@@ -1,0 +1,35 @@
+{
+  "name": "gaudio",
+  "type": "module",
+  "version": "0.1.0",
+  "description": "A browser-first TypeScript audio streaming library.",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "README.md",
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsdown",
+    "dev": "tsdown --watch",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@antfu/eslint-config": "^4.0.0",
+    "eslint": "^9.0.0",
+    "tsdown": "^0.15.0",
+    "typescript": "^5.0.0",
+    "vitest": "^3.0.0"
+  }
+}
