@@ -1,0 +1,28 @@
+---
+description: gaudio TypeScript 严格类型与库代码约定
+globs: **/*.ts
+alwaysApply: false
+---
+
+# TypeScript
+
+- 使用严格类型；避免 `any`；优先显式类型。
+- 简单数据 reshaping 不要抽成仅做字段拷贝的 helper。
+- 禁止 `normalize` 作为方法、变量、文件或类型名。
+
+## 示例
+
+```ts
+// ❌ 仅字段映射却命名为 normalize
+function normalizeUser(input: RawUser): User {
+  return { id: input.id, name: input.name }
+}
+
+// ✅ 直接构造
+const user: User = { id: raw.id, name: raw.name }
+```
+
+## 库代码注意
+
+- 公开 API 变更属高风险，需先确认。
+- 保持 `sideEffects: false` 等与打包相关的既有约定。

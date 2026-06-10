@@ -1,0 +1,31 @@
+---
+description: gaudio 命名、文件约定与 AI 修改注释（来自 AGENTS.md）
+globs: **/*.{ts,vue}
+alwaysApply: false
+---
+
+# 命名与风格
+
+## 命名
+
+- 用清晰、具体、面向业务的名称；避免 `data`、`item`、`result`、`temp`、`value` 及 `processedData`、`parsedResponse` 等占位名。
+- 变量：camelCase；布尔以 `is` / `has` / `can` / `should` 开头；数组用复数。
+- 函数：camelCase，描述业务行为；仅做字段映射/对象重塑时，不要命名为 normalize、parse、transform、convert、format、build、map；一次性变换优先直接构造对象。
+- 类型：PascalCase；不用 `I` / `T` 前缀。
+- 组件：PascalCase；Composable：`use` 开头。
+- 文件：Vue 组件 PascalCase；其余 kebab-case。
+
+## AI 修改注释
+
+逻辑、行为或结构变更时，在附近加简短注释说明原因：
+
+```ts
+// AI modified: added fallback handling for empty user names.
+```
+
+不要逐行注释，不要写无意义注释。
+
+## 依赖与文件
+
+- 加依赖前先查现有依赖；优先平台内置 API。
+- 仅当职责分离理由充分时才新建文件。

@@ -1,0 +1,13 @@
+---
+description: gaudio demo Vue 应用约定
+globs: demo/**/*
+alwaysApply: false
+---
+
+# Demo（Vue）
+
+- 使用 Composition API + `<script setup>` + TypeScript。
+- 业务逻辑放 `composables/use-*.ts`；静态样本配置放 `demo/data/`。
+- 本地音频样本来自 `demo/public/`，按格式分子目录（如 `mp3/`、`wav/`）。
+- Demo 开发：`pnpm run demo`（端口 4173，`strictPort: true`）；改 UI 后需刷新浏览器，勿依赖被占用的旧进程。
+- 改 demo 后运行 typecheck、test、lint。
