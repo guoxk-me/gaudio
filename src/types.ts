@@ -14,6 +14,16 @@ export type PreloadMode = 'none' | 'metadata' | 'auto'
 
 export type AudioFormatSupport = '' | 'maybe' | 'probably'
 
+export type AudioProtocol = 'media' | 'hls' | 'dash'
+
+export type AdaptiveAudioProtocol = Exclude<AudioProtocol, 'media'>
+
+export interface AudioSourceDescription {
+  url: string
+  protocol?: AudioProtocol
+  mimeType?: string
+}
+
 export type GAudioErrorCode
   = | 'SOURCE_UNAVAILABLE'
     | 'LOAD_ABORTED'

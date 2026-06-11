@@ -76,7 +76,7 @@ class FakeAudioSource implements AudioSource {
   readonly kind = 'url'
   closeCalls = 0
 
-  constructor(private readonly url: string) {}
+  constructor(readonly url: string) {}
 
   async open(): Promise<AudioStreamHandle> {
     return { url: this.url }

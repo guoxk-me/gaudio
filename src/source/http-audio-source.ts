@@ -1,9 +1,22 @@
 import type { AudioSource, AudioStreamHandle } from './audio-source'
+import type { AudioProtocol, AudioSourceDescription } from '../types'
 
 export class HttpAudioSource implements AudioSource {
   readonly kind = 'url'
+  readonly url: string
+  readonly protocol?: AudioProtocol
+  readonly mimeType?: string
 
-  constructor(private readonly url: string) {}
+  constructor(source: string | AudioSourceDescription) {
+    if (typeof source === 'string') {
+      this.url = source
+      return
+    }
+
+    this.url = source.url
+    this.protocol = source.protocol
+    this.mimeType = source.mimeType
+  }
 
   async open(): Promise<AudioStreamHandle> {
     return {
