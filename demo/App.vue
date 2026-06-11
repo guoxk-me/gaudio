@@ -11,6 +11,7 @@ const {
   activeSamplePath,
   playerState,
   bufferedLabel,
+  seekableLabel,
   playbackRateLabel,
   currentTimeLabel,
   durationLabel,
@@ -18,6 +19,12 @@ const {
   seekRangeMax,
   volume,
   playbackRate,
+  preload,
+  isMuted,
+  isLooping,
+  isPaused,
+  isEnded,
+  isSeeking,
   eventLog,
   isBusy,
   selectTrack,
@@ -32,6 +39,9 @@ const {
   stop,
   seek,
   setVolume,
+  setMuted,
+  setLoop,
+  setPreload,
   setPlaybackRate,
 } = useGaudioDemo()
 </script>
@@ -41,7 +51,7 @@ const {
     <h1>gaudio demo</h1>
     <p class="subtitle">
       Switch tracks and formats from <code>demo/public/</code>, then exercise load, play, seek, volume,
-      and playback rate against real browser audio files.
+      playback rate, preload, mute, and loop against real browser audio files.
     </p>
 
     <section class="panel catalog" aria-label="Local sample catalog">
@@ -187,6 +197,25 @@ const {
           </div>
         </div>
 
+        <div class="media-options">
+          <label class="toggle-control">
+            <input v-model="isMuted" type="checkbox" @change="setMuted">
+            <span>Muted</span>
+          </label>
+          <label class="toggle-control">
+            <input v-model="isLooping" type="checkbox" @change="setLoop">
+            <span>Loop</span>
+          </label>
+          <label class="preload-control" for="preloadSelect">
+            <span>Preload</span>
+            <select id="preloadSelect" v-model="preload" @change="setPreload">
+              <option value="none">none</option>
+              <option value="metadata">metadata</option>
+              <option value="auto">auto</option>
+            </select>
+          </label>
+        </div>
+
         <div class="status-grid">
           <div class="stat">
             <span>State</span>
@@ -201,8 +230,24 @@ const {
             <strong>{{ bufferedLabel }}</strong>
           </div>
           <div class="stat">
+            <span>Seekable</span>
+            <strong>{{ seekableLabel }}</strong>
+          </div>
+          <div class="stat">
             <span>Rate</span>
             <strong>{{ playbackRateLabel }}</strong>
+          </div>
+          <div class="stat">
+            <span>Paused</span>
+            <strong>{{ isPaused }}</strong>
+          </div>
+          <div class="stat">
+            <span>Ended</span>
+            <strong>{{ isEnded }}</strong>
+          </div>
+          <div class="stat">
+            <span>Seeking</span>
+            <strong>{{ isSeeking }}</strong>
           </div>
         </div>
       </section>
@@ -526,6 +571,44 @@ button:disabled {
   margin-top: 18px;
 }
 
+.media-options {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 18px;
+}
+
+.toggle-control,
+.preload-control {
+  display: flex;
+  min-height: 48px;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  border-radius: 8px;
+  background: #f3f6f0;
+  padding: 10px 12px;
+}
+
+.toggle-control input {
+  width: 18px;
+  height: 18px;
+  accent-color: #0f766e;
+}
+
+.preload-control {
+  justify-content: space-between;
+}
+
+.preload-control select {
+  border: 1px solid #cbd3ca;
+  border-radius: 6px;
+  background: #ffffff;
+  padding: 6px 8px;
+  color: #202420;
+  font: inherit;
+}
+
 .status-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -602,6 +685,7 @@ button:disabled {
   .track-grid,
   .workspace,
   .ranges,
+  .media-options,
   .status-grid {
     grid-template-columns: 1fr;
   }

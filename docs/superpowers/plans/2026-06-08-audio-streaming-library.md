@@ -4,7 +4,7 @@
 
 **Goal:** Build a browser-first TypeScript audio streaming library with stable playback controls, typed events, basic Web Audio analysis, and a package shape ready for npm publishing.
 
-**Architecture:** The library centers on `AudioPlayer`, which owns playback state and delegates runtime-specific behavior to an `AudioBackend`. Version 1 uses `HTMLAudioElement` for reliable streaming playback and a small Web Audio graph for analysis and effects, while preserving interfaces that allow future MSE, HLS, DASH, WebCodecs, or Node adapters.
+**Architecture:** The library centers on `AudioPlayer`, which owns playback state and delegates runtime-specific behavior to an `AudioEngine`. Version 1 uses `HTMLAudioElement` for reliable streaming playback and a small Web Audio graph for analysis and effects, while preserving interfaces that allow future MSE, HLS, DASH, WebCodecs, or Node adapters.
 
 **Tech Stack:** TypeScript, Web Audio API, HTMLMediaElement, pnpm, tsdown, Vitest, @antfu/eslint-config.
 
@@ -41,11 +41,11 @@ Version 1 deliberately excludes:
 - Create: `src/events/EventEmitter.ts` - small typed event emitter.
 - Create: `src/source/AudioSource.ts` - source interfaces.
 - Create: `src/source/HttpAudioSource.ts` - URL source implementation.
-- Create: `src/backend/AudioBackend.ts` - backend contract.
-- Create: `src/backend/MediaElementBackend.ts` - browser playback backend.
+- Create: `src/engine/AudioEngine.ts` - engine contract.
+- Create: `src/engine/MediaElementAudioEngine.ts` - browser playback engine.
 - Create: `src/analysis/AudioAnalyzer.ts` - waveform and frequency reader.
 - Create: `src/player/AudioPlayer.ts` - main public player.
-- Create: `src/player/AudioPlayer.test.ts` - player state tests with a fake backend.
+- Create: `src/player/AudioPlayer.test.ts` - player state tests with a fake engine.
 - Create: `src/events/EventEmitter.test.ts` - typed event behavior tests.
 - Create: `src/errors/errors.test.ts` - error metadata tests.
 - Create: `README.md` - installation, quick start, and first-version limits.
@@ -212,7 +212,7 @@ export type GAudioErrorCode =
   | 'PLAYBACK_BLOCKED'
   | 'UNSUPPORTED_FORMAT'
   | 'NETWORK_ERROR'
-  | 'BACKEND_ERROR'
+  | 'ENGINE_ERROR'
 
 export interface TimeUpdate {
   currentTime: number
@@ -446,12 +446,12 @@ git add src/events/EventEmitter.ts src/events/EventEmitter.test.ts src/index.ts
 git commit -m "feat: add typed audio event emitter"
 ```
 
-### Task 4: Audio Sources and Backend Contract
+### Task 4: Audio Sources and Engine Contract
 
 **Files:**
 - Create: `src/source/AudioSource.ts`
 - Create: `src/source/HttpAudioSource.ts`
-- Create: `src/backend/AudioBackend.ts`
+- Create: `src/engine/AudioEngine.ts`
 - Modify: `src/index.ts`
 
 - [ ] **Step 1: Create `src/source/AudioSource.ts`**
@@ -490,21 +490,21 @@ export class HttpAudioSource implements AudioSource {
 }
 ```
 
-- [ ] **Step 3: Create `src/backend/AudioBackend.ts`**
+- [ ] **Step 3: Create `src/engine/AudioEngine.ts`**
 
 ```ts
 import type { AudioSource } from '../source/AudioSource'
 import type { BufferUpdate, TimeUpdate } from '../types'
 import type { GAudioError } from '../errors/errors'
 
-export interface AudioBackendEvents {
+export interface AudioEngineEvents {
   timeupdate: TimeUpdate
   bufferupdate: BufferUpdate
   ended: undefined
   error: GAudioError
 }
 
-export interface AudioBackend {
+export interface AudioEngine {
   load(source: AudioSource): Promise<void>
   play(): Promise<void>
   pause(): void
@@ -514,21 +514,21 @@ export interface AudioBackend {
   setPlaybackRate(rate: number): void
   getCurrentTime(): number
   getDuration(): number
-  on<EventName extends keyof AudioBackendEvents>(
+  on<EventName extends keyof AudioEngineEvents>(
     eventName: EventName,
-    handler: (payload: AudioBackendEvents[EventName]) => void
+    handler: (payload: AudioEngineEvents[EventName]) => void
   ): () => void
   dispose(): void
 }
 ```
 
-- [ ] **Step 4: Export source and backend types from `src/index.ts`**
+- [ ] **Step 4: Export source and engine types from `src/index.ts`**
 
 ```ts
 export { GAudioError } from './errors/errors'
 export { EventEmitter } from './events/EventEmitter'
 export { HttpAudioSource } from './source/HttpAudioSource'
-export type { AudioBackend, AudioBackendEvents } from './backend/AudioBackend'
+export type { AudioEngine, AudioEngineEvents } from './engine/AudioEngine'
 export type { AudioSource, AudioSourceKind, AudioStreamHandle } from './source/AudioSource'
 export type {
   AudioPlayerEvents,
@@ -552,29 +552,29 @@ Expected: PASS.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add src/source/AudioSource.ts src/source/HttpAudioSource.ts src/backend/AudioBackend.ts src/index.ts
-git commit -m "feat: define audio source and backend contracts"
+git add src/source/AudioSource.ts src/source/HttpAudioSource.ts src/engine/AudioEngine.ts src/index.ts
+git commit -m "feat: define audio source and engine contracts"
 ```
 
-### Task 5: Browser Media Element Backend
+### Task 5: Browser Media Element Engine
 
 **Files:**
-- Create: `src/backend/MediaElementBackend.ts`
+- Create: `src/engine/MediaElementAudioEngine.ts`
 - Modify: `src/index.ts`
 
-- [ ] **Step 1: Create `src/backend/MediaElementBackend.ts`**
+- [ ] **Step 1: Create `src/engine/MediaElementAudioEngine.ts`**
 
 ```ts
 // @env browser
 
-import type { AudioBackend, AudioBackendEvents } from './AudioBackend'
+import type { AudioEngine, AudioEngineEvents } from './AudioEngine'
 import type { AudioSource } from '../source/AudioSource'
 import { GAudioError } from '../errors/errors'
 import { EventEmitter } from '../events/EventEmitter'
 
-export class MediaElementBackend implements AudioBackend {
+export class MediaElementAudioEngine implements AudioEngine {
   private readonly audioElement: HTMLAudioElement
-  private readonly events = new EventEmitter<AudioBackendEvents>()
+  private readonly events = new EventEmitter<AudioEngineEvents>()
   private activeSource?: AudioSource
 
   constructor(audioElement = new Audio()) {
@@ -651,9 +651,9 @@ export class MediaElementBackend implements AudioBackend {
     return Number.isFinite(this.audioElement.duration) ? this.audioElement.duration : 0
   }
 
-  on<EventName extends keyof AudioBackendEvents>(
+  on<EventName extends keyof AudioEngineEvents>(
     eventName: EventName,
-    handler: (payload: AudioBackendEvents[EventName]) => void,
+    handler: (payload: AudioEngineEvents[EventName]) => void,
   ): () => void {
     return this.events.on(eventName, handler)
   }
@@ -696,19 +696,19 @@ export class MediaElementBackend implements AudioBackend {
   }
 
   private readonly handleError = (): void => {
-    this.events.emit('error', new GAudioError('BACKEND_ERROR', 'Audio element reported a playback error'))
+    this.events.emit('error', new GAudioError('ENGINE_ERROR', 'Audio element reported a playback error'))
   }
 }
 ```
 
-- [ ] **Step 2: Export `MediaElementBackend` from `src/index.ts`**
+- [ ] **Step 2: Export `MediaElementAudioEngine` from `src/index.ts`**
 
 ```ts
-export { MediaElementBackend } from './backend/MediaElementBackend'
+export { MediaElementAudioEngine } from './engine/MediaElementAudioEngine'
 export { GAudioError } from './errors/errors'
 export { EventEmitter } from './events/EventEmitter'
 export { HttpAudioSource } from './source/HttpAudioSource'
-export type { AudioBackend, AudioBackendEvents } from './backend/AudioBackend'
+export type { AudioEngine, AudioEngineEvents } from './engine/AudioEngine'
 export type { AudioSource, AudioSourceKind, AudioStreamHandle } from './source/AudioSource'
 export type {
   AudioPlayerEvents,
@@ -732,8 +732,8 @@ Expected: PASS.
 - [ ] **Step 4: Commit**
 
 ```bash
-git add src/backend/MediaElementBackend.ts src/index.ts
-git commit -m "feat: add media element audio backend"
+git add src/engine/MediaElementAudioEngine.ts src/index.ts
+git commit -m "feat: add media element audio engine"
 ```
 
 ### Task 6: Main Audio Player
@@ -746,38 +746,38 @@ git commit -m "feat: add media element audio backend"
 - [ ] **Step 1: Create `src/player/AudioPlayer.ts`**
 
 ```ts
-import type { AudioBackend } from '../backend/AudioBackend'
+import type { AudioEngine } from '../engine/AudioEngine'
 import type { AudioSource } from '../source/AudioSource'
 import type { AudioPlayerEvents, AudioPlayerOptions, PlaybackState } from '../types'
-import { MediaElementBackend } from '../backend/MediaElementBackend'
+import { MediaElementAudioEngine } from '../engine/MediaElementAudioEngine'
 import { GAudioError } from '../errors/errors'
 import { EventEmitter } from '../events/EventEmitter'
 import { HttpAudioSource } from '../source/HttpAudioSource'
 
 export class AudioPlayer {
   private readonly events = new EventEmitter<AudioPlayerEvents>()
-  private readonly backend: AudioBackend
+  private readonly engine: AudioEngine
   private source?: AudioSource
   private state: PlaybackState = 'idle'
 
-  constructor(options: AudioPlayerOptions = {}, backend: AudioBackend = new MediaElementBackend()) {
-    this.backend = backend
+  constructor(options: AudioPlayerOptions = {}, engine: AudioEngine = new MediaElementAudioEngine()) {
+    this.engine = engine
     this.source = options.source ? new HttpAudioSource(options.source) : undefined
 
-    this.backend.on('timeupdate', timeUpdate => {
+    this.engine.on('timeupdate', timeUpdate => {
       this.events.emit('timeupdate', timeUpdate)
     })
 
-    this.backend.on('bufferupdate', bufferUpdate => {
+    this.engine.on('bufferupdate', bufferUpdate => {
       this.events.emit('bufferupdate', bufferUpdate)
     })
 
-    this.backend.on('ended', () => {
+    this.engine.on('ended', () => {
       this.setState('ended')
       this.events.emit('ended', undefined)
     })
 
-    this.backend.on('error', error => {
+    this.engine.on('error', error => {
       this.setState('error')
       this.events.emit('error', error)
     })
@@ -788,11 +788,11 @@ export class AudioPlayer {
   }
 
   getCurrentTime(): number {
-    return this.backend.getCurrentTime()
+    return this.engine.getCurrentTime()
   }
 
   getDuration(): number {
-    return this.backend.getDuration()
+    return this.engine.getDuration()
   }
 
   setSource(source: string | AudioSource): void {
@@ -809,7 +809,7 @@ export class AudioPlayer {
     }
 
     this.setState('loading')
-    await this.backend.load(this.source)
+    await this.engine.load(this.source)
     this.setState('ready')
   }
 
@@ -818,30 +818,30 @@ export class AudioPlayer {
       await this.load()
     }
 
-    await this.backend.play()
+    await this.engine.play()
     this.setState('playing')
   }
 
   pause(): void {
-    this.backend.pause()
+    this.engine.pause()
     this.setState('paused')
   }
 
   stop(): void {
-    this.backend.stop()
+    this.engine.stop()
     this.setState('idle')
   }
 
   async seek(seconds: number): Promise<void> {
-    await this.backend.seek(seconds)
+    await this.engine.seek(seconds)
   }
 
   setVolume(volume: number): void {
-    this.backend.setVolume(volume)
+    this.engine.setVolume(volume)
   }
 
   setPlaybackRate(rate: number): void {
-    this.backend.setPlaybackRate(rate)
+    this.engine.setPlaybackRate(rate)
   }
 
   on<EventName extends keyof AudioPlayerEvents>(
@@ -852,7 +852,7 @@ export class AudioPlayer {
   }
 
   dispose(): void {
-    this.backend.dispose()
+    this.engine.dispose()
     this.events.clear()
     this.source = undefined
     this.state = 'idle'
@@ -872,14 +872,14 @@ export class AudioPlayer {
 - [ ] **Step 2: Create `src/player/AudioPlayer.test.ts`**
 
 ```ts
-import type { AudioBackend, AudioBackendEvents } from '../backend/AudioBackend'
+import type { AudioEngine, AudioEngineEvents } from '../engine/AudioEngine'
 import type { AudioSource } from '../source/AudioSource'
 import { describe, expect, it } from 'vitest'
 import { EventEmitter } from '../events/EventEmitter'
 import { AudioPlayer } from './AudioPlayer'
 
-class FakeAudioBackend implements AudioBackend {
-  private readonly events = new EventEmitter<AudioBackendEvents>()
+class FakeAudioEngine implements AudioEngine {
+  private readonly events = new EventEmitter<AudioEngineEvents>()
   private currentTime = 0
   private duration = 120
   readonly loadedSources: AudioSource[] = []
@@ -924,9 +924,9 @@ class FakeAudioBackend implements AudioBackend {
     return this.duration
   }
 
-  on<EventName extends keyof AudioBackendEvents>(
+  on<EventName extends keyof AudioEngineEvents>(
     eventName: EventName,
-    handler: (payload: AudioBackendEvents[EventName]) => void,
+    handler: (payload: AudioEngineEvents[EventName]) => void,
   ): () => void {
     return this.events.on(eventName, handler)
   }
@@ -938,8 +938,8 @@ class FakeAudioBackend implements AudioBackend {
 
 describe('AudioPlayer', () => {
   it('loads a URL source and reports ready state', async () => {
-    const backend = new FakeAudioBackend()
-    const player = new AudioPlayer({ source: 'https://example.com/audio.mp3' }, backend)
+    const engine = new FakeAudioEngine()
+    const player = new AudioPlayer({ source: 'https://example.com/audio.mp3' }, engine)
     const states: string[] = []
 
     player.on('statechange', state => {
@@ -948,25 +948,25 @@ describe('AudioPlayer', () => {
 
     await player.load()
 
-    expect(backend.loadedSources).toHaveLength(1)
+    expect(engine.loadedSources).toHaveLength(1)
     expect(player.getState()).toBe('ready')
     expect(states).toEqual(['loading', 'ready'])
   })
 
   it('loads automatically before first play', async () => {
-    const backend = new FakeAudioBackend()
-    const player = new AudioPlayer({ source: 'https://example.com/audio.mp3' }, backend)
+    const engine = new FakeAudioEngine()
+    const player = new AudioPlayer({ source: 'https://example.com/audio.mp3' }, engine)
 
     await player.play()
 
-    expect(backend.loadedSources).toHaveLength(1)
-    expect(backend.isPlaying).toBe(true)
+    expect(engine.loadedSources).toHaveLength(1)
+    expect(engine.isPlaying).toBe(true)
     expect(player.getState()).toBe('playing')
   })
 
   it('throws a typed error when no source is available', async () => {
-    const backend = new FakeAudioBackend()
-    const player = new AudioPlayer({}, backend)
+    const engine = new FakeAudioEngine()
+    const player = new AudioPlayer({}, engine)
 
     await expect(player.load()).rejects.toMatchObject({
       code: 'SOURCE_UNAVAILABLE',
@@ -979,12 +979,12 @@ describe('AudioPlayer', () => {
 - [ ] **Step 3: Export `AudioPlayer` from `src/index.ts`**
 
 ```ts
-export { MediaElementBackend } from './backend/MediaElementBackend'
+export { MediaElementAudioEngine } from './engine/MediaElementAudioEngine'
 export { GAudioError } from './errors/errors'
 export { EventEmitter } from './events/EventEmitter'
 export { AudioPlayer } from './player/AudioPlayer'
 export { HttpAudioSource } from './source/HttpAudioSource'
-export type { AudioBackend, AudioBackendEvents } from './backend/AudioBackend'
+export type { AudioEngine, AudioEngineEvents } from './engine/AudioEngine'
 export type { AudioSource, AudioSourceKind, AudioStreamHandle } from './source/AudioSource'
 export type {
   AudioPlayerEvents,
@@ -1062,12 +1062,12 @@ export class AudioAnalyzer {
 
 ```ts
 export { AudioAnalyzer } from './analysis/AudioAnalyzer'
-export { MediaElementBackend } from './backend/MediaElementBackend'
+export { MediaElementAudioEngine } from './engine/MediaElementAudioEngine'
 export { GAudioError } from './errors/errors'
 export { EventEmitter } from './events/EventEmitter'
 export { AudioPlayer } from './player/AudioPlayer'
 export { HttpAudioSource } from './source/HttpAudioSource'
-export type { AudioBackend, AudioBackendEvents } from './backend/AudioBackend'
+export type { AudioEngine, AudioEngineEvents } from './engine/AudioEngine'
 export type { AudioSource, AudioSourceKind, AudioStreamHandle } from './source/AudioSource'
 export type {
   AudioPlayerEvents,
@@ -1146,7 +1146,7 @@ await player.seek(30)
 
 - HLS and DASH are not implemented in the first version.
 - DRM and transcoding are outside the package scope.
-- Custom codec decoding can be added later through a dedicated backend.
+- Custom codec decoding can be added later through a dedicated engine.
 ```
 
 - [ ] **Step 2: Run lint**
@@ -1196,13 +1196,13 @@ git commit -m "docs: add audio library usage guide"
 ## Future Expansion
 
 - Add a `SegmentLoader` for HTTP Range requests and retry behavior.
-- Add an MSE backend for controlled stream buffering.
-- Add HLS adapter after the backend contract proves stable.
+- Add an MSE engine for controlled stream buffering.
+- Add HLS adapter after the engine contract proves stable.
 - Add `AudioWorklet` processors for custom DSP.
 - Add Playwright browser integration tests for real media behavior.
 
 ## Self-Review
 
-- Spec coverage: The plan covers tooling, public API, playback state, typed events, URL source playback, browser backend, analysis, tests, and docs.
+- Spec coverage: The plan covers tooling, public API, playback state, typed events, URL source playback, browser engine, analysis, tests, and docs.
 - Placeholder scan: The plan contains no `TBD`, no unexpanded implementation steps, and no missing test commands.
-- Type consistency: `AudioPlayer`, `AudioBackend`, `AudioSource`, `AudioPlayerEvents`, and `GAudioError` names are used consistently across tasks.
+- Type consistency: `AudioPlayer`, `AudioEngine`, `AudioSource`, `AudioPlayerEvents`, and `GAudioError` names are used consistently across tasks.

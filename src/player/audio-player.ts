@@ -1,39 +1,38 @@
-import type { AudioBackend } from '../backend/audio-backend'
+import type { AudioEngine } from '../engine/audio-engine'
 import type { AudioSource } from '../source/audio-source'
-import type { AudioPlayerEvents, AudioPlayerOptions, PlaybackState } from '../types'
-import { MediaElementBackend } from '../backend/media-element-backend'
+import type {
+  AudioFormatSupport,
+  AudioPlayerEvents,
+  AudioPlayerOptions,
+  PlaybackState,
+  PreloadMode,
+  TimeRange,
+} from '../types'
+import { MediaElementAudioEngine } from '../engine/media-element-audio-engine'
 import { GAudioError } from '../errors/errors'
 import { EventEmitter } from '../events/event-emitter'
 import { HttpAudioSource } from '../source/http-audio-source'
 
 export class AudioPlayer {
   private readonly events = new EventEmitter<AudioPlayerEvents>()
-  private readonly backend: AudioBackend
+  private readonly engine: AudioEngine
   private source?: AudioSource
   private state: PlaybackState = 'idle'
+  private loadRequestId = 0
+  private hasLoadedSource = false
 
-  constructor(options: AudioPlayerOptions = {}, backend: AudioBackend = new MediaElementBackend()) {
-    this.backend = backend
+  constructor(options: AudioPlayerOptions = {}, engine: AudioEngine = new MediaElementAudioEngine()) {
+    this.engine = engine
     this.source = options.source ? new HttpAudioSource(options.source) : undefined
 
-    // AI modified: keep player state and public events stable across backend implementations.
-    this.backend.on('timeupdate', (timeUpdate) => {
-      this.events.emit('timeupdate', timeUpdate)
-    })
+    this.engine.setPreload(options.preload ?? 'metadata')
+    this.engine.setMuted(options.muted ?? false)
+    this.engine.setLoop(options.loop ?? false)
+    this.engine.setVolume(options.volume ?? 1)
+    this.engine.setPlaybackRate(options.playbackRate ?? 1)
 
-    this.backend.on('bufferupdate', (bufferUpdate) => {
-      this.events.emit('bufferupdate', bufferUpdate)
-    })
-
-    this.backend.on('ended', () => {
-      this.setState('ended')
-      this.events.emit('ended', undefined)
-    })
-
-    this.backend.on('error', (error) => {
-      this.setState('error')
-      this.events.emit('error', error)
-    })
+    // AI modified: derive public state from engine lifecycle events instead of method calls.
+    this.connectEngineEvents()
   }
 
   getState(): PlaybackState {
@@ -41,29 +40,121 @@ export class AudioPlayer {
   }
 
   getCurrentTime(): number {
-    return this.backend.getCurrentTime()
+    return this.engine.getCurrentTime()
   }
 
   getDuration(): number {
-    return this.backend.getDuration()
+    return this.engine.getDuration()
+  }
+
+  getPreload(): PreloadMode {
+    return this.engine.getPreload()
+  }
+
+  setPreload(preload: PreloadMode): void {
+    this.engine.setPreload(preload)
+  }
+
+  getVolume(): number {
+    return this.engine.getVolume()
+  }
+
+  setVolume(volume: number): void {
+    this.engine.setVolume(volume)
+  }
+
+  isMuted(): boolean {
+    return this.engine.isMuted()
+  }
+
+  setMuted(isMuted: boolean): void {
+    this.engine.setMuted(isMuted)
+  }
+
+  isLooping(): boolean {
+    return this.engine.isLooping()
+  }
+
+  setLoop(isLooping: boolean): void {
+    this.engine.setLoop(isLooping)
+  }
+
+  getPlaybackRate(): number {
+    return this.engine.getPlaybackRate()
+  }
+
+  setPlaybackRate(rate: number): void {
+    this.engine.setPlaybackRate(rate)
+  }
+
+  isPaused(): boolean {
+    return this.engine.isPaused()
+  }
+
+  isEnded(): boolean {
+    return this.engine.isEnded()
+  }
+
+  isSeeking(): boolean {
+    return this.engine.isSeeking()
+  }
+
+  getBufferedRanges(): readonly TimeRange[] {
+    return this.engine.getBufferedRanges()
+  }
+
+  getSeekableRanges(): readonly TimeRange[] {
+    return this.engine.getSeekableRanges()
+  }
+
+  canPlayType(mimeType: string): AudioFormatSupport {
+    return this.engine.canPlayType(mimeType)
   }
 
   setSource(source: string | AudioSource): void {
+    this.loadRequestId += 1
+    this.engine.unload()
     this.source = typeof source === 'string' ? new HttpAudioSource(source) : source
+    this.hasLoadedSource = false
     this.setState('idle')
   }
 
   async load(): Promise<void> {
     if (!this.source) {
       const error = new GAudioError('SOURCE_UNAVAILABLE', 'Audio source is required before loading')
-      this.setState('error')
-      this.events.emit('error', error)
+      this.publishError(error)
       throw error
     }
 
+    const loadRequestId = ++this.loadRequestId
+    this.hasLoadedSource = false
     this.setState('loading')
-    await this.backend.load(this.source)
-    this.setState('ready')
+
+    try {
+      await this.engine.load(this.source)
+    }
+    catch (error) {
+      if (error instanceof GAudioError && error.code === 'LOAD_ABORTED') {
+        if (loadRequestId === this.loadRequestId) {
+          this.setState('idle')
+        }
+        throw error
+      }
+
+      const playerError = error instanceof GAudioError
+        ? error
+        : new GAudioError('ENGINE_ERROR', 'Audio source could not be loaded', error)
+
+      if (loadRequestId === this.loadRequestId && this.state !== 'error') {
+        this.publishError(playerError)
+      }
+      throw playerError
+    }
+
+    if (loadRequestId === this.loadRequestId) {
+      this.hasLoadedSource = true
+      this.setState('ready')
+    }
   }
 
   async play(): Promise<void> {
@@ -71,30 +162,30 @@ export class AudioPlayer {
       await this.load()
     }
 
-    await this.backend.play()
-    this.setState('playing')
+    try {
+      await this.engine.play()
+    }
+    catch (error) {
+      const playerError = error instanceof GAudioError
+        ? error
+        : new GAudioError('ENGINE_ERROR', 'Audio playback failed', error)
+      this.publishError(playerError)
+      throw playerError
+    }
   }
 
   pause(): void {
-    this.backend.pause()
-    this.setState('paused')
+    this.engine.pause()
   }
 
   stop(): void {
-    this.backend.stop()
-    this.setState('idle')
+    this.engine.stop()
+    // AI modified: ready means a source is loaded and can resume without another load.
+    this.setState(this.hasLoadedSource ? 'ready' : 'idle')
   }
 
   async seek(seconds: number): Promise<void> {
-    await this.backend.seek(seconds)
-  }
-
-  setVolume(volume: number): void {
-    this.backend.setVolume(volume)
-  }
-
-  setPlaybackRate(rate: number): void {
-    this.backend.setPlaybackRate(rate)
+    await this.engine.seek(seconds)
   }
 
   on<EventName extends keyof AudioPlayerEvents>(
@@ -105,10 +196,54 @@ export class AudioPlayer {
   }
 
   dispose(): void {
-    this.backend.dispose()
+    this.loadRequestId += 1
+    this.engine.dispose()
     this.events.clear()
     this.source = undefined
+    this.hasLoadedSource = false
     this.state = 'idle'
+  }
+
+  private connectEngineEvents(): void {
+    this.engine.on('loadstart', payload => this.events.emit('loadstart', payload))
+    this.engine.on('loadedmetadata', payload => this.events.emit('loadedmetadata', payload))
+    this.engine.on('canplay', payload => this.events.emit('canplay', payload))
+    this.engine.on('play', payload => this.events.emit('play', payload))
+
+    this.engine.on('playing', (payload) => {
+      this.setState('playing')
+      this.events.emit('playing', payload)
+    })
+
+    this.engine.on('pause', (payload) => {
+      this.setState('paused')
+      this.events.emit('pause', payload)
+    })
+
+    this.engine.on('waiting', (payload) => {
+      this.setState('buffering')
+      this.events.emit('waiting', payload)
+    })
+
+    this.engine.on('seeking', payload => this.events.emit('seeking', payload))
+    this.engine.on('seeked', payload => this.events.emit('seeked', payload))
+    this.engine.on('timeupdate', payload => this.events.emit('timeupdate', payload))
+    this.engine.on('durationchange', payload => this.events.emit('durationchange', payload))
+    this.engine.on('bufferupdate', payload => this.events.emit('bufferupdate', payload))
+    this.engine.on('volumechange', payload => this.events.emit('volumechange', payload))
+    this.engine.on('ratechange', payload => this.events.emit('ratechange', payload))
+
+    this.engine.on('ended', (payload) => {
+      this.setState('ended')
+      this.events.emit('ended', payload)
+    })
+
+    this.engine.on('error', error => this.publishError(error))
+  }
+
+  private publishError(error: GAudioError): void {
+    this.setState('error')
+    this.events.emit('error', error)
   }
 
   private setState(state: PlaybackState): void {

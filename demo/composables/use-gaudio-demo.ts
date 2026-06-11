@@ -1,6 +1,7 @@
+import type { PreloadMode, TimeRange } from 'gaudio'
 import type { DemoFormatGroup, DemoTrack } from '../data/demo-samples'
 import { AudioPlayer } from 'gaudio'
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, shallowRef } from 'vue'
 import {
   defaultDemoFormatFolder,
   defaultDemoSampleUrl,
@@ -22,20 +23,37 @@ function secondsForDisplay(seconds: number): string {
   return `${minutes}:${String(remainingSeconds).padStart(2, '0')}`
 }
 
+function rangesForDisplay(ranges: readonly TimeRange[]): string {
+  if (ranges.length === 0) {
+    return 'none'
+  }
+
+  return ranges
+    .map(range => `${range.start.toFixed(1)}-${range.end.toFixed(1)}s`)
+    .join(', ')
+}
+
 export function useGaudioDemo() {
-  const activeFormatFolder = ref(defaultDemoFormatFolder)
-  const activeTrackId = ref(defaultDemoTrackId)
-  const sourceUrl = ref(defaultDemoSampleUrl)
-  const playerState = ref('idle')
-  const bufferedLabel = ref('0s')
-  const playbackRateLabel = ref('1.00x')
-  const currentTimeLabel = ref('0:00')
-  const durationLabel = ref('0:00')
-  const seekValue = ref(0)
-  const volume = ref(0.8)
-  const playbackRate = ref(1)
-  const eventLog = ref<string[]>([])
-  const isBusy = ref(false)
+  const activeFormatFolder = shallowRef(defaultDemoFormatFolder)
+  const activeTrackId = shallowRef(defaultDemoTrackId)
+  const sourceUrl = shallowRef(defaultDemoSampleUrl)
+  const playerState = shallowRef('idle')
+  const bufferedLabel = shallowRef('none')
+  const seekableLabel = shallowRef('none')
+  const playbackRateLabel = shallowRef('1.00x')
+  const currentTimeLabel = shallowRef('0:00')
+  const durationLabel = shallowRef('0:00')
+  const seekValue = shallowRef(0)
+  const volume = shallowRef(0.8)
+  const playbackRate = shallowRef(1)
+  const preload = shallowRef<PreloadMode>('metadata')
+  const isMuted = shallowRef(false)
+  const isLooping = shallowRef(false)
+  const isPaused = shallowRef(true)
+  const isEnded = shallowRef(false)
+  const isSeeking = shallowRef(false)
+  const eventLog = shallowRef<string[]>([])
+  const isBusy = shallowRef(false)
 
   const activeTrack = computed(() => findDemoTrack(activeTrackId.value))
   const activeFormatGroup = computed(() => findDemoFormatGroup(activeFormatFolder.value))
@@ -46,17 +64,31 @@ export function useGaudioDemo() {
     activeFormatGroup.value.extension,
   ))
 
-  const player = new AudioPlayer({ source: defaultDemoSampleUrl, preload: 'metadata' })
-  player.setVolume(volume.value)
+  const player = new AudioPlayer({
+    source: defaultDemoSampleUrl,
+    preload: preload.value,
+    muted: isMuted.value,
+    loop: isLooping.value,
+    volume: volume.value,
+    playbackRate: playbackRate.value,
+  })
 
   function addEvent(message: string): void {
-    eventLog.value = [`${new Date().toLocaleTimeString()} ${message}`, ...eventLog.value].slice(0, 12)
+    eventLog.value = [`${new Date().toLocaleTimeString()} ${message}`, ...eventLog.value].slice(0, 16)
   }
 
   function updatePlaybackPosition(currentTime: number, duration: number): void {
     currentTimeLabel.value = secondsForDisplay(currentTime)
     durationLabel.value = secondsForDisplay(duration)
     seekValue.value = duration > 0 ? (currentTime / duration) * seekRangeMax : 0
+  }
+
+  function updateMediaStatus(): void {
+    isPaused.value = player.isPaused()
+    isEnded.value = player.isEnded()
+    isSeeking.value = player.isSeeking()
+    bufferedLabel.value = rangesForDisplay(player.getBufferedRanges())
+    seekableLabel.value = rangesForDisplay(player.getSeekableRanges())
   }
 
   async function withBusyControls(action: () => Promise<void>): Promise<void> {
@@ -73,27 +105,64 @@ export function useGaudioDemo() {
     }
   }
 
-  // AI modified: keep demo UI driven by real AudioPlayer events instead of duplicated playback state.
+  // AI modified: reflect native media lifecycle events through the stable AudioPlayer API.
   player.on('statechange', (state) => {
     playerState.value = state
     addEvent(`statechange: ${state}`)
   })
 
+  player.on('loadstart', () => addEvent('loadstart'))
+  player.on('loadedmetadata', ({ duration }) => {
+    durationLabel.value = secondsForDisplay(duration)
+    seekableLabel.value = rangesForDisplay(player.getSeekableRanges())
+    addEvent(`loadedmetadata: ${duration.toFixed(1)}s`)
+  })
+  player.on('canplay', () => addEvent('canplay'))
+  player.on('play', () => addEvent('play'))
+  player.on('playing', () => {
+    updateMediaStatus()
+    addEvent('playing')
+  })
+  player.on('pause', () => {
+    updateMediaStatus()
+    addEvent('pause')
+  })
+  player.on('waiting', () => addEvent('waiting'))
+  player.on('seeking', ({ currentTime, duration }) => {
+    isSeeking.value = true
+    updatePlaybackPosition(currentTime, duration)
+    addEvent(`seeking: ${currentTime.toFixed(1)}s`)
+  })
+  player.on('seeked', ({ currentTime, duration }) => {
+    isSeeking.value = false
+    updatePlaybackPosition(currentTime, duration)
+    addEvent(`seeked: ${currentTime.toFixed(1)}s`)
+  })
   player.on('timeupdate', ({ currentTime, duration }) => {
     updatePlaybackPosition(currentTime, duration)
   })
-
-  player.on('bufferupdate', ({ bufferedStart, bufferedEnd }) => {
-    bufferedLabel.value = `${Math.max(0, bufferedEnd - bufferedStart).toFixed(1)}s`
+  player.on('durationchange', ({ duration }) => {
+    durationLabel.value = secondsForDisplay(duration)
   })
-
+  player.on('bufferupdate', ({ ranges }) => {
+    bufferedLabel.value = rangesForDisplay(ranges)
+    seekableLabel.value = rangesForDisplay(player.getSeekableRanges())
+  })
+  player.on('volumechange', ({ volume: activeVolume, isMuted: activeMuted }) => {
+    volume.value = activeVolume
+    isMuted.value = activeMuted
+    addEvent(`volumechange: ${activeVolume.toFixed(2)} / muted ${activeMuted}`)
+  })
+  player.on('ratechange', ({ playbackRate: activePlaybackRate }) => {
+    playbackRate.value = activePlaybackRate
+    playbackRateLabel.value = `${activePlaybackRate.toFixed(2)}x`
+    addEvent(`ratechange: ${activePlaybackRate.toFixed(2)}x`)
+  })
   player.on('ended', () => {
+    updateMediaStatus()
     addEvent('ended')
   })
-
-  player.on('error', (error) => {
-    addEvent(`error: ${error.code}`)
-  })
+  player.on('error', error => addEvent(`error: ${error.code}`))
 
   async function applyActiveSample(): Promise<void> {
     const formatGroup = activeFormatGroup.value
@@ -103,6 +172,7 @@ export function useGaudioDemo() {
     await withBusyControls(async () => {
       player.setSource(sourceUrl.value)
       await player.load()
+      updateMediaStatus()
       addEvent(`loaded: ${formatGroup.label} / ${track.title}`)
     })
   }
@@ -143,7 +213,8 @@ export function useGaudioDemo() {
     await withBusyControls(async () => {
       player.setSource(sourceUrl.value)
       await player.load()
-      addEvent(`loaded custom source`)
+      updateMediaStatus()
+      addEvent('loaded custom source')
     })
   }
 
@@ -168,6 +239,7 @@ export function useGaudioDemo() {
   function stop(): void {
     player.stop()
     updatePlaybackPosition(0, player.getDuration())
+    updateMediaStatus()
   }
 
   async function seek(): Promise<void> {
@@ -184,9 +256,21 @@ export function useGaudioDemo() {
     player.setVolume(volume.value)
   }
 
+  function setMuted(): void {
+    player.setMuted(isMuted.value)
+  }
+
+  function setLoop(): void {
+    player.setLoop(isLooping.value)
+  }
+
+  function setPreload(): void {
+    player.setPreload(preload.value)
+    addEvent(`preload: ${player.getPreload()}`)
+  }
+
   function setPlaybackRate(): void {
     player.setPlaybackRate(playbackRate.value)
-    playbackRateLabel.value = `${playbackRate.value.toFixed(2)}x`
   }
 
   onMounted(async () => {
@@ -207,6 +291,7 @@ export function useGaudioDemo() {
     activeSamplePath,
     playerState,
     bufferedLabel,
+    seekableLabel,
     playbackRateLabel,
     currentTimeLabel,
     durationLabel,
@@ -214,6 +299,12 @@ export function useGaudioDemo() {
     seekRangeMax,
     volume,
     playbackRate,
+    preload,
+    isMuted,
+    isLooping,
+    isPaused,
+    isEnded,
+    isSeeking,
     eventLog,
     isBusy,
     selectTrack,
@@ -228,6 +319,9 @@ export function useGaudioDemo() {
     stop,
     seek,
     setVolume,
+    setMuted,
+    setLoop,
+    setPreload,
     setPlaybackRate,
   }
 }

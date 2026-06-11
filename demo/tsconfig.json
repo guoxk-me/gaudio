@@ -1,7 +1,16 @@
 {
   "extends": "../tsconfig.json",
   "compilerOptions": {
-    "jsx": "preserve"
+    "jsx": "preserve",
+    "paths": {
+      "gaudio": [
+        "../src/index.ts"
+      ]
+    },
+    "types": [
+      "node",
+      "vite/client"
+    ]
   },
   "include": [
     "./**/*",

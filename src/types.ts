@@ -12,6 +12,8 @@ export type PlaybackState
 
 export type PreloadMode = 'none' | 'metadata' | 'auto'
 
+export type AudioFormatSupport = '' | 'maybe' | 'probably'
+
 export type GAudioErrorCode
   = | 'SOURCE_UNAVAILABLE'
     | 'LOAD_ABORTED'
@@ -19,22 +21,51 @@ export type GAudioErrorCode
     | 'PLAYBACK_BLOCKED'
     | 'UNSUPPORTED_FORMAT'
     | 'NETWORK_ERROR'
-    | 'BACKEND_ERROR'
+    | 'ENGINE_ERROR'
 
 export interface TimeUpdate {
   currentTime: number
   duration: number
 }
 
+export interface TimeRange {
+  start: number
+  end: number
+}
+
 export interface BufferUpdate {
-  bufferedStart: number
-  bufferedEnd: number
+  ranges: readonly TimeRange[]
+}
+
+export interface DurationUpdate {
+  duration: number
+}
+
+export interface VolumeUpdate {
+  volume: number
+  isMuted: boolean
+}
+
+export interface PlaybackRateUpdate {
+  playbackRate: number
 }
 
 export interface AudioPlayerEvents {
   statechange: PlaybackState
+  loadstart: undefined
+  loadedmetadata: DurationUpdate
+  canplay: undefined
+  play: undefined
+  playing: undefined
+  pause: undefined
+  waiting: undefined
+  seeking: TimeUpdate
+  seeked: TimeUpdate
   timeupdate: TimeUpdate
+  durationchange: DurationUpdate
   bufferupdate: BufferUpdate
+  volumechange: VolumeUpdate
+  ratechange: PlaybackRateUpdate
   error: GAudioError
   ended: undefined
 }
@@ -42,7 +73,10 @@ export interface AudioPlayerEvents {
 export interface AudioPlayerOptions {
   source?: string
   preload?: PreloadMode
-  lowLatency?: boolean
+  muted?: boolean
+  loop?: boolean
+  volume?: number
+  playbackRate?: number
 }
 
 export interface FrequencyDataOptions {
