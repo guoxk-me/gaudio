@@ -12,6 +12,7 @@ const {
   playerState,
   bufferedLabel,
   seekableLabel,
+  playedLabel,
   playbackRateLabel,
   currentTimeLabel,
   durationLabel,
@@ -22,6 +23,8 @@ const {
   preload,
   isMuted,
   isLooping,
+  shouldAutoplay,
+  shouldPreservePitch,
   isPaused,
   isEnded,
   isSeeking,
@@ -38,9 +41,12 @@ const {
   pause,
   stop,
   seek,
+  fastSeek,
   setVolume,
   setMuted,
   setLoop,
+  setAutoplay,
+  setPreservesPitch,
   setPreload,
   setPlaybackRate,
 } = useGaudioDemo()
@@ -152,6 +158,9 @@ const {
           <button class="warning" type="button" @click="stop">
             Stop
           </button>
+          <button class="secondary" type="button" :disabled="isBusy" @click="fastSeek">
+            Fast seek
+          </button>
         </div>
 
         <div class="meter">
@@ -206,6 +215,14 @@ const {
             <input v-model="isLooping" type="checkbox" @change="setLoop">
             <span>Loop</span>
           </label>
+          <label class="toggle-control">
+            <input v-model="shouldAutoplay" type="checkbox" @change="setAutoplay">
+            <span>Autoplay</span>
+          </label>
+          <label class="toggle-control">
+            <input v-model="shouldPreservePitch" type="checkbox" @change="setPreservesPitch">
+            <span>Preserve pitch</span>
+          </label>
           <label class="preload-control" for="preloadSelect">
             <span>Preload</span>
             <select id="preloadSelect" v-model="preload" @change="setPreload">
@@ -232,6 +249,10 @@ const {
           <div class="stat">
             <span>Seekable</span>
             <strong>{{ seekableLabel }}</strong>
+          </div>
+          <div class="stat">
+            <span>Played</span>
+            <strong>{{ playedLabel }}</strong>
           </div>
           <div class="stat">
             <span>Rate</span>

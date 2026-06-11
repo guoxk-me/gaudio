@@ -31,12 +31,14 @@ interface AudioPlayerOptions {
 `AudioPlayer` gains:
 
 ```ts
-getAutoplay(): boolean
-setAutoplay(shouldAutoplay: boolean): void
-getPreservesPitch(): boolean
-setPreservesPitch(shouldPreservePitch: boolean): void
-fastSeek(seconds: number): Promise<void>
-getPlayedRanges(): readonly TimeRange[]
+interface AudioPlayer {
+  getAutoplay: () => boolean
+  setAutoplay: (shouldAutoplay: boolean) => void
+  getPreservesPitch: () => boolean
+  setPreservesPitch: (shouldPreservePitch: boolean) => void
+  fastSeek: (seconds: number) => Promise<void>
+  getPlayedRanges: () => readonly TimeRange[]
+}
 ```
 
 The same capabilities are added to `AudioEngine` so custom engines remain substitutable.

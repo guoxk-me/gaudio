@@ -33,6 +33,8 @@ class FakeAudioElement extends EventTarget {
   volume = 1
   muted = false
   loop = false
+  autoplay = false
+  preservesPitch = true
   playbackRate = 1
   currentTime = 0
   duration = 120
@@ -41,8 +43,11 @@ class FakeAudioElement extends EventTarget {
   seeking = false
   buffered: TimeRanges = new FakeTimeRanges([])
   seekable: TimeRanges = new FakeTimeRanges([])
+  played: TimeRanges = new FakeTimeRanges([])
   error: MediaError | null = null
   loadCalls = 0
+  fastSeekCalls: number[] = []
+  fastSeek?: (seconds: number) => void
 
   load(): void {
     this.loadCalls += 1
@@ -107,6 +112,39 @@ describe('mediaElementEngine', () => {
     expect(engine.getBufferedRanges()).toEqual([{ start: 0, end: 10 }, { start: 20, end: 30 }])
     expect(engine.getSeekableRanges()).toEqual([{ start: 0, end: 120 }])
     expect(engine.canPlayType('audio/mpeg')).toBe('probably')
+  })
+
+  it('exposes autoplay, pitch preservation, and played ranges', () => {
+    const audioElement = new FakeAudioElement()
+    audioElement.played = new FakeTimeRanges([{ start: 2, end: 8 }, { start: 12, end: 20 }])
+    const engine = new MediaElementAudioEngine(audioElement as unknown as HTMLAudioElement)
+
+    engine.setAutoplay(true)
+    engine.setPreservesPitch(false)
+
+    expect(engine.getAutoplay()).toBe(true)
+    expect(engine.getPreservesPitch()).toBe(false)
+    expect(engine.getPlayedRanges()).toEqual([{ start: 2, end: 8 }, { start: 12, end: 20 }])
+  })
+
+  it('uses native fast seek when available', async () => {
+    const audioElement = new FakeAudioElement()
+    audioElement.fastSeek = seconds => audioElement.fastSeekCalls.push(seconds)
+    const engine = new MediaElementAudioEngine(audioElement as unknown as HTMLAudioElement)
+
+    await engine.fastSeek(12)
+
+    expect(audioElement.fastSeekCalls).toEqual([12])
+    expect(audioElement.currentTime).toBe(0)
+  })
+
+  it('falls back to regular seek when native fast seek is unavailable', async () => {
+    const audioElement = new FakeAudioElement()
+    const engine = new MediaElementAudioEngine(audioElement as unknown as HTMLAudioElement)
+
+    await engine.fastSeek(18)
+
+    expect(audioElement.currentTime).toBe(18)
   })
 
   it('emits typed snapshots for media lifecycle events', () => {

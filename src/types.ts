@@ -73,10 +73,12 @@ export interface AudioPlayerEvents {
 export interface AudioPlayerOptions {
   source?: string
   preload?: PreloadMode
+  autoplay?: boolean
   muted?: boolean
   loop?: boolean
   volume?: number
   playbackRate?: number
+  preservesPitch?: boolean
 }
 
 export interface FrequencyDataOptions {

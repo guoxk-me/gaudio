@@ -37,8 +37,11 @@ export interface AudioEngine {
   pause: () => void
   stop: () => void
   seek: (seconds: number) => Promise<void>
+  fastSeek: (seconds: number) => Promise<void>
   setPreload: (preload: PreloadMode) => void
   getPreload: () => PreloadMode
+  setAutoplay: (shouldAutoplay: boolean) => void
+  getAutoplay: () => boolean
   setVolume: (volume: number) => void
   getVolume: () => number
   setMuted: (isMuted: boolean) => void
@@ -47,6 +50,8 @@ export interface AudioEngine {
   isLooping: () => boolean
   setPlaybackRate: (rate: number) => void
   getPlaybackRate: () => number
+  setPreservesPitch: (shouldPreservePitch: boolean) => void
+  getPreservesPitch: () => boolean
   getCurrentTime: () => number
   getDuration: () => number
   isPaused: () => boolean
@@ -54,6 +59,7 @@ export interface AudioEngine {
   isSeeking: () => boolean
   getBufferedRanges: () => readonly TimeRange[]
   getSeekableRanges: () => readonly TimeRange[]
+  getPlayedRanges: () => readonly TimeRange[]
   canPlayType: (mimeType: string) => AudioFormatSupport
   on: <EventName extends keyof AudioEngineEvents>(
     eventName: EventName,

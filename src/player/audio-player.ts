@@ -20,16 +20,21 @@ export class AudioPlayer {
   private state: PlaybackState = 'idle'
   private loadRequestId = 0
   private hasLoadedSource = false
+  private shouldAutoplay: boolean
 
   constructor(options: AudioPlayerOptions = {}, engine: AudioEngine = new MediaElementAudioEngine()) {
     this.engine = engine
     this.source = options.source ? new HttpAudioSource(options.source) : undefined
+    this.shouldAutoplay = options.autoplay ?? false
 
     this.engine.setPreload(options.preload ?? 'metadata')
+    // AI modified: disable engine-native autoplay so load() owns the observable playback attempt.
+    this.engine.setAutoplay(false)
     this.engine.setMuted(options.muted ?? false)
     this.engine.setLoop(options.loop ?? false)
-    this.engine.setVolume(options.volume ?? 1)
-    this.engine.setPlaybackRate(options.playbackRate ?? 1)
+    this.setVolume(options.volume ?? 1)
+    this.setPlaybackRate(options.playbackRate ?? 1)
+    this.engine.setPreservesPitch(options.preservesPitch ?? true)
 
     // AI modified: derive public state from engine lifecycle events instead of method calls.
     this.connectEngineEvents()
@@ -55,11 +60,23 @@ export class AudioPlayer {
     this.engine.setPreload(preload)
   }
 
+  getAutoplay(): boolean {
+    return this.shouldAutoplay
+  }
+
+  setAutoplay(shouldAutoplay: boolean): void {
+    // AI modified: player-managed autoplay keeps browser policy failures observable through load().
+    this.shouldAutoplay = shouldAutoplay
+  }
+
   getVolume(): number {
     return this.engine.getVolume()
   }
 
   setVolume(volume: number): void {
+    if (!Number.isFinite(volume) || volume < 0 || volume > 1) {
+      throw new RangeError('Volume must be a finite number between 0 and 1')
+    }
     this.engine.setVolume(volume)
   }
 
@@ -84,7 +101,18 @@ export class AudioPlayer {
   }
 
   setPlaybackRate(rate: number): void {
+    if (!Number.isFinite(rate) || rate <= 0) {
+      throw new RangeError('Playback rate must be a finite number greater than 0')
+    }
     this.engine.setPlaybackRate(rate)
+  }
+
+  getPreservesPitch(): boolean {
+    return this.engine.getPreservesPitch()
+  }
+
+  setPreservesPitch(shouldPreservePitch: boolean): void {
+    this.engine.setPreservesPitch(shouldPreservePitch)
   }
 
   isPaused(): boolean {
@@ -105,6 +133,10 @@ export class AudioPlayer {
 
   getSeekableRanges(): readonly TimeRange[] {
     return this.engine.getSeekableRanges()
+  }
+
+  getPlayedRanges(): readonly TimeRange[] {
+    return this.engine.getPlayedRanges()
   }
 
   canPlayType(mimeType: string): AudioFormatSupport {
@@ -154,6 +186,10 @@ export class AudioPlayer {
     if (loadRequestId === this.loadRequestId) {
       this.hasLoadedSource = true
       this.setState('ready')
+      if (this.shouldAutoplay) {
+        // AI modified: explicit playback surfaces autoplay rejection and preserves the loaded source.
+        await this.play()
+      }
     }
   }
 
@@ -185,7 +221,17 @@ export class AudioPlayer {
   }
 
   async seek(seconds: number): Promise<void> {
+    if (!Number.isFinite(seconds) || seconds < 0) {
+      throw new RangeError('Seek position must be a finite number greater than or equal to 0')
+    }
     await this.engine.seek(seconds)
+  }
+
+  async fastSeek(seconds: number): Promise<void> {
+    if (!Number.isFinite(seconds) || seconds < 0) {
+      throw new RangeError('Fast seek position must be a finite number greater than or equal to 0')
+    }
+    await this.engine.fastSeek(seconds)
   }
 
   on<EventName extends keyof AudioPlayerEvents>(

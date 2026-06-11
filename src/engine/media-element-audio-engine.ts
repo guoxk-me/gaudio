@@ -111,6 +111,15 @@ export class MediaElementAudioEngine implements AudioEngine {
     this.audioElement.currentTime = Math.max(0, seconds)
   }
 
+  async fastSeek(seconds: number): Promise<void> {
+    // AI modified: prefer optimized browser seeking while retaining a standard seek fallback.
+    if (typeof this.audioElement.fastSeek === 'function') {
+      this.audioElement.fastSeek(seconds)
+      return
+    }
+    await this.seek(seconds)
+  }
+
   setPreload(preload: PreloadMode): void {
     this.audioElement.preload = preload
   }
@@ -118,6 +127,14 @@ export class MediaElementAudioEngine implements AudioEngine {
   getPreload(): PreloadMode {
     const preload = this.audioElement.preload
     return preload === 'none' || preload === 'auto' ? preload : 'metadata'
+  }
+
+  setAutoplay(shouldAutoplay: boolean): void {
+    this.audioElement.autoplay = shouldAutoplay
+  }
+
+  getAutoplay(): boolean {
+    return this.audioElement.autoplay
   }
 
   setVolume(volume: number): void {
@@ -152,6 +169,14 @@ export class MediaElementAudioEngine implements AudioEngine {
     return this.audioElement.playbackRate
   }
 
+  setPreservesPitch(shouldPreservePitch: boolean): void {
+    this.audioElement.preservesPitch = shouldPreservePitch
+  }
+
+  getPreservesPitch(): boolean {
+    return this.audioElement.preservesPitch
+  }
+
   getCurrentTime(): number {
     return this.audioElement.currentTime
   }
@@ -178,6 +203,10 @@ export class MediaElementAudioEngine implements AudioEngine {
 
   getSeekableRanges(): readonly TimeRange[] {
     return this.timeRanges(this.audioElement.seekable)
+  }
+
+  getPlayedRanges(): readonly TimeRange[] {
+    return this.timeRanges(this.audioElement.played)
   }
 
   canPlayType(mimeType: string): AudioFormatSupport {

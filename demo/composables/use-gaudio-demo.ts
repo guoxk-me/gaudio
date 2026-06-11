@@ -40,6 +40,7 @@ export function useGaudioDemo() {
   const playerState = shallowRef('idle')
   const bufferedLabel = shallowRef('none')
   const seekableLabel = shallowRef('none')
+  const playedLabel = shallowRef('none')
   const playbackRateLabel = shallowRef('1.00x')
   const currentTimeLabel = shallowRef('0:00')
   const durationLabel = shallowRef('0:00')
@@ -49,6 +50,8 @@ export function useGaudioDemo() {
   const preload = shallowRef<PreloadMode>('metadata')
   const isMuted = shallowRef(false)
   const isLooping = shallowRef(false)
+  const shouldAutoplay = shallowRef(false)
+  const shouldPreservePitch = shallowRef(true)
   const isPaused = shallowRef(true)
   const isEnded = shallowRef(false)
   const isSeeking = shallowRef(false)
@@ -67,10 +70,12 @@ export function useGaudioDemo() {
   const player = new AudioPlayer({
     source: defaultDemoSampleUrl,
     preload: preload.value,
+    autoplay: shouldAutoplay.value,
     muted: isMuted.value,
     loop: isLooping.value,
     volume: volume.value,
     playbackRate: playbackRate.value,
+    preservesPitch: shouldPreservePitch.value,
   })
 
   function addEvent(message: string): void {
@@ -89,6 +94,7 @@ export function useGaudioDemo() {
     isSeeking.value = player.isSeeking()
     bufferedLabel.value = rangesForDisplay(player.getBufferedRanges())
     seekableLabel.value = rangesForDisplay(player.getSeekableRanges())
+    playedLabel.value = rangesForDisplay(player.getPlayedRanges())
   }
 
   async function withBusyControls(action: () => Promise<void>): Promise<void> {
@@ -136,10 +142,12 @@ export function useGaudioDemo() {
   player.on('seeked', ({ currentTime, duration }) => {
     isSeeking.value = false
     updatePlaybackPosition(currentTime, duration)
+    playedLabel.value = rangesForDisplay(player.getPlayedRanges())
     addEvent(`seeked: ${currentTime.toFixed(1)}s`)
   })
   player.on('timeupdate', ({ currentTime, duration }) => {
     updatePlaybackPosition(currentTime, duration)
+    playedLabel.value = rangesForDisplay(player.getPlayedRanges())
   })
   player.on('durationchange', ({ duration }) => {
     durationLabel.value = secondsForDisplay(duration)
@@ -252,6 +260,19 @@ export function useGaudioDemo() {
     await player.seek((seekValue.value / seekRangeMax) * duration)
   }
 
+  async function fastSeek(): Promise<void> {
+    const duration = player.getDuration()
+
+    if (duration <= 0) {
+      return
+    }
+
+    // AI modified: demo fast seek targets the same position selected by the existing timeline.
+    await withBusyControls(async () => {
+      await player.fastSeek((seekValue.value / seekRangeMax) * duration)
+    })
+  }
+
   function setVolume(): void {
     player.setVolume(volume.value)
   }
@@ -262,6 +283,16 @@ export function useGaudioDemo() {
 
   function setLoop(): void {
     player.setLoop(isLooping.value)
+  }
+
+  function setAutoplay(): void {
+    player.setAutoplay(shouldAutoplay.value)
+    addEvent(`autoplay: ${player.getAutoplay()}`)
+  }
+
+  function setPreservesPitch(): void {
+    player.setPreservesPitch(shouldPreservePitch.value)
+    addEvent(`preservesPitch: ${player.getPreservesPitch()}`)
   }
 
   function setPreload(): void {
@@ -292,6 +323,7 @@ export function useGaudioDemo() {
     playerState,
     bufferedLabel,
     seekableLabel,
+    playedLabel,
     playbackRateLabel,
     currentTimeLabel,
     durationLabel,
@@ -302,6 +334,8 @@ export function useGaudioDemo() {
     preload,
     isMuted,
     isLooping,
+    shouldAutoplay,
+    shouldPreservePitch,
     isPaused,
     isEnded,
     isSeeking,
@@ -318,9 +352,12 @@ export function useGaudioDemo() {
     pause,
     stop,
     seek,
+    fastSeek,
     setVolume,
     setMuted,
     setLoop,
+    setAutoplay,
+    setPreservesPitch,
     setPreload,
     setPlaybackRate,
   }
