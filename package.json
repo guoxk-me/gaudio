@@ -33,6 +33,7 @@
     "@antfu/eslint-config": "^9.0.0",
     "@types/node": "^25.9.3",
     "@vitejs/plugin-vue": "^6.0.7",
+    "dashjs": "^5.2.0",
     "eslint": "^10.4.1",
     "hls.js": "^1.6.16",
     "tsdown": "^0.22.2",
