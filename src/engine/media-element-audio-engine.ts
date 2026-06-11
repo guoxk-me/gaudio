@@ -20,7 +20,7 @@ interface ActiveLoad {
 
 export class MediaElementAudioEngine implements AudioEngine {
   protected readonly audioElement: HTMLAudioElement
-  private readonly events = new EventEmitter<AudioEngineEvents>()
+  protected readonly events = new EventEmitter<AudioEngineEvents>()
   private activeLoad?: ActiveLoad
   private activeSource?: AudioSource
   private shouldSuppressPause = false

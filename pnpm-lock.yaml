@@ -20,6 +20,9 @@ importers:
       eslint:
         specifier: ^10.4.1
         version: 10.4.1(jiti@2.7.0)
+      hls.js:
+        specifier: ^1.6.16
+        version: 1.6.16
       tsdown:
         specifier: ^0.22.2
         version: 0.22.2(typescript@6.0.3)(vue-tsc@3.2.9(typescript@6.0.3))
@@ -1187,6 +1190,9 @@ packages:
 
   graceful-fs@4.2.11:
     resolution: {integrity: sha512-RbJ5/jmFcNNCcDV5o9eTnBLJ/HszWV0P73bc+Ff4nS/rJj+YaS6IGyiOL0VoBYX+l1Wrl3k63h/KrH+nhJ0XvQ==}
+
+  hls.js@1.6.16:
+    resolution: {integrity: sha512-VSIRpLfRwlAAdGL4wiTucx2ScRipo0ed1FBatWkyt832jC4CReKstga6yIhYVwGu9LOBjuX9wzmRMeQdBJtzEA==}
 
   hookable@6.1.1:
     resolution: {integrity: sha512-U9LYDy1CwhMCnprUfeAZWZGByVbhd54hwepegYTK7Pi5NvqEj63ifz5z+xukznehT7i6NIZRu89Ay1AZmRsLEQ==}
@@ -3123,6 +3129,8 @@ snapshots:
   globrex@0.1.2: {}
 
   graceful-fs@4.2.11: {}
+
+  hls.js@1.6.16: {}
 
   hookable@6.1.1: {}
 
