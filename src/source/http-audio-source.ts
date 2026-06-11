@@ -1,5 +1,5 @@
-import type { AudioSource, AudioStreamHandle } from './audio-source'
 import type { AudioProtocol, AudioSourceDescription } from '../types'
+import type { AudioSource, AudioStreamHandle } from './audio-source'
 
 export class HttpAudioSource implements AudioSource {
   readonly kind = 'url'

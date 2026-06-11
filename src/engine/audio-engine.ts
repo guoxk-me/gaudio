@@ -1,6 +1,11 @@
 import type { GAudioError } from '../errors/errors'
 import type { AudioSource } from '../source/audio-source'
 import type {
+  AdaptiveManifestUpdate,
+  AdaptivePlaybackInfo,
+  AdaptiveSegmentUpdate,
+  AdaptiveStreamError,
+  AdaptiveVariantUpdate,
   AudioFormatSupport,
   BufferUpdate,
   DurationUpdate,
@@ -26,6 +31,12 @@ export interface AudioEngineEvents {
   bufferupdate: BufferUpdate
   volumechange: VolumeUpdate
   ratechange: PlaybackRateUpdate
+  adaptivechange: AdaptivePlaybackInfo
+  manifestloaded: AdaptiveManifestUpdate
+  variantchange: AdaptiveVariantUpdate
+  segmentloadstart: AdaptiveSegmentUpdate
+  segmentloaded: AdaptiveSegmentUpdate
+  streamerror: AdaptiveStreamError
   ended: undefined
   error: GAudioError
 }

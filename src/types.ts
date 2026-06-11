@@ -18,6 +18,8 @@ export type AudioProtocol = 'media' | 'hls' | 'dash'
 
 export type AdaptiveAudioProtocol = Exclude<AudioProtocol, 'media'>
 
+export type AdaptivePlaybackImplementation = 'native' | 'hls.js' | 'dash.js'
+
 export interface AudioSourceDescription {
   url: string
   protocol?: AudioProtocol
@@ -26,6 +28,11 @@ export interface AudioSourceDescription {
 
 export type GAudioErrorCode
   = | 'SOURCE_UNAVAILABLE'
+    | 'ADAPTER_UNAVAILABLE'
+    | 'PROTOCOL_UNSUPPORTED'
+    | 'MANIFEST_ERROR'
+    | 'SEGMENT_ERROR'
+    | 'ADAPTIVE_STREAM_ERROR'
     | 'LOAD_ABORTED'
     | 'DECODE_FAILED'
     | 'PLAYBACK_BLOCKED'
@@ -60,6 +67,42 @@ export interface PlaybackRateUpdate {
   playbackRate: number
 }
 
+export interface AdaptivePlaybackInfo {
+  protocol: AdaptiveAudioProtocol
+  implementation: AdaptivePlaybackImplementation
+}
+
+export interface AdaptiveVariant {
+  id: string
+  bitrate: number
+  codecs?: string
+}
+
+export interface AdaptiveManifestUpdate extends AdaptivePlaybackInfo {
+  url: string
+  variants: readonly AdaptiveVariant[]
+}
+
+export interface AdaptiveVariantUpdate extends AdaptivePlaybackInfo {
+  previousVariantId?: string
+  variantId?: string
+  bitrate?: number
+  reason: 'initial' | 'automatic'
+}
+
+export interface AdaptiveSegmentUpdate extends AdaptivePlaybackInfo {
+  url?: string
+  variantId?: string
+  duration?: number
+}
+
+export interface AdaptiveStreamError extends AdaptivePlaybackInfo {
+  category: 'manifest' | 'network' | 'media' | 'segment' | 'other'
+  isFatal: boolean
+  code?: string
+  cause?: unknown
+}
+
 export interface AudioPlayerEvents {
   statechange: PlaybackState
   loadstart: undefined
@@ -76,6 +119,12 @@ export interface AudioPlayerEvents {
   bufferupdate: BufferUpdate
   volumechange: VolumeUpdate
   ratechange: PlaybackRateUpdate
+  adaptivechange: AdaptivePlaybackInfo
+  manifestloaded: AdaptiveManifestUpdate
+  variantchange: AdaptiveVariantUpdate
+  segmentloadstart: AdaptiveSegmentUpdate
+  segmentloaded: AdaptiveSegmentUpdate
+  streamerror: AdaptiveStreamError
   error: GAudioError
   ended: undefined
 }

@@ -1,5 +1,5 @@
-import type { AudioSource } from './audio-source'
 import type { AudioProtocol } from '../types'
+import type { AudioSource } from './audio-source'
 
 const hlsMimeTypes = new Set([
   'application/vnd.apple.mpegurl',

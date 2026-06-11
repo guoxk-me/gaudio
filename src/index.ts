@@ -1,5 +1,6 @@
 export { AudioAnalyzer } from './analysis/audio-analyzer'
 export type { AudioEngine, AudioEngineEvents } from './engine/audio-engine'
+export type { AudioEngineAdapter } from './engine/audio-engine-adapter'
 export { MediaElementAudioEngine } from './engine/media-element-audio-engine'
 export { GAudioError } from './errors/errors'
 export { EventEmitter } from './events/event-emitter'
@@ -8,10 +9,17 @@ export type { AudioSource, AudioSourceInput, AudioSourceKind, AudioStreamHandle 
 export { HttpAudioSource } from './source/http-audio-source'
 export type {
   AdaptiveAudioProtocol,
+  AdaptiveManifestUpdate,
+  AdaptivePlaybackImplementation,
+  AdaptivePlaybackInfo,
+  AdaptiveSegmentUpdate,
+  AdaptiveStreamError,
+  AdaptiveVariant,
+  AdaptiveVariantUpdate,
   AudioFormatSupport,
-  AudioProtocol,
   AudioPlayerEvents,
   AudioPlayerOptions,
+  AudioProtocol,
   AudioSourceDescription,
   BufferUpdate,
   DurationUpdate,

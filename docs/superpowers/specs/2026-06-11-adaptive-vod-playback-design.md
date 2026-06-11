@@ -12,8 +12,8 @@ The package exposes three entry points:
 
 ```ts
 import { AudioPlayer } from 'gaudio'
-import { createHlsAdapter } from 'gaudio/hls'
 import { createDashAdapter } from 'gaudio/dash'
+import { createHlsAdapter } from 'gaudio/hls'
 ```
 
 The root entry does not import `hls.js` or `dashjs`. The adapter entry points declare their vendor libraries as optional peer dependencies, and the project installs them as development dependencies for type checking and tests.

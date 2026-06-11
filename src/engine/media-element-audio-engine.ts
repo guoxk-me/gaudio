@@ -19,7 +19,7 @@ interface ActiveLoad {
 }
 
 export class MediaElementAudioEngine implements AudioEngine {
-  private readonly audioElement: HTMLAudioElement
+  protected readonly audioElement: HTMLAudioElement
   private readonly events = new EventEmitter<AudioEngineEvents>()
   private activeLoad?: ActiveLoad
   private activeSource?: AudioSource
@@ -46,8 +46,7 @@ export class MediaElementAudioEngine implements AudioEngine {
       throw this.loadAbortedError()
     }
 
-    this.audioElement.src = streamHandle.url
-    this.audioElement.load()
+    this.attachSourceUrl(streamHandle.url)
 
     await new Promise<void>((resolve, reject) => {
       const abortController = new AbortController()
@@ -83,8 +82,7 @@ export class MediaElementAudioEngine implements AudioEngine {
   unload(): void {
     this.cancelActiveLoad()
     this.pauseWithoutEvent()
-    this.audioElement.removeAttribute('src')
-    this.audioElement.load()
+    this.detachSourceUrl()
     this.activeSource = undefined
   }
 
@@ -224,6 +222,16 @@ export class MediaElementAudioEngine implements AudioEngine {
     this.removeMediaEventListeners()
     this.unload()
     this.events.clear()
+  }
+
+  protected attachSourceUrl(url: string): void {
+    this.audioElement.src = url
+    this.audioElement.load()
+  }
+
+  protected detachSourceUrl(): void {
+    this.audioElement.removeAttribute('src')
+    this.audioElement.load()
   }
 
   private addMediaEventListeners(): void {

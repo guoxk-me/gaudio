@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { HttpAudioSource } from './http-audio-source'
 import { resolveAudioProtocol } from './audio-protocol'
+import { HttpAudioSource } from './http-audio-source'
 
 describe('resolveAudioProtocol', () => {
   it('prefers an explicit protocol over MIME and URL hints', () => {
