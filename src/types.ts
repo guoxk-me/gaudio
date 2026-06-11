@@ -1,4 +1,6 @@
+import type { AudioEngineAdapter } from './engine/audio-engine-adapter'
 import type { GAudioError } from './errors/errors'
+import type { AudioSourceInput } from './source/audio-source'
 
 export type PlaybackState
   = | 'idle'
@@ -130,7 +132,8 @@ export interface AudioPlayerEvents {
 }
 
 export interface AudioPlayerOptions {
-  source?: string
+  source?: AudioSourceInput
+  adapters?: readonly AudioEngineAdapter[]
   preload?: PreloadMode
   autoplay?: boolean
   muted?: boolean

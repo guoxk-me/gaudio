@@ -1,5 +1,5 @@
 import type { AudioEngine } from '../engine/audio-engine'
-import type { AudioSource } from '../source/audio-source'
+import type { AudioSource, AudioSourceInput } from '../source/audio-source'
 import type {
   AudioFormatSupport,
   AudioPlayerEvents,
@@ -8,7 +8,7 @@ import type {
   PreloadMode,
   TimeRange,
 } from '../types'
-import { MediaElementAudioEngine } from '../engine/media-element-audio-engine'
+import { AudioEngineRouter } from '../engine/audio-engine-router'
 import { GAudioError } from '../errors/errors'
 import { EventEmitter } from '../events/event-emitter'
 import { HttpAudioSource } from '../source/http-audio-source'
@@ -22,9 +22,18 @@ export class AudioPlayer {
   private hasLoadedSource = false
   private shouldAutoplay: boolean
 
-  constructor(options: AudioPlayerOptions = {}, engine: AudioEngine = new MediaElementAudioEngine()) {
-    this.engine = engine
-    this.source = options.source ? new HttpAudioSource(options.source) : undefined
+  constructor(options: AudioPlayerOptions = {}, engine?: AudioEngine) {
+    if (engine && options.adapters?.length) {
+      throw new TypeError('AudioPlayer cannot combine adapters with an explicit custom engine')
+    }
+
+    // AI modified: the router owns protocol engines only when callers do not inject a custom engine.
+    this.engine = engine ?? new AudioEngineRouter({ adapters: options.adapters })
+    if (options.source) {
+      this.source = typeof options.source === 'string' || !('open' in options.source)
+        ? new HttpAudioSource(options.source)
+        : options.source
+    }
     this.shouldAutoplay = options.autoplay ?? false
 
     this.engine.setPreload(options.preload ?? 'metadata')
@@ -143,10 +152,12 @@ export class AudioPlayer {
     return this.engine.canPlayType(mimeType)
   }
 
-  setSource(source: string | AudioSource): void {
+  setSource(source: AudioSourceInput): void {
     this.loadRequestId += 1
     this.engine.unload()
-    this.source = typeof source === 'string' ? new HttpAudioSource(source) : source
+    this.source = typeof source === 'string' || !('open' in source)
+      ? new HttpAudioSource(source)
+      : source
     this.hasLoadedSource = false
     this.setState('idle')
   }
@@ -278,6 +289,12 @@ export class AudioPlayer {
     this.engine.on('bufferupdate', payload => this.events.emit('bufferupdate', payload))
     this.engine.on('volumechange', payload => this.events.emit('volumechange', payload))
     this.engine.on('ratechange', payload => this.events.emit('ratechange', payload))
+    this.engine.on('adaptivechange', payload => this.events.emit('adaptivechange', payload))
+    this.engine.on('manifestloaded', payload => this.events.emit('manifestloaded', payload))
+    this.engine.on('variantchange', payload => this.events.emit('variantchange', payload))
+    this.engine.on('segmentloadstart', payload => this.events.emit('segmentloadstart', payload))
+    this.engine.on('segmentloaded', payload => this.events.emit('segmentloaded', payload))
+    this.engine.on('streamerror', payload => this.events.emit('streamerror', payload))
 
     this.engine.on('ended', (payload) => {
       this.setState('ended')

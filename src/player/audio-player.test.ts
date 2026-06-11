@@ -1,4 +1,5 @@
 import type { AudioEngine, AudioEngineEvents } from '../engine/audio-engine'
+import type { AudioEngineAdapter } from '../engine/audio-engine-adapter'
 import type { AudioSource } from '../source/audio-source'
 import type { AudioFormatSupport, PreloadMode, TimeRange } from '../types'
 import { describe, expect, it } from 'vitest'
@@ -175,6 +176,22 @@ class FakeAudioEngine implements AudioEngine {
   }
 }
 
+class FakeHlsAdapter implements AudioEngineAdapter {
+  readonly protocol = 'hls'
+  createCalls = 0
+
+  constructor(private readonly engine: AudioEngine) {}
+
+  createEngine(): AudioEngine {
+    this.createCalls += 1
+    return this.engine
+  }
+
+  isSupported(): boolean {
+    return true
+  }
+}
+
 describe('audioPlayer', () => {
   it('applies media options and exposes engine capabilities', () => {
     const engine = new FakeAudioEngine()
@@ -246,6 +263,57 @@ describe('audioPlayer', () => {
     expect(engine.loadedSources).toHaveLength(1)
     expect(player.getState()).toBe('ready')
     expect(states).toEqual(['loading', 'ready'])
+  })
+
+  it('routes source descriptions through registered adapters', async () => {
+    const engine = new FakeAudioEngine()
+    const adapter = new FakeHlsAdapter(engine)
+    const player = new AudioPlayer({ adapters: [adapter] })
+
+    player.setSource({
+      url: 'https://example.com/stream?id=1',
+      protocol: 'hls',
+    })
+    await player.load()
+
+    expect(adapter.createCalls).toBe(1)
+    expect(engine.loadedSources[0]).toMatchObject({
+      url: 'https://example.com/stream?id=1',
+      protocol: 'hls',
+    })
+  })
+
+  it('rejects adapters combined with an explicit custom engine', () => {
+    const engine = new FakeAudioEngine()
+    const adapter = new FakeHlsAdapter(new FakeAudioEngine())
+
+    expect(() => new AudioPlayer({ adapters: [adapter] }, engine)).toThrow(TypeError)
+  })
+
+  it('forwards adaptive events and uses the error event for fatal state changes', () => {
+    const engine = new FakeAudioEngine()
+    const player = new AudioPlayer({}, engine)
+    const implementations: string[] = []
+    const streamErrors: boolean[] = []
+
+    player.on('adaptivechange', ({ implementation }) => implementations.push(implementation))
+    player.on('streamerror', ({ isFatal }) => streamErrors.push(isFatal))
+
+    engine.emit('adaptivechange', { protocol: 'hls', implementation: 'hls.js' })
+    engine.emit('streamerror', {
+      protocol: 'hls',
+      implementation: 'hls.js',
+      category: 'segment',
+      isFatal: true,
+    })
+
+    expect(player.getState()).toBe('idle')
+
+    engine.emit('error', new GAudioError('SEGMENT_ERROR', 'Segment loading failed'))
+
+    expect(implementations).toEqual(['hls.js'])
+    expect(streamErrors).toEqual([true])
+    expect(player.getState()).toBe('error')
   })
 
   it('starts playback after loading when autoplay is enabled', async () => {
