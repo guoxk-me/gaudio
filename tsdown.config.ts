@@ -1,7 +1,11 @@
 import { defineConfig } from 'tsdown'
 
 export default defineConfig({
-  entry: ['src/index.ts'],
+  entry: {
+    index: 'src/index.ts',
+    hls: 'src/adapters/hls/index.ts',
+    dash: 'src/adapters/dash/index.ts',
+  },
   format: ['esm', 'cjs'],
   dts: true,
   clean: true,
