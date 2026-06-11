@@ -3,6 +3,7 @@ import { useGaudioDemo } from './composables/use-gaudio-demo'
 
 const {
   sourceUrl,
+  protocolOverride,
   demoTracks,
   demoFormatGroups,
   activeTrack,
@@ -10,6 +11,11 @@ const {
   activeSampleLabel,
   activeSamplePath,
   playerState,
+  adaptiveImplementationLabel,
+  adaptiveVariantLabel,
+  adaptiveBitrateLabel,
+  manifestVariantLabel,
+  segmentLabel,
   bufferedLabel,
   seekableLabel,
   playedLabel,
@@ -137,13 +143,26 @@ const {
           <span>{{ playerState }}</span>
         </div>
 
-        <label for="sourceUrl">Source URL</label>
-        <input
-          id="sourceUrl"
-          v-model="sourceUrl"
-          type="url"
-          autocomplete="off"
-        >
+        <div class="source-options">
+          <div>
+            <label for="sourceUrl">Source URL</label>
+            <input
+              id="sourceUrl"
+              v-model="sourceUrl"
+              type="url"
+              autocomplete="off"
+            >
+          </div>
+          <label class="protocol-control" for="protocolOverride">
+            <span>Protocol</span>
+            <select id="protocolOverride" v-model="protocolOverride">
+              <option value="auto">auto</option>
+              <option value="media">media</option>
+              <option value="hls">HLS</option>
+              <option value="dash">DASH</option>
+            </select>
+          </label>
+        </div>
 
         <div class="actions">
           <button type="button" :disabled="isBusy" @click="loadSource">
@@ -269,6 +288,26 @@ const {
           <div class="stat">
             <span>Seeking</span>
             <strong>{{ isSeeking }}</strong>
+          </div>
+          <div class="stat">
+            <span>Implementation</span>
+            <strong>{{ adaptiveImplementationLabel }}</strong>
+          </div>
+          <div class="stat">
+            <span>Manifest</span>
+            <strong>{{ manifestVariantLabel }}</strong>
+          </div>
+          <div class="stat">
+            <span>Variant</span>
+            <strong>{{ adaptiveVariantLabel }}</strong>
+          </div>
+          <div class="stat">
+            <span>Bitrate</span>
+            <strong>{{ adaptiveBitrateLabel }}</strong>
+          </div>
+          <div class="stat">
+            <span>Segment</span>
+            <strong>{{ segmentLabel }}</strong>
           </div>
         </div>
       </section>
@@ -528,6 +567,29 @@ input[type="url"] {
   border: 1px solid #cbd3ca;
   border-radius: 6px;
   padding: 0 12px;
+  color: #202420;
+  font: inherit;
+}
+
+.source-options {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 150px;
+  gap: 12px;
+  align-items: end;
+}
+
+.protocol-control {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+
+.protocol-control select {
+  min-height: 44px;
+  border: 1px solid #cbd3ca;
+  border-radius: 6px;
+  background: #ffffff;
+  padding: 0 10px;
   color: #202420;
   font: inherit;
 }

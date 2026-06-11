@@ -8,6 +8,13 @@ A browser-first TypeScript audio streaming library.
 pnpm add gaudio
 ```
 
+Install only the adaptive-stream dependency your application uses:
+
+```bash
+pnpm add gaudio hls.js
+pnpm add gaudio dashjs
+```
+
 ## Quick Start
 
 ```ts
@@ -38,6 +45,121 @@ await player.fastSeek(30)
 console.log(player.getPlayedRanges())
 ```
 
+## HLS and DASH VOD
+
+Adaptive playback uses optional adapters, so importing `gaudio` alone does not load `hls.js` or `dashjs`:
+
+```ts
+import { AudioPlayer } from 'gaudio'
+import { createDashAdapter } from 'gaudio/dash'
+import { createHlsAdapter } from 'gaudio/hls'
+
+const hlsAdapter = createHlsAdapter({
+  playbackStrategy: 'native-first',
+  config: {
+    maxBufferLength: 60,
+  },
+})
+
+const dashAdapter = createDashAdapter({
+  settings: {
+    streaming: {
+      buffer: {
+        bufferTimeDefault: 30,
+      },
+    },
+  },
+})
+
+const player = new AudioPlayer({
+  adapters: [hlsAdapter, dashAdapter],
+})
+
+player.setSource('https://example.com/program.m3u8')
+await player.load()
+```
+
+The player selects a protocol from explicit metadata, MIME type, then the `.m3u8` or `.mpd` URL pathname. Signed or extensionless URLs can specify the protocol:
+
+```ts
+player.setSource({
+  url: 'https://example.com/media?id=42',
+  protocol: 'dash',
+  mimeType: 'application/dash+xml',
+})
+```
+
+One player can switch between ordinary media, HLS, and DASH sources. Protocol changes dispose the previous engine and are not gapless.
+
+### HLS Strategy
+
+`createHlsAdapter()` supports four deterministic strategies:
+
+- `native-first` (default): native HLS, then `hls.js`.
+- `hls-first`: `hls.js`, then native HLS.
+- `native-only`: reject when native HLS is unavailable.
+- `hls-only`: reject when `hls.js` cannot run.
+
+The adapter exposes the active implementation and read-only vendor instance:
+
+```ts
+console.log(hlsAdapter.implementation)
+console.log(hlsAdapter.hlsInstance)
+console.log(dashAdapter.dashInstance)
+```
+
+`hlsInstance` is `undefined` on the native HLS path. Native playback also cannot provide the detailed manifest, variant, segment, and recoverable-error events emitted by `hls.js`.
+
+### Adaptive Events
+
+The player exposes protocol-neutral adaptive events:
+
+```ts
+player.on('adaptivechange', update => console.log(update))
+player.on('manifestloaded', update => console.log(update.variants))
+player.on('variantchange', update => console.log(update.variantId, update.bitrate))
+player.on('segmentloadstart', update => console.log(update.url))
+player.on('segmentloaded', update => console.log(update.url))
+player.on('streamerror', update => console.log(update.category, update.isFatal))
+```
+
+Recoverable vendor failures emit `streamerror` while the vendor retries. Fatal failures also emit the existing `error` event with a typed `GAudioError` code.
+
+### Runtime Configuration
+
+HLS configuration updates default to the next load and do not interrupt playback:
+
+```ts
+await hlsAdapter.updateConfig({ maxBufferLength: 90 })
+```
+
+Constructor-only `hls.js` settings require an explicit reload:
+
+```ts
+await hlsAdapter.updateConfig(
+  { backBufferLength: 30 },
+  {
+    apply: 'reload',
+    restorePosition: true,
+    resumePlayback: true,
+  },
+)
+```
+
+Reloading destroys and recreates the active `Hls` instance. It may interrupt playback and rebuffer; buffered segments, in-flight requests, bandwidth estimates, and retry state are not preserved.
+
+DASH settings use the official runtime update API:
+
+```ts
+dashAdapter.updateSettings({
+  streaming: {
+    buffer: {
+      bufferTimeDefault: 45,
+    },
+  },
+})
+```
+
 ## Core API
 
 `AudioPlayer` provides playback controls plus typed media state:
@@ -46,7 +168,7 @@ console.log(player.getPlayedRanges())
 - Media settings: preload, autoplay, volume, muted, loop, playback rate, and `preservesPitch` getters/setters.
 - State queries: current time, duration, paused, ended, seeking, buffered ranges, seekable ranges, and `getPlayedRanges()`.
 - Format checks: `canPlayType(mimeType)` returns `''`, `'maybe'`, or `'probably'`.
-- Lifecycle events: loading, metadata, readiness, playback, buffering, seeking, time, duration, volume, rate, ending, and errors.
+- Lifecycle events: loading, metadata, readiness, playback, buffering, seeking, time, duration, volume, rate, ending, adaptive streaming, and errors.
 
 `stop()` pauses playback and returns to 0 seconds while retaining the loaded source. The player returns to `ready`, so the next `play()` does not reload the media.
 
@@ -62,7 +184,7 @@ Run the browser demo from the project root:
 pnpm run demo
 ```
 
-Then open <http://localhost:4173/>. The Vue demo loads local MP3, WAV, AAC (M4A), and Opus (OGG) samples. It exercises loading, playback, regular and fast seeking, autoplay, pitch preservation, preload, mute, loop, volume, playback rate, media states, time ranges, and lifecycle events.
+Then open <http://localhost:4173/>. The Vue demo loads local MP3, WAV, AAC (M4A), and Opus (OGG) samples and accepts external HLS/DASH VOD URLs. It exercises protocol selection, adaptive status/events, loading, playback, regular and fast seeking, autoplay, pitch preservation, preload, mute, loop, volume, playback rate, media states, and time ranges.
 
 Verify the production Demo build with:
 
@@ -84,8 +206,16 @@ pnpm run demo:build
 - Expect `load()` to attempt playback when autoplay is enabled and to reject with `PLAYBACK_BLOCKED` when browser policy prevents it.
 - Handle `RangeError` for invalid volume, playback rate, `seek`, and `fastSeek` arguments.
 
+## Migration from 0.3.0
+
+- Install `hls.js` or `dashjs` only when importing `gaudio/hls` or `gaudio/dash`; both are optional peers.
+- Register adaptive adapters through `AudioPlayerOptions.adapters`.
+- Use an explicit source `protocol` when MIME type and URL pathname cannot identify an extensionless stream.
+- Handle the new adaptive events and fatal error codes when observing HLS/DASH playback.
+- Do not combine `options.adapters` with an explicitly injected custom `AudioEngine`.
+
 ## Current Limits
 
-- HLS and DASH protocol handling are not implemented.
-- DRM and transcoding are outside the package scope.
+- HLS and DASH support is limited to video-on-demand playback; live playback is not implemented.
+- DRM, transcoding, offline media, playlists, and manual quality selection are outside the current package scope.
 - Custom codec decoding can be added later through a dedicated engine.

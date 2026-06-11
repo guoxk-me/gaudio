@@ -6,10 +6,12 @@ export default defineConfig({
   root: resolve(import.meta.dirname),
   plugins: [vue()],
   resolve: {
-    alias: {
+    alias: [
+      { find: 'gaudio/hls', replacement: resolve(import.meta.dirname, '../src/adapters/hls/index.ts') },
+      { find: 'gaudio/dash', replacement: resolve(import.meta.dirname, '../src/adapters/dash/index.ts') },
       // AI modified: resolve gaudio from source so demo dev does not require a prior library build.
-      gaudio: resolve(import.meta.dirname, '../src/index.ts'),
-    },
+      { find: 'gaudio', replacement: resolve(import.meta.dirname, '../src/index.ts') },
+    ],
   },
   server: {
     port: 4173,

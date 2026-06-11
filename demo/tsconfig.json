@@ -5,6 +5,12 @@
     "paths": {
       "gaudio": [
         "../src/index.ts"
+      ],
+      "gaudio/hls": [
+        "../src/adapters/hls/index.ts"
+      ],
+      "gaudio/dash": [
+        "../src/adapters/dash/index.ts"
       ]
     },
     "types": [

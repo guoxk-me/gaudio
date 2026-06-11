@@ -1,6 +1,8 @@
-import type { PreloadMode, TimeRange } from 'gaudio'
+import type { AudioProtocol, PreloadMode, TimeRange } from 'gaudio'
 import type { DemoFormatGroup, DemoTrack } from '../data/demo-samples'
 import { AudioPlayer } from 'gaudio'
+import { createDashAdapter } from 'gaudio/dash'
+import { createHlsAdapter } from 'gaudio/hls'
 import { computed, onMounted, onUnmounted, shallowRef } from 'vue'
 import {
   defaultDemoFormatFolder,
@@ -14,6 +16,8 @@ import {
 } from '../data/demo-samples'
 
 const seekRangeMax = 1000
+
+type ProtocolOverride = 'auto' | AudioProtocol
 
 function secondsForDisplay(seconds: number): string {
   const safeSeconds = Number.isFinite(seconds) ? Math.max(0, seconds) : 0
@@ -37,7 +41,13 @@ export function useGaudioDemo() {
   const activeFormatFolder = shallowRef(defaultDemoFormatFolder)
   const activeTrackId = shallowRef(defaultDemoTrackId)
   const sourceUrl = shallowRef(defaultDemoSampleUrl)
+  const protocolOverride = shallowRef<ProtocolOverride>('auto')
   const playerState = shallowRef('idle')
+  const adaptiveImplementationLabel = shallowRef('media element')
+  const adaptiveVariantLabel = shallowRef('automatic')
+  const adaptiveBitrateLabel = shallowRef('unknown')
+  const manifestVariantLabel = shallowRef('none')
+  const segmentLabel = shallowRef('none')
   const bufferedLabel = shallowRef('none')
   const seekableLabel = shallowRef('none')
   const playedLabel = shallowRef('none')
@@ -67,8 +77,11 @@ export function useGaudioDemo() {
     activeFormatGroup.value.extension,
   ))
 
+  const hlsAdapter = createHlsAdapter({ playbackStrategy: 'native-first' })
+  const dashAdapter = createDashAdapter()
   const player = new AudioPlayer({
     source: defaultDemoSampleUrl,
+    adapters: [hlsAdapter, dashAdapter],
     preload: preload.value,
     autoplay: shouldAutoplay.value,
     muted: isMuted.value,
@@ -166,6 +179,34 @@ export function useGaudioDemo() {
     playbackRateLabel.value = `${activePlaybackRate.toFixed(2)}x`
     addEvent(`ratechange: ${activePlaybackRate.toFixed(2)}x`)
   })
+  player.on('adaptivechange', ({ protocol, implementation }) => {
+    adaptiveImplementationLabel.value = `${protocol} / ${implementation}`
+    adaptiveVariantLabel.value = 'automatic'
+    adaptiveBitrateLabel.value = 'unknown'
+    manifestVariantLabel.value = implementation === 'native' ? 'native metadata unavailable' : 'loading'
+    segmentLabel.value = 'waiting'
+    addEvent(`adaptivechange: ${protocol} / ${implementation}`)
+  })
+  player.on('manifestloaded', ({ variants }) => {
+    manifestVariantLabel.value = `${variants.length} variants`
+    addEvent(`manifestloaded: ${variants.length} variants`)
+  })
+  player.on('variantchange', ({ variantId, bitrate }) => {
+    adaptiveVariantLabel.value = variantId ?? 'automatic'
+    adaptiveBitrateLabel.value = bitrate === undefined ? 'unknown' : `${Math.round(bitrate / 1000)} kbps`
+    addEvent(`variantchange: ${adaptiveVariantLabel.value}`)
+  })
+  player.on('segmentloadstart', ({ url }) => {
+    segmentLabel.value = `loading ${url ?? 'segment'}`
+  })
+  player.on('segmentloaded', ({ url }) => {
+    segmentLabel.value = `loaded ${url ?? 'segment'}`
+    addEvent(`segmentloaded: ${url ?? 'segment'}`)
+  })
+  player.on('streamerror', ({ category, isFatal }) => {
+    segmentLabel.value = `${isFatal ? 'fatal' : 'recoverable'} ${category} error`
+    addEvent(`streamerror: ${category} / fatal ${isFatal}`)
+  })
   player.on('ended', () => {
     updateMediaStatus()
     addEvent('ended')
@@ -176,6 +217,12 @@ export function useGaudioDemo() {
     const formatGroup = activeFormatGroup.value
     const track = activeTrack.value
     sourceUrl.value = demoSampleUrl(formatGroup.folder, track.id, formatGroup.extension)
+    protocolOverride.value = 'auto'
+    adaptiveImplementationLabel.value = 'media element'
+    adaptiveVariantLabel.value = 'automatic'
+    adaptiveBitrateLabel.value = 'unknown'
+    manifestVariantLabel.value = 'none'
+    segmentLabel.value = 'none'
 
     await withBusyControls(async () => {
       player.setSource(sourceUrl.value)
@@ -219,7 +266,10 @@ export function useGaudioDemo() {
 
   async function loadSource(): Promise<void> {
     await withBusyControls(async () => {
-      player.setSource(sourceUrl.value)
+      // AI modified: explicit protocol metadata handles signed URLs without .m3u8 or .mpd suffixes.
+      player.setSource(protocolOverride.value === 'auto'
+        ? sourceUrl.value
+        : { url: sourceUrl.value, protocol: protocolOverride.value })
       await player.load()
       updateMediaStatus()
       addEvent('loaded custom source')
@@ -314,6 +364,7 @@ export function useGaudioDemo() {
 
   return {
     sourceUrl,
+    protocolOverride,
     demoTracks,
     demoFormatGroups,
     activeTrack,
@@ -321,6 +372,11 @@ export function useGaudioDemo() {
     activeSampleLabel,
     activeSamplePath,
     playerState,
+    adaptiveImplementationLabel,
+    adaptiveVariantLabel,
+    adaptiveBitrateLabel,
+    manifestVariantLabel,
+    segmentLabel,
     bufferedLabel,
     seekableLabel,
     playedLabel,
