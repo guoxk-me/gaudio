@@ -3,12 +3,12 @@
 import type {
   ErrorEvent as DashErrorEvent,
   FragmentLoadingCompletedEvent,
-  ManifestLoadedEvent,
   MediaPlayerClass,
   MediaPlayerEvents,
   MediaPlayerSettingClass,
   QualityChangeRenderedEvent,
   Representation,
+  StreamInitializedEvent,
 } from 'dashjs'
 import type { AdaptiveStreamError, GAudioErrorCode } from '../../types'
 import { MediaElementAudioEngine } from '../../engine/media-element-audio-engine'
@@ -64,7 +64,7 @@ export class DashAudioEngine extends MediaElementAudioEngine {
     const dashPlayer = this.createDashPlayer()
     this.dashPlayer = dashPlayer
     this.onDashInstanceChange(dashPlayer)
-    dashPlayer.on(this.dashEvents.MANIFEST_LOADED, this.handleManifestLoaded)
+    dashPlayer.on(this.dashEvents.STREAM_INITIALIZED, this.handleStreamInitialized)
     dashPlayer.on(this.dashEvents.QUALITY_CHANGE_RENDERED, this.handleQualityChangeRendered)
     dashPlayer.on(this.dashEvents.FRAGMENT_LOADING_STARTED, this.handleFragmentLoadingStarted)
     dashPlayer.on(this.dashEvents.FRAGMENT_LOADING_COMPLETED, this.handleFragmentLoadingCompleted)
@@ -85,7 +85,7 @@ export class DashAudioEngine extends MediaElementAudioEngine {
     super.detachSourceUrl()
   }
 
-  private readonly handleManifestLoaded = (_payload: ManifestLoadedEvent): void => {
+  private readonly handleStreamInitialized = (_payload: StreamInitializedEvent): void => {
     const variants = this.dashPlayer?.getRepresentationsByType('audio') ?? []
     this.events.emit('manifestloaded', {
       protocol: 'dash',
@@ -153,7 +153,9 @@ export class DashAudioEngine extends MediaElementAudioEngine {
 
     if (isFatal) {
       const errorCode = this.fatalErrorCode(category)
-      this.events.emit('error', new GAudioError(errorCode, `DASH playback failed: ${streamError.code ?? 'unknown error'}`, payload))
+      const error = new GAudioError(errorCode, `DASH playback failed: ${streamError.code ?? 'unknown error'}`, payload)
+      this.events.emit('error', error)
+      this.rejectActiveLoad(error)
     }
   }
 
@@ -170,7 +172,13 @@ export class DashAudioEngine extends MediaElementAudioEngine {
       return 'manifest'
     }
     if (payload.error === 'download') {
-      return payload.event.id.toLowerCase().includes('content') ? 'segment' : 'network'
+      const downloadId = payload.event.id.toLowerCase()
+      if (downloadId.includes('manifest')) {
+        return 'manifest'
+      }
+      return downloadId.includes('content') || downloadId.includes('initialization')
+        ? 'segment'
+        : 'network'
     }
     if (typeof payload.error === 'object') {
       return 'media'

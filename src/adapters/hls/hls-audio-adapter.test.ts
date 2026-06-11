@@ -246,6 +246,7 @@ describe('hlsAudioAdapter', () => {
     const errorCodes: string[] = []
     engine.on('error', error => errorCodes.push(error.code))
     const load = engine.load(new HttpAudioSource('/stream.m3u8'))
+    const loadExpectation = expect(load).rejects.toMatchObject({ code: errorCode })
     await Promise.resolve()
 
     harness.hlsInstances[0].emit(Events.ERROR, {
@@ -254,8 +255,7 @@ describe('hlsAudioAdapter', () => {
       fatal: true,
       error: new Error('fatal'),
     })
-    harness.audioElements.at(-1)?.dispatchEvent(new Event('loadedmetadata'))
-    await load
+    await loadExpectation
 
     expect(errorCodes).toEqual([errorCode])
   })
@@ -299,5 +299,22 @@ describe('hlsAudioAdapter', () => {
 
     expect(harness.hlsInstances).toHaveLength(0)
     expect(harness.adapter.getConfig()).toMatchObject({ maxBufferLength: 45 })
+  })
+
+  it('rejects an HLS config reload when the replacement manifest fails', async () => {
+    const harness = adapterHarness({ strategy: 'hls-only' })
+    await loadEngine(harness)
+
+    const reload = harness.adapter.updateConfig({ maxBufferLength: 50 }, { apply: 'reload' })
+    const reloadExpectation = expect(reload).rejects.toMatchObject({ code: 'MANIFEST_ERROR' })
+    await Promise.resolve()
+    harness.hlsInstances.at(-1)?.emit(Events.ERROR, {
+      type: ErrorTypes.NETWORK_ERROR,
+      details: ErrorDetails.MANIFEST_LOAD_ERROR,
+      fatal: true,
+      error: new Error('replacement failed'),
+    })
+
+    await reloadExpectation
   })
 })

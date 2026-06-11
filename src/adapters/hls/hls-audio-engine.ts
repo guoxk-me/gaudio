@@ -40,6 +40,8 @@ export class HlsAudioEngine extends MediaElementAudioEngine {
   private hls?: Hls
   private activeUrl?: string
   private previousVariantId?: string
+  private rejectMetadataWait?: (error: GAudioError) => void
+  private publishedReloadError?: GAudioError
 
   constructor(options: HlsAudioEngineOptions) {
     super(options.audioElement)
@@ -58,6 +60,7 @@ export class HlsAudioEngine extends MediaElementAudioEngine {
 
     const currentTime = this.getCurrentTime()
     const shouldResume = options.resumePlayback ?? !this.isPaused()
+    this.publishedReloadError = undefined
 
     try {
       const metadataReady = this.waitForMetadata()
@@ -76,7 +79,10 @@ export class HlsAudioEngine extends MediaElementAudioEngine {
       const playerError = error instanceof GAudioError
         ? error
         : new GAudioError('ADAPTIVE_STREAM_ERROR', 'HLS configuration reload failed', error)
-      this.events.emit('error', playerError)
+      if (playerError !== this.publishedReloadError) {
+        this.events.emit('error', playerError)
+      }
+      this.publishedReloadError = undefined
       throw playerError
     }
   }
@@ -104,6 +110,7 @@ export class HlsAudioEngine extends MediaElementAudioEngine {
   }
 
   protected override detachSourceUrl(): void {
+    this.rejectMetadataWait?.(new GAudioError('LOAD_ABORTED', 'HLS reload was interrupted by source removal'))
     this.activeUrl = undefined
     this.previousVariantId = undefined
     this.destroyHlsInstance()
@@ -134,11 +141,18 @@ export class HlsAudioEngine extends MediaElementAudioEngine {
       const abortController = new AbortController()
       const finish = (): void => {
         abortController.abort()
+        this.rejectMetadataWait = undefined
         resolve()
       }
       const fail = (): void => {
         abortController.abort()
+        this.rejectMetadataWait = undefined
         reject(new GAudioError('ADAPTIVE_STREAM_ERROR', 'HLS media metadata could not be restored'))
+      }
+      this.rejectMetadataWait = (error): void => {
+        abortController.abort()
+        this.rejectMetadataWait = undefined
+        reject(error)
       }
       this.audioElement.addEventListener('loadedmetadata', finish, {
         once: true,
@@ -211,7 +225,11 @@ export class HlsAudioEngine extends MediaElementAudioEngine {
 
     if (payload.fatal) {
       const errorCode = this.fatalErrorCode(payload.details)
-      this.events.emit('error', new GAudioError(errorCode, `HLS playback failed: ${payload.details}`, payload))
+      const error = new GAudioError(errorCode, `HLS playback failed: ${payload.details}`, payload)
+      this.events.emit('error', error)
+      this.publishedReloadError = error
+      this.rejectMetadataWait?.(error)
+      this.rejectActiveLoad(error)
     }
   }
 

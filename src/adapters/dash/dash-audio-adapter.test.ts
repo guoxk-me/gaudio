@@ -70,6 +70,7 @@ const dashEvents: MediaPlayerEvents = {
   FRAGMENT_LOADING_STARTED: 'fragmentLoadingStarted',
   MANIFEST_LOADED: 'manifestLoaded',
   QUALITY_CHANGE_RENDERED: 'qualityChangeRendered',
+  STREAM_INITIALIZED: 'streamInitialized',
 } as MediaPlayerEvents
 
 class FakeDashPlayer {
@@ -252,7 +253,7 @@ describe('dashAudioAdapter', () => {
       { id: 'audio-64', bandwidth: 64_000, codecs: 'mp4a.40.2' } as Representation,
       { id: 'audio-128', bandwidth: 128_000, codecs: 'mp4a.40.2' } as Representation,
     ]
-    dashPlayer.emit(dashEvents.MANIFEST_LOADED, { data: {} })
+    dashPlayer.emit(dashEvents.STREAM_INITIALIZED, { error: null, streamInfo: { id: 'stream-1' } })
     dashPlayer.emit(dashEvents.QUALITY_CHANGE_RENDERED, {
       mediaType: 'audio',
       oldRepresentation: dashPlayer.representations[0],
@@ -300,15 +301,30 @@ describe('dashAudioAdapter', () => {
     const errorCodes: string[] = []
     engine.on('error', error => errorCodes.push(error.code))
     const load = engine.load(new HttpAudioSource('/stream.mpd'))
+    const loadExpectation = expect(load).rejects.toMatchObject({ code: 'MANIFEST_ERROR' })
     await Promise.resolve()
 
     harness.dashPlayers[0].emit(dashEvents.ERROR, {
       error: 'manifestError',
       event: { id: 'parse', message: 'invalid manifest' },
     })
-    harness.audioElements[0].dispatchEvent(new Event('loadedmetadata'))
-    await load
+    await loadExpectation
 
     expect(errorCodes).toEqual(['MANIFEST_ERROR'])
+  })
+
+  it('rejects manifest download failures as fatal errors', async () => {
+    const harness = dashHarness()
+    const engine = harness.adapter.createEngine()
+    const load = engine.load(new HttpAudioSource('/stream.mpd'))
+    const loadExpectation = expect(load).rejects.toMatchObject({ code: 'MANIFEST_ERROR' })
+    await Promise.resolve()
+
+    harness.dashPlayers[0].emit(dashEvents.ERROR, {
+      error: 'download',
+      event: { id: 'manifest', url: '/stream.mpd' },
+    })
+
+    await loadExpectation
   })
 })

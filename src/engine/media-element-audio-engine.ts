@@ -234,6 +234,25 @@ export class MediaElementAudioEngine implements AudioEngine {
     this.audioElement.load()
   }
 
+  protected rejectActiveLoad(error: GAudioError): void {
+    const activeLoad = this.activeLoad
+    if (!activeLoad?.reject) {
+      return
+    }
+
+    // AI modified: vendor engines report fatal failures outside the media element error channel.
+    this.activeLoad = undefined
+    activeLoad.abortController?.abort()
+    const reject = activeLoad.reject
+    activeLoad.abortController = undefined
+    activeLoad.reject = undefined
+    this.closeLoadSource(activeLoad)
+    if (this.activeSource === activeLoad.source) {
+      this.activeSource = undefined
+    }
+    reject(error)
+  }
+
   private addMediaEventListeners(): void {
     this.audioElement.addEventListener('loadstart', this.handleLoadStart)
     this.audioElement.addEventListener('loadedmetadata', this.handleLoadedMetadata)

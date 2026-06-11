@@ -29,24 +29,34 @@ export class AudioPlayer {
 
     // AI modified: the router owns protocol engines only when callers do not inject a custom engine.
     this.engine = engine ?? new AudioEngineRouter({ adapters: options.adapters })
-    if (options.source) {
-      this.source = typeof options.source === 'string' || !('open' in options.source)
-        ? new HttpAudioSource(options.source)
-        : options.source
-    }
     this.shouldAutoplay = options.autoplay ?? false
 
-    this.engine.setPreload(options.preload ?? 'metadata')
-    // AI modified: disable engine-native autoplay so load() owns the observable playback attempt.
-    this.engine.setAutoplay(false)
-    this.engine.setMuted(options.muted ?? false)
-    this.engine.setLoop(options.loop ?? false)
-    this.setVolume(options.volume ?? 1)
-    this.setPlaybackRate(options.playbackRate ?? 1)
-    this.engine.setPreservesPitch(options.preservesPitch ?? true)
+    try {
+      if (options.source) {
+        this.source = typeof options.source === 'string' || !('open' in options.source)
+          ? new HttpAudioSource(options.source)
+          : options.source
+      }
 
-    // AI modified: derive public state from engine lifecycle events instead of method calls.
-    this.connectEngineEvents()
+      this.engine.setPreload(options.preload ?? 'metadata')
+      // AI modified: disable engine-native autoplay so load() owns the observable playback attempt.
+      this.engine.setAutoplay(false)
+      this.engine.setMuted(options.muted ?? false)
+      this.engine.setLoop(options.loop ?? false)
+      this.setVolume(options.volume ?? 1)
+      this.setPlaybackRate(options.playbackRate ?? 1)
+      this.engine.setPreservesPitch(options.preservesPitch ?? true)
+
+      // AI modified: derive public state from engine lifecycle events instead of method calls.
+      this.connectEngineEvents()
+    }
+    catch (error) {
+      // AI modified: failed construction must release adapters claimed by an internally owned router.
+      if (!engine) {
+        this.engine.dispose()
+      }
+      throw error
+    }
   }
 
   getState(): PlaybackState {

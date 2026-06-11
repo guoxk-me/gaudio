@@ -290,6 +290,15 @@ describe('audioPlayer', () => {
     expect(() => new AudioPlayer({ adapters: [adapter] }, engine)).toThrow(TypeError)
   })
 
+  it('releases adapter ownership when player construction fails', () => {
+    const adapter = new FakeHlsAdapter(new FakeAudioEngine())
+
+    expect(() => new AudioPlayer({ adapters: [adapter], volume: 2 })).toThrow(RangeError)
+
+    const player = new AudioPlayer({ adapters: [adapter] })
+    player.dispose()
+  })
+
   it('forwards adaptive events and uses the error event for fatal state changes', () => {
     const engine = new FakeAudioEngine()
     const player = new AudioPlayer({}, engine)
