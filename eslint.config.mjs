@@ -2,7 +2,11 @@ import antfu from '@antfu/eslint-config'
 
 export default antfu({
   ignores: [
+    '.turbo/**',
+    'apps/docs/.vitepress/dist/**',
+    'apps/docs/api/**',
     'dist/**',
-    'docs/superpowers/plans/**',
+    'packages/*/dist/**',
+    'project/plans/**',
   ],
 })
