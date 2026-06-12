@@ -12,7 +12,7 @@ export interface DemoFormatGroup {
 }
 
 export const demoTracks: DemoTrack[] = [
-  { id: 'generated-tone', title: 'Generated Tone', artist: 'gaudio docs' },
+  { id: 'pineapple-slice', title: 'Pineapple Slice Instrumental', artist: 'Unknown' },
 ]
 
 export const demoFormatGroups: DemoFormatGroup[] = [
@@ -20,6 +20,8 @@ export const demoFormatGroups: DemoFormatGroup[] = [
   { folder: 'wav', label: 'WAV', extension: '.wav', mimeType: 'audio/wav' },
   { folder: 'm4a', label: 'AAC (M4A)', extension: '.m4a', mimeType: 'audio/mp4' },
   { folder: 'ogg', label: 'Opus (OGG)', extension: '.ogg', mimeType: 'audio/ogg' },
+  { folder: 'hls', label: 'HLS', extension: '.m3u8', mimeType: 'application/vnd.apple.mpegurl' },
+  { folder: 'dash', label: 'DASH', extension: '.mpd', mimeType: 'application/dash+xml' },
 ]
 
 export function demoSampleUrl(formatFolder: string, trackId: string, extension: string): string {
