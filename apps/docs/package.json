@@ -1,0 +1,29 @@
+{
+  "name": "@gaudio/docs",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "api": "typedoc",
+    "build": "pnpm run api && vitepress build .",
+    "dev": "pnpm run api && vitepress dev .",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "typecheck": "vue-tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "dashjs": "^5.2.0",
+    "gaudio": "workspace:*",
+    "hls.js": "^1.6.16"
+  },
+  "devDependencies": {
+    "@types/node": "^25.9.3",
+    "typedoc": "^0.28.19",
+    "typedoc-plugin-markdown": "^4.12.0",
+    "typescript": "^6.0.3",
+    "vite": "^6.4.3",
+    "vitepress": "^1.6.4",
+    "vitest": "^4.1.8",
+    "vue": "^3.5.38",
+    "vue-tsc": "^3.3.4"
+  }
+}

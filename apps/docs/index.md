@@ -1,0 +1,23 @@
+---
+layout: home
+
+hero:
+  name: gaudio
+  text: Browser-first audio streaming
+  tagline: Typed media playback with optional HLS and DASH adapters.
+  actions:
+    - theme: brand
+      text: Get Started
+      link: /guide/getting-started
+    - theme: alt
+      text: Interactive Example
+      link: /examples/
+
+features:
+  - title: Stable core API
+    details: Control loading, playback, seeking, volume, rate, and media state through one typed player.
+  - title: Optional adaptive streaming
+    details: Add HLS or DASH support without loading vendor libraries in core-only applications.
+  - title: Browser-native lifecycle
+    details: Observe media readiness, buffering, seeking, adaptive variants, segments, and typed failures.
+---

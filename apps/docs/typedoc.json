@@ -1,0 +1,20 @@
+{
+  "$schema": "https://typedoc.org/schema.json",
+  "entryPoints": [
+    "../../packages/gaudio/src/index.ts",
+    "../../packages/gaudio/src/adapters/hls/index.ts",
+    "../../packages/gaudio/src/adapters/dash/index.ts"
+  ],
+  "plugin": [
+    "typedoc-plugin-markdown"
+  ],
+  "tsconfig": "../../packages/gaudio/tsconfig.json",
+  "out": "api",
+  "entryFileName": "index",
+  "readme": "none",
+  "cleanOutputDir": true,
+  "excludeInternal": true,
+  "intentionallyNotExported": [
+    "EventHandler"
+  ]
+}
