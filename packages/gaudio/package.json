@@ -1,0 +1,58 @@
+{
+  "name": "gaudio",
+  "type": "module",
+  "version": "0.4.0",
+  "description": "A browser-first TypeScript audio streaming library.",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    },
+    "./hls": {
+      "types": "./dist/hls.d.ts",
+      "import": "./dist/hls.js",
+      "require": "./dist/hls.cjs"
+    },
+    "./dash": {
+      "types": "./dist/dash.d.ts",
+      "import": "./dist/dash.js",
+      "require": "./dist/dash.cjs"
+    }
+  },
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "README.md",
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsdown",
+    "dev": "tsdown --watch",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "peerDependencies": {
+    "dashjs": "^5.2.0",
+    "hls.js": "^1.6.16"
+  },
+  "peerDependenciesMeta": {
+    "dashjs": {
+      "optional": true
+    },
+    "hls.js": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@types/node": "^25.9.3",
+    "dashjs": "^5.2.0",
+    "hls.js": "^1.6.16",
+    "tsdown": "^0.22.2",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.8"
+  }
+}
