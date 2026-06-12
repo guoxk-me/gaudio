@@ -93,7 +93,7 @@ Every DASH profile explicitly configures:
 - throughput measurement, audio automatic switching, unrestricted audio bitrate range, and conservative bandwidth safety;
 - MPD, initialization-segment, media-segment, index-segment, and other request timeouts, retry intervals, and retry counts;
 - small-gap jumping, large-gap jumping, seek repair, stall recovery, and blacklist expiry;
-- recent bitrate and media-selection caching, main-role prioritization, and lowest-startup-delay initial audio selection.
+- recent bitrate and media-selection caching and main-role prioritization, while retaining the vendor's initial audio-selection mode.
 
 The DASH preset differences are:
 

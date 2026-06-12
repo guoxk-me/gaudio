@@ -10,6 +10,8 @@
 
 ---
 
+## Tasks
+
 ### Task 1: Create the workspace orchestration layer
 
 **Files:**
@@ -18,7 +20,7 @@
 - Create: `turbo.json`
 - Modify: `.gitignore`
 
-- [ ] **Step 1: Replace the root package metadata with a private workspace package**
+- [x] **Step 1: Replace the root package metadata with a private workspace package**
 
 Use a private root package with scripts that delegate to Turbo:
 
@@ -45,7 +47,7 @@ Use a private root package with scripts that delegate to Turbo:
 
 `pnpm add -Dw turbo` in Step 5 adds the resolved Turbo version to this object.
 
-- [ ] **Step 2: Declare workspace package locations**
+- [x] **Step 2: Declare workspace package locations**
 
 Create `pnpm-workspace.yaml`:
 
@@ -55,7 +57,7 @@ packages:
   - packages/*
 ```
 
-- [ ] **Step 3: Configure Turbo task dependencies and outputs**
+- [x] **Step 3: Configure Turbo task dependencies and outputs**
 
 Create `turbo.json` with package builds preceding dependent builds, cached build outputs, uncached persistent development tasks, and independent lint/test/typecheck tasks:
 
@@ -85,17 +87,17 @@ Create `turbo.json` with package builds preceding dependent builds, cached build
 }
 ```
 
-- [ ] **Step 4: Ignore generated workspace outputs**
+- [x] **Step 4: Ignore generated workspace outputs**
 
 Ensure `.gitignore` contains `node_modules`, `.turbo`, `dist`, `apps/docs/.vitepress/cache`, `apps/docs/.vitepress/dist`, and generated `apps/docs/api` output.
 
-- [ ] **Step 5: Install the root Turborepo dependency**
+- [x] **Step 5: Install the root Turborepo dependency**
 
 Run: `pnpm add -Dw turbo`
 
 Expected: `package.json` and `pnpm-lock.yaml` contain Turbo, with no install errors.
 
-- [ ] **Step 6: Verify Turbo can discover the workspace configuration**
+- [x] **Step 6: Verify Turbo can discover the workspace configuration**
 
 Run: `pnpm exec turbo run lint --dry=json`
 
@@ -113,11 +115,11 @@ Expected: valid JSON describing the current root task graph. Package tasks are v
 - Modify: `eslint.config.mjs`
 - Test: `packages/gaudio/src/package-exports.test.ts`
 
-- [ ] **Step 1: Move existing library files without altering current source changes**
+- [x] **Step 1: Move existing library files without altering current source changes**
 
 Use filesystem moves so the existing TSDoc edits remain intact. Do not recreate or overwrite files under `src`.
 
-- [ ] **Step 2: Create the package manifest from the current npm metadata**
+- [x] **Step 2: Create the package manifest from the current npm metadata**
 
 Keep `name`, `version`, `description`, `sideEffects`, `exports`, `main`, `module`, `types`, `files`, peer dependencies, and optional peer metadata unchanged. Use package-local scripts:
 
@@ -135,19 +137,19 @@ Keep `name`, `version`, `description`, `sideEffects`, `exports`, `main`, `module
 
 Move TypeScript, tsdown, Vitest, `hls.js`, and `dashjs` development dependencies from the old root manifest into this package.
 
-- [ ] **Step 3: Keep package-relative tests valid**
+- [x] **Step 3: Keep package-relative tests valid**
 
 Run: `pnpm --filter gaudio test`
 
 Expected: existing tests pass from `packages/gaudio`; package export tests resolve the package root through `resolve(import.meta.dirname, '..')`.
 
-- [ ] **Step 4: Verify package type checking and build**
+- [x] **Step 4: Verify package type checking and build**
 
 Run: `pnpm --filter gaudio typecheck && pnpm --filter gaudio build`
 
 Expected: exit code 0 and `packages/gaudio/dist` contains ESM, CJS, source maps, and declarations for `index`, `hls`, and `dash`.
 
-- [ ] **Step 5: Inspect the publish payload**
+- [x] **Step 5: Inspect the publish payload**
 
 Run: `pnpm --filter gaudio pack --pack-destination /tmp/gaudio-pack`
 
@@ -159,17 +161,17 @@ Expected: the tarball contains `package/README.md`, `package/package.json`, and 
 - Move: `docs/superpowers/specs/*` to `project/specs/`
 - Move: `docs/superpowers/plans/*` to `project/plans/`
 
-- [ ] **Step 1: Move tracked and untracked internal records**
+- [x] **Step 1: Move tracked and untracked internal records**
 
 Move every existing design and plan, including the public API TSDoc records, while preserving file contents. Resolve duplicate destination names by keeping the already approved `project` file and moving only non-conflicting records.
 
-- [ ] **Step 2: Verify the old internal docs directory is gone**
+- [x] **Step 2: Verify the old internal docs directory is gone**
 
 Run: `find docs -maxdepth 3 -type f 2>/dev/null`
 
 Expected: no `docs/superpowers` files remain.
 
-- [ ] **Step 3: Verify all records are present under `project`**
+- [x] **Step 3: Verify all records are present under `project`**
 
 Run: `find project -maxdepth 2 -type f | sort`
 
@@ -190,17 +192,17 @@ Expected: all prior specs and plans plus this migration design and plan are list
 - Create: `apps/docs/docs.test.ts`
 - Modify: `eslint.config.mjs`
 
-- [ ] **Step 1: Write a failing documentation contract test**
+- [x] **Step 1: Write a failing documentation contract test**
 
 The test reads the docs manifest and VitePress config and asserts that the application is private, depends on `gaudio` through `workspace:*`, exposes `build`, `dev`, `typecheck`, `lint`, and `test`, generates API docs before VitePress build, and configures the GitHub Pages base path.
 
-- [ ] **Step 2: Run the contract test and verify failure**
+- [x] **Step 2: Run the contract test and verify failure**
 
 Run: `pnpm exec vitest run apps/docs/docs.test.ts`
 
 Expected: FAIL because the docs application files do not exist.
 
-- [ ] **Step 3: Create the docs package manifest**
+- [x] **Step 3: Create the docs package manifest**
 
 Use package name `@gaudio/docs`, `private: true`, `gaudio: workspace:*`, and scripts:
 
@@ -219,7 +221,7 @@ Use package name `@gaudio/docs`, `private: true`, `gaudio: workspace:*`, and scr
 
 Add VitePress, Vue, Vue TypeScript tooling, TypeDoc, `typedoc-plugin-markdown`, Vitest, and the optional adaptive peers required by examples.
 
-- [ ] **Step 4: Configure TypeDoc for public entry points**
+- [x] **Step 4: Configure TypeDoc for public entry points**
 
 Configure `typedoc.json` to read:
 
@@ -240,21 +242,21 @@ Configure `typedoc.json` to read:
 
 TypeDoc reads declarations to generate reference content, while runtime docs examples continue to import only package exports.
 
-- [ ] **Step 5: Configure VitePress navigation and Pages base**
+- [x] **Step 5: Configure VitePress navigation and Pages base**
 
 Use `process.env.DOCS_BASE ?? '/gaudio/'` for `base`. Add navigation for Guide, Examples, and API, plus sidebar entries for the initial guide pages.
 
-- [ ] **Step 6: Add handwritten guide pages**
+- [x] **Step 6: Add handwritten guide pages**
 
 Move the detailed README material into focused guides. Keep the package README concise and link to `/gaudio/`. Code examples must import from `gaudio`, `gaudio/hls`, and `gaudio/dash` only.
 
-- [ ] **Step 7: Install documentation dependencies**
+- [x] **Step 7: Install documentation dependencies**
 
 Run: `pnpm install`
 
 Expected: the lockfile contains separate importers for `.`, `apps/docs`, and `packages/gaudio`.
 
-- [ ] **Step 8: Run docs contract and API generation**
+- [x] **Step 8: Run docs contract and API generation**
 
 Run: `pnpm --filter @gaudio/docs test && pnpm --filter @gaudio/docs api`
 
@@ -271,17 +273,17 @@ Expected: the test passes and generated Markdown exists under `apps/docs/api` fo
 - Create: `apps/docs/examples/demo.test.ts`
 - Delete after migration: `demo/`
 
-- [ ] **Step 1: Write a failing example integration test**
+- [x] **Step 1: Write a failing example integration test**
 
 Assert that the example page wraps `AudioPlayerDemo` in `ClientOnly`, the component imports the composable locally, the composable imports only `gaudio` public entry points, and sample URLs include the VitePress base path.
 
-- [ ] **Step 2: Run the integration test and verify failure**
+- [x] **Step 2: Run the integration test and verify failure**
 
 Run: `pnpm --filter @gaudio/docs test`
 
 Expected: FAIL because the migrated example files do not exist.
 
-- [ ] **Step 3: Move and adapt the existing demo**
+- [x] **Step 3: Move and adapt the existing demo**
 
 Rename the component to `AudioPlayerDemo.vue`. Keep the existing controls and status behavior. Move player creation into the mounted client lifecycle so SSR import does not instantiate `Audio`, `document`, or vendor playback engines.
 
@@ -293,15 +295,15 @@ Add a concise nearby comment explaining the behavioral change:
 
 Dispose the mounted player in `onUnmounted` and guard control methods until initialization completes.
 
-- [ ] **Step 4: Make sample URLs base-aware**
+- [x] **Step 4: Make sample URLs base-aware**
 
 Use Vite's `import.meta.env.BASE_URL` when creating local audio URLs so both local `/` development and GitHub Pages `/gaudio/` deployment resolve assets correctly.
 
-- [ ] **Step 5: Reduce sample media size**
+- [x] **Step 5: Reduce sample media size**
 
 Use `ffmpeg` to create short representative clips under `apps/docs/public/audio/{mp3,wav,m4a,ogg}`. Retain one short track per format, update the catalog to match, and remove the original full-length duplicates after verifying output playback metadata.
 
-- [ ] **Step 6: Add the example page**
+- [x] **Step 6: Add the example page**
 
 Create `apps/docs/examples/index.md`:
 
@@ -317,7 +319,7 @@ import AudioPlayerDemo from './AudioPlayerDemo.vue'
 </script>
 ```
 
-- [ ] **Step 7: Verify SSR-safe production build**
+- [x] **Step 7: Verify SSR-safe production build**
 
 Run: `pnpm --filter gaudio build && pnpm --filter @gaudio/docs typecheck && pnpm --filter @gaudio/docs test && pnpm --filter @gaudio/docs build`
 
@@ -328,7 +330,7 @@ Expected: exit code 0; no `window is not defined`, `document is not defined`, or
 **Files:**
 - Create: `.github/workflows/docs.yml`
 
-- [ ] **Step 1: Add the Pages workflow**
+- [x] **Step 1: Add the Pages workflow**
 
 Configure pushes to `main`, manual dispatch, read-only contents, Pages write permission, and id-token write permission. Use `actions/checkout`, `pnpm/action-setup`, `actions/setup-node`, `actions/configure-pages`, `actions/upload-pages-artifact`, and `actions/deploy-pages`.
 
@@ -344,7 +346,7 @@ The build job runs:
 
 Upload `apps/docs/.vitepress/dist` as the Pages artifact.
 
-- [ ] **Step 2: Inspect workflow and base-path agreement**
+- [x] **Step 2: Inspect workflow and base-path agreement**
 
 Run: `rg -n "pages|apps/docs/.vitepress/dist|pnpm run build|/gaudio/" .github/workflows/docs.yml apps/docs/.vitepress/config.ts`
 
@@ -355,7 +357,7 @@ Expected: workflow output path and VitePress base configuration agree.
 **Files:**
 - Inspect: files introduced or moved in Tasks 1-6
 
-- [ ] **Step 1: Run all root quality gates**
+- [x] **Step 1: Run all root quality gates**
 
 Run:
 
@@ -368,23 +370,23 @@ pnpm run build
 
 Expected: every Turbo task succeeds for `gaudio` and `@gaudio/docs`.
 
-- [ ] **Step 2: Inspect generated package and API outputs**
+- [x] **Step 2: Inspect generated package and API outputs**
 
 Confirm TSDoc appears in representative `packages/gaudio/dist/*.d.ts` declarations and generated API Markdown documents `AudioPlayer`, adaptive adapter factories, events, options, defaults, and exceptions.
 
-- [ ] **Step 3: Run package payload verification again**
+- [x] **Step 3: Run package payload verification again**
 
 Run: `pnpm --filter gaudio pack --pack-destination /tmp/gaudio-pack-final`
 
 Expected: only package metadata, README, and `dist` are included.
 
-- [ ] **Step 4: Start the docs site and test it in a browser**
+- [x] **Step 4: Start the docs site and test it in a browser**
 
 Run: `pnpm run docs:dev`
 
 Open the reported local URL. Verify the home page, guide navigation, generated API navigation, interactive player load/play/pause/seek controls, and static audio requests. Stop the development tasks after verification.
 
-- [ ] **Step 5: Check repository state and scope**
+- [x] **Step 5: Check repository state and scope**
 
 Run: `git status --short && git diff --check`
 
