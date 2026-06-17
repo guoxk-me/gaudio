@@ -1,5 +1,4 @@
-import type { AudioProtocol, AudioSourceDescription } from '../types'
-import type { AudioSource, AudioStreamHandle } from './audio-source'
+import type { AudioProtocol, AudioSource, AudioSourceDescription, AudioStreamHandle } from './audio-source'
 
 /** URL-backed audio source used for strings and {@link AudioSourceDescription} values. */
 export class HttpAudioSource implements AudioSource {

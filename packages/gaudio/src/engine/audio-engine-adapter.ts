@@ -1,4 +1,4 @@
-import type { AdaptiveAudioProtocol } from '../types'
+import type { AdaptiveAudioProtocol } from '../adapters/adaptive-audio-types'
 import type { AudioEngine } from './audio-engine'
 
 /** Creates an engine for one adaptive streaming protocol. */

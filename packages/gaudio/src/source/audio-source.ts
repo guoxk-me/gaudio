@@ -1,4 +1,15 @@
-import type { AudioProtocol, AudioSourceDescription } from '../types'
+/** Identifies the transport or manifest protocol used by an audio source. */
+export type AudioProtocol = 'media' | 'hls' | 'dash'
+
+/** Describes a URL-backed audio source and optional protocol hints. */
+export interface AudioSourceDescription {
+  /** URL passed to the selected playback engine. */
+  url: string
+  /** Explicit protocol override for URLs that cannot be identified by MIME type or extension. */
+  protocol?: AudioProtocol
+  /** MIME type used for protocol selection and browser capability checks. */
+  mimeType?: string
+}
 
 /** Identifies the resource shape exposed by an {@link AudioSource}. */
 export type AudioSourceKind = 'url'

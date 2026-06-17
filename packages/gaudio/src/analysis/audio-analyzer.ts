@@ -1,6 +1,16 @@
 // @env browser
 
-import type { FrequencyDataOptions, WaveformDataOptions } from '../types'
+/** Configures frequency-domain samples returned by {@link AudioAnalyzer.getFrequencyData}. */
+export interface FrequencyDataOptions {
+  /** Number of frequency bins to return. Defaults to the analyzer node's `frequencyBinCount`. */
+  binCount?: number
+}
+
+/** Configures time-domain samples returned by {@link AudioAnalyzer.getWaveformData}. */
+export interface WaveformDataOptions {
+  /** Number of waveform samples to return. Defaults to the analyzer node's `fftSize`. */
+  sampleCount?: number
+}
 
 /** Provides byte-based frequency and waveform samples from a Web Audio graph. */
 export class AudioAnalyzer {

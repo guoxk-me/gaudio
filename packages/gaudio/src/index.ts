@@ -1,13 +1,4 @@
-export { AudioAnalyzer } from './analysis/audio-analyzer'
-export type { AudioEngine, AudioEngineEvents } from './engine/audio-engine'
-export type { AudioEngineAdapter } from './engine/audio-engine-adapter'
-export { MediaElementAudioEngine } from './engine/media-element-audio-engine'
-export { GAudioError } from './errors/errors'
-export { EventEmitter } from './events/event-emitter'
-export { AudioPlayer } from './player/audio-player'
-export type { AudioSource, AudioSourceInput, AudioSourceKind, AudioStreamHandle } from './source/audio-source'
-export { HttpAudioSource } from './source/http-audio-source'
-export { AdaptivePlaybackPreset } from './types'
+export { AdaptivePlaybackPreset } from './adapters/adaptive-audio-types'
 export type {
   AdaptiveAudioProtocol,
   AdaptiveManifestUpdate,
@@ -17,20 +8,34 @@ export type {
   AdaptiveStreamError,
   AdaptiveVariant,
   AdaptiveVariantUpdate,
+} from './adapters/adaptive-audio-types'
+export { AudioAnalyzer } from './analysis/audio-analyzer'
+export type {
+  FrequencyDataOptions,
+  WaveformDataOptions,
+} from './analysis/audio-analyzer'
+export type { AudioEngine, AudioEngineEvents } from './engine/audio-engine'
+export type { AudioEngineAdapter } from './engine/audio-engine-adapter'
+export type {
   AudioFormatSupport,
-  AudioPlayerEvents,
-  AudioPlayerOptions,
-  AudioProtocol,
-  AudioSourceDescription,
   BufferUpdate,
   DurationUpdate,
-  FrequencyDataOptions,
-  GAudioErrorCode,
   PlaybackRateUpdate,
-  PlaybackState,
   PreloadMode,
   TimeRange,
   TimeUpdate,
   VolumeUpdate,
-  WaveformDataOptions,
-} from './types'
+} from './engine/audio-engine-types'
+export { MediaElementAudioEngine } from './engine/media-element-audio-engine'
+export { GAudioError } from './errors/errors'
+export type { GAudioErrorCode } from './errors/errors'
+export { EventEmitter } from './events/event-emitter'
+export { AudioPlayer } from './player/audio-player'
+export type { AudioPlayerEvents } from './player/audio-player-events'
+export type { AudioPlayerOptions, PlaybackState } from './player/audio-player-options'
+export type { AudioSource, AudioSourceInput, AudioSourceKind, AudioStreamHandle } from './source/audio-source'
+export type {
+  AudioProtocol,
+  AudioSourceDescription,
+} from './source/audio-source'
+export { HttpAudioSource } from './source/http-audio-source'

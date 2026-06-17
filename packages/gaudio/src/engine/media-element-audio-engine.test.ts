@@ -1,84 +1,21 @@
+import type { GAudioErrorCode } from '../errors/errors'
 import type { AudioSource, AudioStreamHandle } from '../source/audio-source'
-import type { GAudioErrorCode, TimeRange } from '../types'
+import type { TimeRange } from './audio-engine-types'
 import { describe, expect, it } from 'vitest'
+import { FakeAudioElement, FakeTimeRanges } from '../test-support/fake-media'
 import { MediaElementAudioEngine } from './media-element-audio-engine'
-
-class FakeTimeRanges implements TimeRanges {
-  constructor(private readonly ranges: readonly TimeRange[]) {}
-
-  get length(): number {
-    return this.ranges.length
-  }
-
-  start(index: number): number {
-    const range = this.ranges[index]
-    if (!range) {
-      throw new DOMException('Index out of bounds', 'IndexSizeError')
-    }
-    return range.start
-  }
-
-  end(index: number): number {
-    const range = this.ranges[index]
-    if (!range) {
-      throw new DOMException('Index out of bounds', 'IndexSizeError')
-    }
-    return range.end
-  }
-}
-
-class FakeAudioElement extends EventTarget {
-  src = ''
-  preload = ''
-  volume = 1
-  muted = false
-  loop = false
-  autoplay = false
-  preservesPitch = true
-  playbackRate = 1
-  currentTime = 0
-  duration = 120
-  paused = true
-  ended = false
-  seeking = false
-  buffered: TimeRanges = new FakeTimeRanges([])
-  seekable: TimeRanges = new FakeTimeRanges([])
-  played: TimeRanges = new FakeTimeRanges([])
-  error: MediaError | null = null
-  loadCalls = 0
-  fastSeekCalls: number[] = []
-  fastSeek?: (seconds: number) => void
-
-  load(): void {
-    this.loadCalls += 1
-  }
-
-  async play(): Promise<void> {
-    this.paused = false
-  }
-
-  pause(): void {
-    this.paused = true
-  }
-
-  canPlayType(mimeType: string): CanPlayTypeResult {
-    return mimeType === 'audio/mpeg' ? 'probably' : ''
-  }
-
-  removeAttribute(name: string): void {
-    if (name === 'src') {
-      this.src = ''
-    }
-  }
-}
 
 class FakeAudioSource implements AudioSource {
   readonly kind = 'url'
   closeCalls = 0
+  openError?: Error
 
   constructor(readonly url: string) {}
 
   async open(): Promise<AudioStreamHandle> {
+    if (this.openError) {
+      throw this.openError
+    }
     return { url: this.url }
   }
 
@@ -215,6 +152,17 @@ describe('mediaElementEngine', () => {
     await expect(secondLoad).resolves.toBeUndefined()
     expect(firstSource.closeCalls).toBe(1)
     expect(audioElement.src).toBe('https://example.com/second.mp3')
+  })
+
+  it('closes the source immediately when opening fails', async () => {
+    const audioElement = new FakeAudioElement()
+    const engine = new MediaElementAudioEngine(audioElement as unknown as HTMLAudioElement)
+    const source = new FakeAudioSource('https://example.com/audio.mp3')
+    source.openError = new Error('open failed')
+
+    await expect(engine.load(source)).rejects.toThrow('open failed')
+
+    expect(source.closeCalls).toBe(1)
   })
 
   it('unloads the current source and removes event listeners on dispose', async () => {

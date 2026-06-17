@@ -45,7 +45,8 @@ export function dashVodDefaults(): MediaPlayerSettingClass {
       },
       scheduling: {
         defaultTimeout: 500,
-        scheduleWhilePaused: false,
+        // AI modified: load() waits for metadata before playback, so DASH must fetch while paused.
+        scheduleWhilePaused: true,
       },
       lastBitrateCachingInfo: {
         enabled: true,

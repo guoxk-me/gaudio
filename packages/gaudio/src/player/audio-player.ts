@@ -1,13 +1,9 @@
-import type { AudioEngine } from '../engine/audio-engine'
+import type { AudioEngine, AudioEngineEvents } from '../engine/audio-engine'
+import type { AudioFormatSupport, PreloadMode, TimeRange } from '../engine/audio-engine-types'
 import type { AudioSource, AudioSourceInput } from '../source/audio-source'
-import type {
-  AudioFormatSupport,
-  AudioPlayerEvents,
-  AudioPlayerOptions,
-  PlaybackState,
-  PreloadMode,
-  TimeRange,
-} from '../types'
+import type { AudioPlayerEvents } from './audio-player-events'
+import type { AudioPlayerOptions, PlaybackState } from './audio-player-options'
+import { audioEngineEventNames } from '../engine/audio-engine'
 import { AudioEngineRouter } from '../engine/audio-engine-router'
 import { GAudioError } from '../errors/errors'
 import { EventEmitter } from '../events/event-emitter'
@@ -385,46 +381,43 @@ export class AudioPlayer {
   }
 
   private connectEngineEvents(): void {
-    this.engine.on('loadstart', payload => this.events.emit('loadstart', payload))
-    this.engine.on('loadedmetadata', payload => this.events.emit('loadedmetadata', payload))
-    this.engine.on('canplay', payload => this.events.emit('canplay', payload))
-    this.engine.on('play', payload => this.events.emit('play', payload))
+    for (const eventName of audioEngineEventNames) {
+      switch (eventName) {
+        case 'playing':
+          this.engine.on(eventName, (payload) => {
+            this.setState('playing')
+            this.events.emit(eventName, payload)
+          })
+          break
+        case 'pause':
+          this.engine.on(eventName, (payload) => {
+            this.setState('paused')
+            this.events.emit(eventName, payload)
+          })
+          break
+        case 'waiting':
+          this.engine.on(eventName, (payload) => {
+            this.setState('buffering')
+            this.events.emit(eventName, payload)
+          })
+          break
+        case 'ended':
+          this.engine.on(eventName, (payload) => {
+            this.setState('ended')
+            this.events.emit(eventName, payload)
+          })
+          break
+        case 'error':
+          this.engine.on(eventName, error => this.publishError(error))
+          break
+        default:
+          this.forwardEngineEvent(eventName)
+      }
+    }
+  }
 
-    this.engine.on('playing', (payload) => {
-      this.setState('playing')
-      this.events.emit('playing', payload)
-    })
-
-    this.engine.on('pause', (payload) => {
-      this.setState('paused')
-      this.events.emit('pause', payload)
-    })
-
-    this.engine.on('waiting', (payload) => {
-      this.setState('buffering')
-      this.events.emit('waiting', payload)
-    })
-
-    this.engine.on('seeking', payload => this.events.emit('seeking', payload))
-    this.engine.on('seeked', payload => this.events.emit('seeked', payload))
-    this.engine.on('timeupdate', payload => this.events.emit('timeupdate', payload))
-    this.engine.on('durationchange', payload => this.events.emit('durationchange', payload))
-    this.engine.on('bufferupdate', payload => this.events.emit('bufferupdate', payload))
-    this.engine.on('volumechange', payload => this.events.emit('volumechange', payload))
-    this.engine.on('ratechange', payload => this.events.emit('ratechange', payload))
-    this.engine.on('adaptivechange', payload => this.events.emit('adaptivechange', payload))
-    this.engine.on('manifestloaded', payload => this.events.emit('manifestloaded', payload))
-    this.engine.on('variantchange', payload => this.events.emit('variantchange', payload))
-    this.engine.on('segmentloadstart', payload => this.events.emit('segmentloadstart', payload))
-    this.engine.on('segmentloaded', payload => this.events.emit('segmentloaded', payload))
-    this.engine.on('streamerror', payload => this.events.emit('streamerror', payload))
-
-    this.engine.on('ended', (payload) => {
-      this.setState('ended')
-      this.events.emit('ended', payload)
-    })
-
-    this.engine.on('error', error => this.publishError(error))
+  private forwardEngineEvent<EventName extends keyof AudioEngineEvents>(eventName: EventName): void {
+    this.engine.on(eventName, payload => this.events.emit(eventName, payload as AudioPlayerEvents[EventName]))
   }
 
   private publishError(error: GAudioError): void {

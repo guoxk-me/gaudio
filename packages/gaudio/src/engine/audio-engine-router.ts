@@ -1,12 +1,14 @@
 // @env browser
 
-import type { AudioSource } from '../source/audio-source'
-import type { AdaptiveAudioProtocol, AudioFormatSupport, AudioProtocol, PreloadMode, TimeRange } from '../types'
+import type { AdaptiveAudioProtocol } from '../adapters/adaptive-audio-types'
+import type { AudioProtocol, AudioSource } from '../source/audio-source'
 import type { AudioEngine, AudioEngineEvents } from './audio-engine'
 import type { AudioEngineAdapter } from './audio-engine-adapter'
+import type { AudioFormatSupport, PreloadMode, TimeRange } from './audio-engine-types'
 import { GAudioError } from '../errors/errors'
 import { EventEmitter } from '../events/event-emitter'
 import { resolveAudioProtocol } from '../source/audio-protocol'
+import { audioEngineEventNames } from './audio-engine'
 import { MediaElementAudioEngine } from './media-element-audio-engine'
 
 interface AudioEngineRouterOptions {
@@ -269,28 +271,9 @@ export class AudioEngineRouter implements AudioEngine {
       this.removeEngineListeners.push(removeListener)
     }
 
-    forward('loadstart')
-    forward('loadedmetadata')
-    forward('canplay')
-    forward('play')
-    forward('playing')
-    forward('pause')
-    forward('waiting')
-    forward('seeking')
-    forward('seeked')
-    forward('timeupdate')
-    forward('durationchange')
-    forward('bufferupdate')
-    forward('volumechange')
-    forward('ratechange')
-    forward('adaptivechange')
-    forward('manifestloaded')
-    forward('variantchange')
-    forward('segmentloadstart')
-    forward('segmentloaded')
-    forward('streamerror')
-    forward('ended')
-    forward('error')
+    for (const eventName of audioEngineEventNames) {
+      forward(eventName)
+    }
   }
 
   private removeActiveEngineListeners(): void {

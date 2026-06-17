@@ -10,7 +10,8 @@ import type {
   LevelSwitchedData,
   ManifestLoadedData,
 } from 'hls.js'
-import type { AdaptiveStreamError, GAudioErrorCode } from '../../types'
+import type { GAudioErrorCode } from '../../errors/errors'
+import type { AdaptiveStreamError } from '../adaptive-audio-types'
 import { ErrorTypes, Events } from 'hls.js'
 import { MediaElementAudioEngine } from '../../engine/media-element-audio-engine'
 import { GAudioError } from '../../errors/errors'

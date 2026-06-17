@@ -1,17 +1,18 @@
 // @env browser
 
 import type { AudioSource } from '../source/audio-source'
+import type { AudioEngine, AudioEngineEvents } from './audio-engine'
 import type {
   AudioFormatSupport,
-  GAudioErrorCode,
   PreloadMode,
   TimeRange,
-} from '../types'
-import type { AudioEngine, AudioEngineEvents } from './audio-engine'
+} from './audio-engine-types'
 import { GAudioError } from '../errors/errors'
 import { EventEmitter } from '../events/event-emitter'
+import { mediaElementError } from './media-element-errors'
+import { mediaTimeRanges } from './media-element-ranges'
 
-interface ActiveLoad {
+interface ActiveSourceSession {
   source: AudioSource
   isClosed: boolean
   abortController?: AbortController
@@ -24,8 +25,7 @@ export class MediaElementAudioEngine implements AudioEngine {
   protected readonly audioElement: HTMLAudioElement
   /** Event channel used to publish browser media lifecycle updates. */
   protected readonly events = new EventEmitter<AudioEngineEvents>()
-  private activeLoad?: ActiveLoad
-  private activeSource?: AudioSource
+  private activeSourceSession?: ActiveSourceSession
   private shouldSuppressPause = false
 
   /**
@@ -45,18 +45,28 @@ export class MediaElementAudioEngine implements AudioEngine {
    * @throws {@link GAudioError} When loading fails or is superseded by another load.
    */
   async load(source: AudioSource): Promise<void> {
-    this.cancelActiveLoad()
+    this.cancelActiveSourceSession()
 
-    const activeLoad: ActiveLoad = {
+    const activeSourceSession: ActiveSourceSession = {
       source,
       isClosed: false,
     }
-    this.activeLoad = activeLoad
-    this.activeSource = source
+    this.activeSourceSession = activeSourceSession
 
-    const streamHandle = await source.open()
+    let streamHandle
+    try {
+      streamHandle = await source.open()
+    }
+    catch (error) {
+      if (this.activeSourceSession === activeSourceSession) {
+        // AI modified: failed source opens must not leave stale sessions or leaked source resources.
+        this.activeSourceSession = undefined
+        this.closeSourceSession(activeSourceSession)
+      }
+      throw error
+    }
 
-    if (this.activeLoad !== activeLoad) {
+    if (this.activeSourceSession !== activeSourceSession) {
       throw this.loadAbortedError()
     }
 
@@ -64,21 +74,21 @@ export class MediaElementAudioEngine implements AudioEngine {
 
     await new Promise<void>((resolve, reject) => {
       const abortController = new AbortController()
-      activeLoad.abortController = abortController
-      activeLoad.reject = reject
+      activeSourceSession.abortController = abortController
+      activeSourceSession.reject = reject
 
       const handleReady = (): void => {
         abortController.abort()
-        activeLoad.abortController = undefined
-        activeLoad.reject = undefined
+        activeSourceSession.abortController = undefined
+        activeSourceSession.reject = undefined
         resolve()
       }
 
       const handleLoadError = (): void => {
-        const error = this.mediaElementError()
+        const error = mediaElementError(this.audioElement)
         abortController.abort()
-        activeLoad.abortController = undefined
-        activeLoad.reject = undefined
+        activeSourceSession.abortController = undefined
+        activeSourceSession.reject = undefined
         reject(error)
       }
 
@@ -95,10 +105,9 @@ export class MediaElementAudioEngine implements AudioEngine {
 
   /** Cancels loading, pauses playback, and detaches the current source. */
   unload(): void {
-    this.cancelActiveLoad()
+    this.cancelActiveSourceSession()
     this.pauseWithoutEvent()
     this.detachSourceUrl()
-    this.activeSource = undefined
   }
 
   /**
@@ -248,17 +257,17 @@ export class MediaElementAudioEngine implements AudioEngine {
 
   /** @returns Buffered media ranges in seconds. */
   getBufferedRanges(): readonly TimeRange[] {
-    return this.timeRanges(this.audioElement.buffered)
+    return mediaTimeRanges(this.audioElement.buffered)
   }
 
   /** @returns Seekable media ranges in seconds. */
   getSeekableRanges(): readonly TimeRange[] {
-    return this.timeRanges(this.audioElement.seekable)
+    return mediaTimeRanges(this.audioElement.seekable)
   }
 
   /** @returns Media ranges played during the current source lifecycle. */
   getPlayedRanges(): readonly TimeRange[] {
-    return this.timeRanges(this.audioElement.played)
+    return mediaTimeRanges(this.audioElement.played)
   }
 
   /**
@@ -314,21 +323,18 @@ export class MediaElementAudioEngine implements AudioEngine {
    * @param error Error used to reject the pending load.
    */
   protected rejectActiveLoad(error: GAudioError): void {
-    const activeLoad = this.activeLoad
-    if (!activeLoad?.reject) {
+    const activeSourceSession = this.activeSourceSession
+    if (!activeSourceSession?.reject) {
       return
     }
 
     // AI modified: vendor engines report fatal failures outside the media element error channel.
-    this.activeLoad = undefined
-    activeLoad.abortController?.abort()
-    const reject = activeLoad.reject
-    activeLoad.abortController = undefined
-    activeLoad.reject = undefined
-    this.closeLoadSource(activeLoad)
-    if (this.activeSource === activeLoad.source) {
-      this.activeSource = undefined
-    }
+    this.activeSourceSession = undefined
+    activeSourceSession.abortController?.abort()
+    const reject = activeSourceSession.reject
+    activeSourceSession.abortController = undefined
+    activeSourceSession.reject = undefined
+    this.closeSourceSession(activeSourceSession)
     reject(error)
   }
 
@@ -370,35 +376,27 @@ export class MediaElementAudioEngine implements AudioEngine {
     this.audioElement.removeEventListener('error', this.handleError)
   }
 
-  private cancelActiveLoad(): void {
-    const activeLoad = this.activeLoad
-    if (!activeLoad) {
-      if (this.activeSource) {
-        void this.activeSource.close()
-        this.activeSource = undefined
-      }
+  private cancelActiveSourceSession(): void {
+    const activeSourceSession = this.activeSourceSession
+    if (!activeSourceSession) {
       return
     }
 
-    this.activeLoad = undefined
-    activeLoad.abortController?.abort()
-    activeLoad.reject?.(this.loadAbortedError())
-    activeLoad.abortController = undefined
-    activeLoad.reject = undefined
-    this.closeLoadSource(activeLoad)
-
-    if (this.activeSource === activeLoad.source) {
-      this.activeSource = undefined
-    }
+    this.activeSourceSession = undefined
+    activeSourceSession.abortController?.abort()
+    activeSourceSession.reject?.(this.loadAbortedError())
+    activeSourceSession.abortController = undefined
+    activeSourceSession.reject = undefined
+    this.closeSourceSession(activeSourceSession)
   }
 
-  private closeLoadSource(activeLoad: ActiveLoad): void {
-    if (activeLoad.isClosed) {
+  private closeSourceSession(activeSourceSession: ActiveSourceSession): void {
+    if (activeSourceSession.isClosed) {
       return
     }
 
-    activeLoad.isClosed = true
-    void activeLoad.source.close()
+    activeSourceSession.isClosed = true
+    void activeSourceSession.source.close()
   }
 
   private pauseWithoutEvent(): void {
@@ -406,17 +404,6 @@ export class MediaElementAudioEngine implements AudioEngine {
       this.shouldSuppressPause = true
     }
     this.audioElement.pause()
-  }
-
-  private timeRanges(timeRanges: TimeRanges): readonly TimeRange[] {
-    const ranges: TimeRange[] = []
-    for (let index = 0; index < timeRanges.length; index += 1) {
-      ranges.push({
-        start: timeRanges.start(index),
-        end: timeRanges.end(index),
-      })
-    }
-    return ranges
   }
 
   private timeUpdate(): { currentTime: number, duration: number } {
@@ -428,27 +415,6 @@ export class MediaElementAudioEngine implements AudioEngine {
 
   private loadAbortedError(): GAudioError {
     return new GAudioError('LOAD_ABORTED', 'Audio load was superseded by a newer source')
-  }
-
-  private mediaElementError(): GAudioError {
-    const mediaError = this.audioElement.error
-    const errorCode: GAudioErrorCode = mediaError ? this.errorCode(mediaError.code) : 'ENGINE_ERROR'
-    return new GAudioError(errorCode, mediaError?.message || 'Audio element reported a playback error', mediaError ?? undefined)
-  }
-
-  private errorCode(mediaErrorCode: number): GAudioErrorCode {
-    switch (mediaErrorCode) {
-      case 1:
-        return 'LOAD_ABORTED'
-      case 2:
-        return 'NETWORK_ERROR'
-      case 3:
-        return 'DECODE_FAILED'
-      case 4:
-        return 'UNSUPPORTED_FORMAT'
-      default:
-        return 'ENGINE_ERROR'
-    }
   }
 
   private readonly handleLoadStart = (): void => {
@@ -519,6 +485,6 @@ export class MediaElementAudioEngine implements AudioEngine {
   }
 
   private readonly handleError = (): void => {
-    this.events.emit('error', this.mediaElementError())
+    this.events.emit('error', mediaElementError(this.audioElement))
   }
 }

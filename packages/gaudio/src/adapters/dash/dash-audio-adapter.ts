@@ -4,7 +4,7 @@ import type { MediaPlayerClass, MediaPlayerEvents, MediaPlayerSettingClass } fro
 import type { AudioEngine } from '../../engine/audio-engine'
 import type { AudioEngineAdapter } from '../../engine/audio-engine-adapter'
 import { GAudioError } from '../../errors/errors'
-import { AdaptivePlaybackPreset } from '../../types'
+import { AdaptivePlaybackPreset } from '../adaptive-audio-types'
 import { settingsWithChanges } from '../settings-with-changes'
 import { DashAudioEngine } from './dash-audio-engine'
 import { dashSettingsForPreset } from './dash-playback-presets'

@@ -1,183 +1,28 @@
-import type { AudioEngine, AudioEngineEvents } from '../engine/audio-engine'
+import type { AudioEngine } from '../engine/audio-engine'
 import type { AudioEngineAdapter } from '../engine/audio-engine-adapter'
-import type { AudioSource } from '../source/audio-source'
-import type { AudioFormatSupport, PreloadMode, TimeRange } from '../types'
 import { describe, expect, it } from 'vitest'
 import { GAudioError } from '../errors/errors'
-import { EventEmitter } from '../events/event-emitter'
+import { FakeAudioEngine } from '../test-support/fake-audio-engine'
 import { AudioPlayer } from './audio-player'
-
-class FakeAudioEngine implements AudioEngine {
-  private readonly events = new EventEmitter<AudioEngineEvents>()
-  private currentTime = 0
-  private duration = 120
-  private preload: PreloadMode = 'metadata'
-  private autoplay = false
-  private muted = false
-  private looping = false
-  private preservesPitch = true
-  private seeking = false
-  readonly loadedSources: AudioSource[] = []
-  readonly bufferedRanges: TimeRange[] = [{ start: 0, end: 30 }]
-  readonly seekableRanges: TimeRange[] = [{ start: 0, end: 120 }]
-  readonly playedRanges: TimeRange[] = [{ start: 5, end: 25 }]
-  readonly fastSeekCalls: number[] = []
-  isPlaying = false
-  isUnloaded = false
-  playCalls = 0
-  playError?: GAudioError
-  volume = 1
-  playbackRate = 1
-
-  async load(source: AudioSource): Promise<void> {
-    this.loadedSources.push(source)
-    this.isUnloaded = false
-  }
-
-  unload(): void {
-    this.isUnloaded = true
-    this.isPlaying = false
-  }
-
-  async play(): Promise<void> {
-    this.playCalls += 1
-    if (this.playError) {
-      throw this.playError
-    }
-    this.isPlaying = true
-  }
-
-  pause(): void {
-    this.isPlaying = false
-  }
-
-  stop(): void {
-    this.currentTime = 0
-    this.isPlaying = false
-  }
-
-  async seek(seconds: number): Promise<void> {
-    this.currentTime = seconds
-  }
-
-  async fastSeek(seconds: number): Promise<void> {
-    this.fastSeekCalls.push(seconds)
-    this.currentTime = seconds
-  }
-
-  setPreload(preload: PreloadMode): void {
-    this.preload = preload
-  }
-
-  getPreload(): PreloadMode {
-    return this.preload
-  }
-
-  setAutoplay(shouldAutoplay: boolean): void {
-    this.autoplay = shouldAutoplay
-  }
-
-  getAutoplay(): boolean {
-    return this.autoplay
-  }
-
-  setVolume(volume: number): void {
-    this.volume = volume
-  }
-
-  getVolume(): number {
-    return this.volume
-  }
-
-  setMuted(isMuted: boolean): void {
-    this.muted = isMuted
-  }
-
-  isMuted(): boolean {
-    return this.muted
-  }
-
-  setLoop(isLooping: boolean): void {
-    this.looping = isLooping
-  }
-
-  isLooping(): boolean {
-    return this.looping
-  }
-
-  setPlaybackRate(rate: number): void {
-    this.playbackRate = rate
-  }
-
-  getPlaybackRate(): number {
-    return this.playbackRate
-  }
-
-  setPreservesPitch(shouldPreservePitch: boolean): void {
-    this.preservesPitch = shouldPreservePitch
-  }
-
-  getPreservesPitch(): boolean {
-    return this.preservesPitch
-  }
-
-  getCurrentTime(): number {
-    return this.currentTime
-  }
-
-  getDuration(): number {
-    return this.duration
-  }
-
-  isPaused(): boolean {
-    return !this.isPlaying
-  }
-
-  isEnded(): boolean {
-    return false
-  }
-
-  isSeeking(): boolean {
-    return this.seeking
-  }
-
-  getBufferedRanges(): readonly TimeRange[] {
-    return this.bufferedRanges
-  }
-
-  getSeekableRanges(): readonly TimeRange[] {
-    return this.seekableRanges
-  }
-
-  getPlayedRanges(): readonly TimeRange[] {
-    return this.playedRanges
-  }
-
-  canPlayType(mimeType: string): AudioFormatSupport {
-    return mimeType === 'audio/mpeg' ? 'probably' : ''
-  }
-
-  on<EventName extends keyof AudioEngineEvents>(
-    eventName: EventName,
-    handler: (payload: AudioEngineEvents[EventName]) => void,
-  ): () => void {
-    return this.events.on(eventName, handler)
-  }
-
-  emit<EventName extends keyof AudioEngineEvents>(
-    eventName: EventName,
-    payload: AudioEngineEvents[EventName],
-  ): void {
-    this.events.emit(eventName, payload)
-  }
-
-  dispose(): void {
-    this.events.clear()
-  }
-}
 
 class FakeHlsAdapter implements AudioEngineAdapter {
   readonly protocol = 'hls'
+  createCalls = 0
+
+  constructor(private readonly engine: AudioEngine) {}
+
+  createEngine(): AudioEngine {
+    this.createCalls += 1
+    return this.engine
+  }
+
+  isSupported(): boolean {
+    return true
+  }
+}
+
+class FakeDashAdapter implements AudioEngineAdapter {
+  readonly protocol = 'dash'
   createCalls = 0
 
   constructor(private readonly engine: AudioEngine) {}
@@ -281,6 +126,27 @@ describe('audioPlayer', () => {
       url: 'https://example.com/stream?id=1',
       protocol: 'hls',
     })
+  })
+
+  it('switches between HLS and DASH sources through the registered adapters', async () => {
+    const hlsEngine = new FakeAudioEngine()
+    const dashEngine = new FakeAudioEngine()
+    const hlsAdapter = new FakeHlsAdapter(hlsEngine)
+    const dashAdapter = new FakeDashAdapter(dashEngine)
+    const player = new AudioPlayer({ adapters: [hlsAdapter, dashAdapter] })
+
+    player.setSource({ url: 'https://example.com/audio.m3u8', protocol: 'hls' })
+    await player.load()
+    player.setSource({ url: 'https://example.com/audio.mpd', protocol: 'dash' })
+    await player.load()
+
+    expect(hlsAdapter.createCalls).toBe(1)
+    expect(dashAdapter.createCalls).toBe(1)
+    expect(hlsEngine.loadedSources).toHaveLength(1)
+    expect(dashEngine.loadedSources).toHaveLength(1)
+    expect(hlsEngine.isUnloaded).toBe(true)
+    expect(hlsEngine.disposeCalls).toBe(1)
+    expect(player.getState()).toBe('ready')
   })
 
   it('rejects adapters combined with an explicit custom engine', () => {

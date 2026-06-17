@@ -5,71 +5,9 @@ import type { HlsAdapterConfig } from './hls-audio-adapter'
 import { ErrorDetails, ErrorTypes, Events } from 'hls.js'
 import { describe, expect, it } from 'vitest'
 import { HttpAudioSource } from '../../source/http-audio-source'
-import { AdaptivePlaybackPreset } from '../../types'
+import { FakeAudioElement } from '../../test-support/fake-media'
+import { AdaptivePlaybackPreset } from '../adaptive-audio-types'
 import { HlsAudioAdapterImpl } from './hls-audio-adapter'
-
-class FakeTimeRanges implements TimeRanges {
-  get length(): number {
-    return 0
-  }
-
-  start(_index: number): number {
-    throw new DOMException('Index out of bounds', 'IndexSizeError')
-  }
-
-  end(_index: number): number {
-    throw new DOMException('Index out of bounds', 'IndexSizeError')
-  }
-}
-
-class FakeAudioElement extends EventTarget {
-  src = ''
-  preload = 'metadata'
-  volume = 1
-  muted = false
-  loop = false
-  autoplay = false
-  preservesPitch = true
-  playbackRate = 1
-  currentTime = 0
-  duration = 120
-  paused = true
-  ended = false
-  seeking = false
-  buffered: TimeRanges = new FakeTimeRanges()
-  seekable: TimeRanges = new FakeTimeRanges()
-  played: TimeRanges = new FakeTimeRanges()
-  error: MediaError | null = null
-  loadCalls = 0
-  playCalls = 0
-
-  constructor(private readonly nativeHlsSupport: CanPlayTypeResult = '') {
-    super()
-  }
-
-  load(): void {
-    this.loadCalls += 1
-  }
-
-  async play(): Promise<void> {
-    this.playCalls += 1
-    this.paused = false
-  }
-
-  pause(): void {
-    this.paused = true
-  }
-
-  canPlayType(mimeType: string): CanPlayTypeResult {
-    return mimeType.includes('mpegurl') ? this.nativeHlsSupport : ''
-  }
-
-  removeAttribute(name: string): void {
-    if (name === 'src') {
-      this.src = ''
-    }
-  }
-}
 
 type HlsListener = (event: Events, payload: unknown) => void
 
@@ -128,7 +66,7 @@ function adapterHarness(options: {
     preset: options.preset,
   }, {
     audioElementFactory: () => {
-      const audioElement = new FakeAudioElement(options.nativeSupport)
+      const audioElement = new FakeAudioElement({ nativeHlsSupport: options.nativeSupport })
       audioElements.push(audioElement)
       return audioElement as unknown as HTMLAudioElement
     },

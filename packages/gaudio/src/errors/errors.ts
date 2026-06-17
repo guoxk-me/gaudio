@@ -1,4 +1,17 @@
-import type { GAudioErrorCode } from '../types'
+/** Identifies a failure reported by gaudio. */
+export type GAudioErrorCode
+  = | 'SOURCE_UNAVAILABLE'
+    | 'ADAPTER_UNAVAILABLE'
+    | 'PROTOCOL_UNSUPPORTED'
+    | 'MANIFEST_ERROR'
+    | 'SEGMENT_ERROR'
+    | 'ADAPTIVE_STREAM_ERROR'
+    | 'LOAD_ABORTED'
+    | 'DECODE_FAILED'
+    | 'PLAYBACK_BLOCKED'
+    | 'UNSUPPORTED_FORMAT'
+    | 'NETWORK_ERROR'
+    | 'ENGINE_ERROR'
 
 /** Error type used for loading, playback, and adaptive streaming failures. */
 export class GAudioError extends Error {

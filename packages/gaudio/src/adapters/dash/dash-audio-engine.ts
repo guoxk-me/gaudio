@@ -10,7 +10,8 @@ import type {
   Representation,
   StreamInitializedEvent,
 } from 'dashjs'
-import type { AdaptiveStreamError, GAudioErrorCode } from '../../types'
+import type { GAudioErrorCode } from '../../errors/errors'
+import type { AdaptiveStreamError } from '../adaptive-audio-types'
 import { MediaElementAudioEngine } from '../../engine/media-element-audio-engine'
 import { GAudioError } from '../../errors/errors'
 
@@ -60,7 +61,11 @@ export class DashAudioEngine extends MediaElementAudioEngine {
   }
 
   protected override attachSourceUrl(url: string): void {
-    this.activeUrl = url
+    // AI modified: dash.js CMCD code expects an absolute URL even when callers pass app-relative paths.
+    const playbackUrl = globalThis.location === undefined
+      ? url
+      : new URL(url, globalThis.location.href).href
+    this.activeUrl = playbackUrl
     const dashPlayer = this.createDashPlayer()
     this.dashPlayer = dashPlayer
     this.onDashInstanceChange(dashPlayer)
@@ -70,7 +75,7 @@ export class DashAudioEngine extends MediaElementAudioEngine {
     dashPlayer.on(this.dashEvents.FRAGMENT_LOADING_COMPLETED, this.handleFragmentLoadingCompleted)
     dashPlayer.on(this.dashEvents.ERROR, this.handleDashError)
     dashPlayer.updateSettings(this.settings)
-    dashPlayer.initialize(this.audioElement, url, false)
+    dashPlayer.initialize(this.audioElement, playbackUrl, false)
     this.events.emit('adaptivechange', {
       protocol: 'dash',
       implementation: 'dash.js',

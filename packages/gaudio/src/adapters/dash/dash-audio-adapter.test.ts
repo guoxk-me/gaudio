@@ -7,61 +7,9 @@ import type {
 import type { AudioEngineEvents } from '../../engine/audio-engine'
 import { describe, expect, it } from 'vitest'
 import { HttpAudioSource } from '../../source/http-audio-source'
-import { AdaptivePlaybackPreset } from '../../types'
+import { FakeAudioElement } from '../../test-support/fake-media'
+import { AdaptivePlaybackPreset } from '../adaptive-audio-types'
 import { DashAudioAdapterImpl } from './dash-audio-adapter'
-
-class FakeTimeRanges implements TimeRanges {
-  get length(): number {
-    return 0
-  }
-
-  start(_index: number): number {
-    throw new DOMException('Index out of bounds', 'IndexSizeError')
-  }
-
-  end(_index: number): number {
-    throw new DOMException('Index out of bounds', 'IndexSizeError')
-  }
-}
-
-class FakeAudioElement extends EventTarget {
-  src = ''
-  preload = 'metadata'
-  volume = 1
-  muted = false
-  loop = false
-  autoplay = false
-  preservesPitch = true
-  playbackRate = 1
-  currentTime = 0
-  duration = 120
-  paused = true
-  ended = false
-  seeking = false
-  buffered: TimeRanges = new FakeTimeRanges()
-  seekable: TimeRanges = new FakeTimeRanges()
-  played: TimeRanges = new FakeTimeRanges()
-  error: MediaError | null = null
-
-  load(): void {}
-  async play(): Promise<void> {
-    this.paused = false
-  }
-
-  pause(): void {
-    this.paused = true
-  }
-
-  canPlayType(_mimeType: string): CanPlayTypeResult {
-    return ''
-  }
-
-  removeAttribute(name: string): void {
-    if (name === 'src') {
-      this.src = ''
-    }
-  }
-}
 
 type DashListener = (payload: unknown) => void
 
@@ -174,7 +122,7 @@ describe('dashAudioAdapter', () => {
             bufferPruningInterval,
           },
           scheduling: {
-            scheduleWhilePaused: false,
+            scheduleWhilePaused: true,
           },
           abr: {
             throughput: {
@@ -231,7 +179,7 @@ describe('dashAudioAdapter', () => {
           stallSeek: 0.1,
           seekOffset: 0,
         },
-        scheduling: { defaultTimeout: 500, scheduleWhilePaused: false },
+        scheduling: { defaultTimeout: 500, scheduleWhilePaused: true },
         lastBitrateCachingInfo: { enabled: true, ttl: 360_000 },
         lastMediaSettingsCachingInfo: { enabled: true, ttl: 360_000 },
         saveLastMediaSettingsForCurrentStreamingSession: true,
@@ -302,7 +250,7 @@ describe('dashAudioAdapter', () => {
           bufferTimeAtTopQualityLongForm: 60,
         },
         scheduling: {
-          scheduleWhilePaused: false,
+          scheduleWhilePaused: true,
         },
       },
     })

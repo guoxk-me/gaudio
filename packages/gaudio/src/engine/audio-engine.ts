@@ -1,11 +1,13 @@
-import type { GAudioError } from '../errors/errors'
-import type { AudioSource } from '../source/audio-source'
 import type {
   AdaptiveManifestUpdate,
   AdaptivePlaybackInfo,
   AdaptiveSegmentUpdate,
   AdaptiveStreamError,
   AdaptiveVariantUpdate,
+} from '../adapters/adaptive-audio-types'
+import type { GAudioError } from '../errors/errors'
+import type { AudioSource } from '../source/audio-source'
+import type {
   AudioFormatSupport,
   BufferUpdate,
   DurationUpdate,
@@ -14,7 +16,7 @@ import type {
   TimeRange,
   TimeUpdate,
   VolumeUpdate,
-} from '../types'
+} from './audio-engine-types'
 
 /** Maps low-level engine events to the payload delivered to listeners. */
 export interface AudioEngineEvents {
@@ -63,6 +65,32 @@ export interface AudioEngineEvents {
   /** Emitted when loading or playback fails. */
   error: GAudioError
 }
+
+// AI modified: shared event names keep router and player forwarding aligned with the event contract.
+export const audioEngineEventNames = [
+  'loadstart',
+  'loadedmetadata',
+  'canplay',
+  'play',
+  'playing',
+  'pause',
+  'waiting',
+  'seeking',
+  'seeked',
+  'timeupdate',
+  'durationchange',
+  'bufferupdate',
+  'volumechange',
+  'ratechange',
+  'adaptivechange',
+  'manifestloaded',
+  'variantchange',
+  'segmentloadstart',
+  'segmentloaded',
+  'streamerror',
+  'ended',
+  'error',
+] as const satisfies readonly (keyof AudioEngineEvents)[]
 
 /** Playback engine contract used by {@link AudioPlayer} and adaptive adapters. */
 export interface AudioEngine {
