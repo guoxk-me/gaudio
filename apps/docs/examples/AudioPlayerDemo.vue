@@ -1,22 +1,30 @@
 <script setup lang="ts">
+import { useData } from 'vitepress'
+import { computed } from 'vue'
+import { demoLocaleForLang, demoText } from './demo-i18n'
+import DemoCapabilities from './DemoCapabilities.vue'
 import DemoCatalog from './DemoCatalog.vue'
 import DemoControls from './DemoControls.vue'
 import DemoStatus from './DemoStatus.vue'
 import { useGaudioDemo } from './use-gaudio-demo'
 
+const { lang } = useData()
 const demo = useGaudioDemo()
+// AI modified: keep demo UI bilingual while sharing the same playback implementation.
+const text = computed(() => demoText[demoLocaleForLang(lang.value)])
 </script>
 
 <template>
   <div class="gaudio-demo">
     <p class="gaudio-demo__intro">
-      Load the bundled samples or provide an external media, HLS, or DASH URL.
+      {{ text.intro }}
     </p>
-    <DemoCatalog :demo="demo" />
+    <DemoCatalog :demo="demo" :text="text" />
     <div class="gaudio-demo__workspace">
-      <DemoControls :demo="demo" />
-      <DemoStatus :demo="demo" />
+      <DemoControls :demo="demo" :text="text" />
+      <DemoStatus :demo="demo" :text="text" />
     </div>
+    <DemoCapabilities :demo="demo" :text="text" />
   </div>
 </template>
 

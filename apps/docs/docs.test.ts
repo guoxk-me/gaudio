@@ -1,4 +1,4 @@
-import { readFile } from 'node:fs/promises'
+import { readdir, readFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
@@ -29,6 +29,36 @@ describe('documentation application', () => {
     expect(packageJson.scripts).toHaveProperty('test')
     expect(packageJson.scripts).toHaveProperty('typecheck')
     expect(vitePressConfig).toContain('process.env.DOCS_BASE ?? \'/gaudio/\'')
+    expect(vitePressConfig).toContain('locales:')
+    expect(vitePressConfig).toContain('label: \'English\'')
+    expect(vitePressConfig).toContain('label: \'简体中文\'')
+    expect(vitePressConfig).toContain('link: \'/zh/\'')
+    expect(vitePressConfig).not.toContain('Migration')
+    expect(vitePressConfig).not.toContain('/guide/migration')
     expect(typeDocConfig.entryFileName).toBe('index')
+  })
+
+  it('ships bilingual guide pages without migration documentation', async () => {
+    const [englishGuideFiles, chineseGuideFiles, englishHome, chineseHome] = await Promise.all([
+      readdir(resolve(docsRoot, 'guide')),
+      readdir(resolve(docsRoot, 'zh/guide')),
+      readFile(resolve(docsRoot, 'index.md'), 'utf8'),
+      readFile(resolve(docsRoot, 'zh/index.md'), 'utf8'),
+    ])
+
+    expect(englishGuideFiles).not.toContain('migration.md')
+    expect(chineseGuideFiles).not.toContain('migration.md')
+    expect(englishGuideFiles).toEqual(expect.arrayContaining([
+      'getting-started.md',
+      'adaptive-playback.md',
+      'events.md',
+    ]))
+    expect(chineseGuideFiles).toEqual(expect.arrayContaining([
+      'getting-started.md',
+      'adaptive-playback.md',
+      'events.md',
+    ]))
+    expect(englishHome).toContain('Pre-release')
+    expect(chineseHome).toContain('预发布')
   })
 })

@@ -1,8 +1,10 @@
 <script setup lang="ts">
+import type { DemoText } from './demo-i18n'
 import type { GaudioDemo } from './use-gaudio-demo'
 
 const props = defineProps<{
   demo: GaudioDemo
+  text: DemoText
 }>()
 
 const {
@@ -32,6 +34,7 @@ const {
   setVolume,
   shouldAutoplay,
   shouldPreservePitch,
+  sourceMode,
   sourceUrl,
   stop,
   volume,
@@ -39,19 +42,19 @@ const {
 </script>
 
 <template>
-  <section class="controls" aria-label="Audio player controls">
+  <section class="controls" :aria-label="text.controls.ariaLabel">
     <header class="controls__summary">
       <strong>{{ activeSampleLabel }}</strong>
       <span>{{ playerState }}</span>
     </header>
 
     <label class="controls__field">
-      <span>Source URL</span>
+      <span>{{ text.controls.sourceUrl }}</span>
       <input v-model="sourceUrl" type="url" autocomplete="off">
     </label>
 
     <label class="controls__field">
-      <span>Protocol</span>
+      <span>{{ text.controls.protocol }}</span>
       <select v-model="protocolOverride">
         <option value="auto">auto</option>
         <option value="media">media</option>
@@ -60,21 +63,31 @@ const {
       </select>
     </label>
 
+    <label class="controls__field">
+      <span>{{ text.controls.sourceMode }}</span>
+      <select v-model="sourceMode">
+        <option value="url-string">{{ text.controls.sourceModes.urlString }}</option>
+        <option value="source-description">{{ text.controls.sourceModes.sourceDescription }}</option>
+        <option value="http-source">{{ text.controls.sourceModes.httpSource }}</option>
+        <option value="custom-source">{{ text.controls.sourceModes.customSource }}</option>
+      </select>
+    </label>
+
     <div class="controls__actions">
       <button type="button" :disabled="isBusy" @click="loadSource">
-        Load URL
+        {{ text.controls.loadUrl }}
       </button>
       <button type="button" :disabled="isBusy" @click="play">
-        Play
+        {{ text.controls.play }}
       </button>
       <button type="button" @click="pause">
-        Pause
+        {{ text.controls.pause }}
       </button>
       <button type="button" @click="stop">
-        Stop
+        {{ text.controls.stop }}
       </button>
       <button type="button" :disabled="isBusy" @click="fastSeek">
-        Fast seek
+        {{ text.controls.fastSeek }}
       </button>
     </div>
 
@@ -88,27 +101,27 @@ const {
       :min="0"
       :max="seekRangeMax"
       :step="1"
-      aria-label="Seek"
+      :aria-label="text.controls.seek"
       @input="seek"
     >
 
     <label class="controls__field">
-      <span>Volume</span>
+      <span>{{ text.controls.volume }}</span>
       <input v-model.number="volume" type="range" min="0" max="1" step="0.01" @input="setVolume">
     </label>
 
     <label class="controls__field">
-      <span>Playback rate</span>
+      <span>{{ text.controls.playbackRate }}</span>
       <input v-model.number="playbackRate" type="range" min="0.5" max="2" step="0.05" @input="setPlaybackRate">
     </label>
 
     <div class="controls__options">
-      <label><input v-model="isMuted" type="checkbox" @change="setMuted"> Muted</label>
-      <label><input v-model="isLooping" type="checkbox" @change="setLoop"> Loop</label>
-      <label><input v-model="shouldAutoplay" type="checkbox" @change="setAutoplay"> Autoplay</label>
-      <label><input v-model="shouldPreservePitch" type="checkbox" @change="setPreservesPitch"> Preserve pitch</label>
+      <label><input v-model="isMuted" type="checkbox" @change="setMuted"> {{ text.controls.muted }}</label>
+      <label><input v-model="isLooping" type="checkbox" @change="setLoop"> {{ text.controls.loop }}</label>
+      <label><input v-model="shouldAutoplay" type="checkbox" @change="setAutoplay"> {{ text.controls.autoplay }}</label>
+      <label><input v-model="shouldPreservePitch" type="checkbox" @change="setPreservesPitch"> {{ text.controls.preservePitch }}</label>
       <label>
-        Preload
+        {{ text.controls.preload }}
         <select v-model="preload" @change="setPreload">
           <option value="none">none</option>
           <option value="metadata">metadata</option>

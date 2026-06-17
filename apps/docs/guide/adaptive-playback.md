@@ -82,4 +82,18 @@ player.setSource({
 
 HLS strategies are `native-first`, `hls-first`, `native-only`, and `hls-only`. Runtime HLS configuration normally applies on the next load; constructor-only settings require an explicit reload. DASH settings use the vendor runtime update API.
 
+```ts
+const hlsAdapter = createHlsAdapter({ preset: AdaptivePlaybackPreset.Balanced })
+const dashAdapter = createDashAdapter({ preset: AdaptivePlaybackPreset.Balanced })
+
+await hlsAdapter.updateConfig({ maxBufferLength: 48 }, { apply: 'next-load' })
+dashAdapter.updateSettings({
+  streaming: {
+    buffer: {
+      bufferTimeDefault: 24,
+    },
+  },
+})
+```
+
 Adaptive playback currently supports video-on-demand. Live playback, DRM, transcoding, offline media, playlists, and manual quality selection are outside the current package scope.

@@ -2,6 +2,8 @@
 
 A browser-first TypeScript audio streaming library with optional HLS and DASH adapters.
 
+gaudio is currently pre-release. Use the documented API directly, but expect intentional API adjustments before the first official release.
+
 ## Install
 
 ```bash
@@ -44,4 +46,4 @@ const player = new AudioPlayer({
 
 `Balanced` is used when `preset` is omitted. Choose `FastStart` for smaller startup buffers or `Stable` for weak and variable networks. Presets configure audio VOD loading, buffering, memory limits, ABR, request retries, timeouts, and stall recovery. Explicit vendor configuration overrides the selected preset, including nested HLS request-policy fields.
 
-See the [gaudio documentation](https://guoxk.github.io/gaudio/) for guides, API reference, migration notes, and interactive examples.
+See the [gaudio documentation](https://guoxk.github.io/gaudio/) for bilingual guides, API reference, and interactive examples.

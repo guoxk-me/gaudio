@@ -1,9 +1,11 @@
 <script setup lang="ts">
+import type { DemoText } from './demo-i18n'
 import type { GaudioDemo } from './use-gaudio-demo'
 import { computed } from 'vue'
 
 const props = defineProps<{
   demo: GaudioDemo
+  text: DemoText
 }>()
 
 const {
@@ -24,24 +26,24 @@ const {
 } = props.demo
 
 const statuses = computed(() => [
-  ['State', playerState.value],
-  ['Buffered', bufferedLabel.value],
-  ['Seekable', seekableLabel.value],
-  ['Played', playedLabel.value],
-  ['Rate', playbackRateLabel.value],
-  ['Paused', isPaused.value],
-  ['Ended', isEnded.value],
-  ['Seeking', isSeeking.value],
-  ['Implementation', adaptiveImplementationLabel.value],
-  ['Manifest', manifestVariantLabel.value],
-  ['Variant', adaptiveVariantLabel.value],
-  ['Bitrate', adaptiveBitrateLabel.value],
-  ['Segment', segmentLabel.value],
+  [props.text.status.labels.state, playerState.value],
+  [props.text.status.labels.buffered, bufferedLabel.value],
+  [props.text.status.labels.seekable, seekableLabel.value],
+  [props.text.status.labels.played, playedLabel.value],
+  [props.text.status.labels.rate, playbackRateLabel.value],
+  [props.text.status.labels.paused, isPaused.value],
+  [props.text.status.labels.ended, isEnded.value],
+  [props.text.status.labels.seeking, isSeeking.value],
+  [props.text.status.labels.implementation, adaptiveImplementationLabel.value],
+  [props.text.status.labels.manifest, manifestVariantLabel.value],
+  [props.text.status.labels.variant, adaptiveVariantLabel.value],
+  [props.text.status.labels.bitrate, adaptiveBitrateLabel.value],
+  [props.text.status.labels.segment, segmentLabel.value],
 ] as const)
 </script>
 
 <template>
-  <aside class="status" aria-label="Player status and events">
+  <aside class="status" :aria-label="text.status.ariaLabel">
     <div class="status__grid">
       <div v-for="[label, statusValue] in statuses" :key="label" class="status__entry">
         <span>{{ label }}</span>
@@ -49,7 +51,7 @@ const statuses = computed(() => [
       </div>
     </div>
 
-    <h2>Events</h2>
+    <h2>{{ text.status.events }}</h2>
     <ol class="status__events">
       <li v-for="eventMessage in eventLog" :key="eventMessage">
         {{ eventMessage }}

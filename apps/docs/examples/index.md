@@ -1,6 +1,6 @@
-# Interactive Player
+# Interactive Demo
 
-The example runs against the same public package exports used by applications.
+The example runs against the same public package exports used by applications. It demonstrates core playback, source input shapes, browser capability checks, HLS and DASH adapters, adaptive events, runtime adapter updates, `AudioAnalyzer`, `EventEmitter`, and typed error reporting.
 
 <ClientOnly>
   <AudioPlayerDemo />

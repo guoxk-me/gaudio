@@ -1,6 +1,6 @@
-# Events
+# 事件
 
-Core lifecycle events follow the browser media element:
+核心生命周期事件跟随浏览器 media element：
 
 ```ts
 player.on('loadstart', () => console.log('loading'))
@@ -12,7 +12,7 @@ player.on('bufferupdate', ({ ranges }) => console.log(ranges))
 player.on('error', error => console.error(error.code))
 ```
 
-Adaptive adapters expose protocol-neutral events:
+自适应适配器会暴露协议中立事件：
 
 ```ts
 player.on('adaptivechange', update => console.log(update))
@@ -23,6 +23,6 @@ player.on('segmentloaded', update => console.log(update.url))
 player.on('streamerror', update => console.log(update.category, update.isFatal))
 ```
 
-Recoverable vendor failures emit `streamerror` while the vendor retries. Fatal failures also emit `error` with a typed `GAudioError` code.
+可恢复的供应商错误会在供应商重试期间发出 `streamerror`。致命失败也会发出带类型化 `GAudioError` code 的 `error`。
 
-The interactive demo logs these events live, including state changes, range updates, adaptive manifest events, segment activity, and typed error codes.
+交互 demo 会实时记录这些事件，包括状态变化、时间范围更新、自适应 manifest 事件、分段活动和类型化错误 code。

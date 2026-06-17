@@ -23,5 +23,8 @@
     "examples/**/*.ts",
     "examples/**/*.vue",
     "*.test.ts"
+  ],
+  "exclude": [
+    ".vitepress/dist"
   ]
 }

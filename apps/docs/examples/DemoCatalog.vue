@@ -1,8 +1,10 @@
 <script setup lang="ts">
+import type { DemoText } from './demo-i18n'
 import type { GaudioDemo } from './use-gaudio-demo'
 
 const props = defineProps<{
   demo: GaudioDemo
+  text: DemoText
 }>()
 
 const {
@@ -22,11 +24,11 @@ const {
 </script>
 
 <template>
-  <section class="catalog" aria-label="Local sample catalog">
+  <section class="catalog" :aria-label="text.catalog.ariaLabel">
     <div class="catalog__header">
       <div>
         <p class="catalog__eyebrow">
-          Bundled sample
+          {{ text.catalog.bundledSample }}
         </p>
         <h2>{{ activeTrack.title }}</h2>
         <p class="catalog__meta">
@@ -35,18 +37,18 @@ const {
       </div>
       <div class="catalog__navigation">
         <button type="button" :disabled="isBusy" @click="prevTrack">
-          Previous
+          {{ text.catalog.previous }}
         </button>
         <button type="button" :disabled="isBusy" @click="nextTrack">
-          Next
+          {{ text.catalog.next }}
         </button>
       </div>
     </div>
 
     <p class="catalog__label">
-      Format
+      {{ text.catalog.format }}
     </p>
-    <div class="catalog__formats" role="tablist" aria-label="Audio format">
+    <div class="catalog__formats" role="tablist" :aria-label="text.catalog.format">
       <button
         v-for="formatGroup in demoFormatGroups"
         :key="formatGroup.folder"
@@ -63,7 +65,7 @@ const {
     </div>
 
     <p class="catalog__label">
-      Track
+      {{ text.catalog.track }}
     </p>
     <div class="catalog__tracks">
       <button
