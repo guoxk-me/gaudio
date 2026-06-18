@@ -1,4 +1,4 @@
-import type { AudioProtocol, AudioSource, AudioSourceDescription, PreloadMode, TimeRange } from 'gaudio'
+import type { AdaptiveVariant, AudioProtocol, AudioSource, AudioSourceDescription, PreloadMode, TimeRange } from 'gaudio'
 import type { DashAudioAdapter } from 'gaudio/dash'
 import type { HlsAudioAdapter } from 'gaudio/hls'
 import type { DemoFormatGroup, DemoTrack } from './demo-samples'
@@ -18,6 +18,7 @@ import {
 } from './demo-samples'
 
 const seekRangeMax = 1000
+const automaticQualitySelection = 'automatic'
 
 type ProtocolOverride = 'auto' | AudioProtocol
 type DemoSourceMode = 'url-string' | 'source-description' | 'http-source' | 'custom-source'
@@ -31,6 +32,11 @@ interface BrowserSupportRow {
 interface AdapterDiagnosticRow {
   label: string
   value: string
+}
+
+interface AdaptiveQualityChoice {
+  id: string
+  label: string
 }
 
 interface DemoEmitterEvents {
@@ -67,6 +73,16 @@ function samplesForDisplay(samples: Uint8Array): string {
     .join(', ')
 }
 
+function bitrateForDisplay(bitrate: number | undefined): string {
+  return bitrate === undefined ? 'unknown' : `${Math.round(bitrate / 1000)} kbps`
+}
+
+function variantChoiceLabel(variant: AdaptiveVariant): string {
+  const codecLabel = variant.codecs ? ` · ${variant.codecs}` : ''
+
+  return `${variant.id} · ${bitrateForDisplay(variant.bitrate)}${codecLabel}`
+}
+
 function sourceProtocol(protocolOverride: ProtocolOverride): AudioProtocol | undefined {
   return protocolOverride === 'auto' ? undefined : protocolOverride
 }
@@ -93,6 +109,9 @@ export function useGaudioDemo() {
   const adaptiveImplementationLabel = shallowRef('media element')
   const adaptiveVariantLabel = shallowRef('automatic')
   const adaptiveBitrateLabel = shallowRef('unknown')
+  const adaptiveVariants = shallowRef<readonly AdaptiveVariant[]>([])
+  const adaptiveQualitySelection = shallowRef<string>(automaticQualitySelection)
+  const adaptiveQualityControlLabel = shallowRef('automatic ABR')
   const manifestVariantLabel = shallowRef('none')
   const segmentLabel = shallowRef('none')
   const bufferedLabel = shallowRef('none')
@@ -132,6 +151,13 @@ export function useGaudioDemo() {
     activeTrack.value.id,
     activeFormatGroup.value.extension,
   ))
+  const adaptiveQualityChoices = computed<AdaptiveQualityChoice[]>(() => [
+    { id: automaticQualitySelection, label: 'Automatic ABR' },
+    ...adaptiveVariants.value.map(variant => ({
+      id: variant.id,
+      label: variantChoiceLabel(variant),
+    })),
+  ])
 
   let player: AudioPlayer
   let hlsAdapter: HlsAudioAdapter
@@ -191,6 +217,12 @@ export function useGaudioDemo() {
 
   function updateSourceLifecycle(): void {
     sourceLifecycleLabel.value = `open ${customSourceOpenCount.value} / close ${customSourceCloseCount.value}`
+  }
+
+  function resetAdaptiveQualityControls(controlLabel = 'automatic ABR'): void {
+    adaptiveVariants.value = []
+    adaptiveQualitySelection.value = automaticQualitySelection
+    adaptiveQualityControlLabel.value = controlLabel
   }
 
   // AI modified: expose every public source input shape through one demo selector.
@@ -304,17 +336,24 @@ export function useGaudioDemo() {
       adaptiveBitrateLabel.value = 'unknown'
       manifestVariantLabel.value = implementation === 'native' ? 'native metadata unavailable' : 'loading'
       segmentLabel.value = 'waiting'
+      resetAdaptiveQualityControls(implementation === 'native' ? 'native HLS uses browser ABR' : 'automatic ABR')
       updateAdapterDiagnostics()
       addEvent(`adaptivechange: ${protocol} / ${implementation}`)
     })
     activePlayer.on('manifestloaded', ({ variants }) => {
-      manifestVariantLabel.value = `${variants.length} variants`
+      adaptiveVariants.value = variants
+      manifestVariantLabel.value = variants.length === 0
+        ? 'no variants'
+        : variants.map(variant => bitrateForDisplay(variant.bitrate)).join(', ')
+      adaptiveQualityControlLabel.value = variants.length === 0
+        ? 'no selectable variants'
+        : 'automatic ABR; manual variants available'
       updateAdapterDiagnostics()
       addEvent(`manifestloaded: ${variants.length} variants`)
     })
     activePlayer.on('variantchange', ({ variantId, bitrate }) => {
       adaptiveVariantLabel.value = variantId ?? 'automatic'
-      adaptiveBitrateLabel.value = bitrate === undefined ? 'unknown' : `${Math.round(bitrate / 1000)} kbps`
+      adaptiveBitrateLabel.value = bitrateForDisplay(bitrate)
       updateAdapterDiagnostics()
       addEvent(`variantchange: ${adaptiveVariantLabel.value}`)
     })
@@ -348,6 +387,7 @@ export function useGaudioDemo() {
     adaptiveBitrateLabel.value = 'unknown'
     manifestVariantLabel.value = 'none'
     segmentLabel.value = 'none'
+    resetAdaptiveQualityControls()
 
     await withBusyControls(async () => {
       player.setSource(sourceUrl.value)
@@ -503,6 +543,91 @@ export function useGaudioDemo() {
     })
   }
 
+  function restoreAutomaticAdaptiveQuality(): void {
+    if (hlsAdapter.hlsInstance) {
+      hlsAdapter.hlsInstance.loadLevel = -1
+      adaptiveQualityControlLabel.value = 'HLS automatic ABR'
+      addEvent('quality: HLS automatic ABR')
+      return
+    }
+
+    if (dashAdapter.dashInstance) {
+      dashAdapter.updateSettings({
+        streaming: {
+          abr: {
+            autoSwitchBitrate: {
+              audio: true,
+            },
+          },
+        },
+      })
+      adaptiveQualityControlLabel.value = 'DASH automatic ABR'
+      updateAdapterDiagnostics()
+      addEvent('quality: DASH automatic ABR')
+      return
+    }
+
+    adaptiveQualityControlLabel.value = adaptiveImplementationLabel.value.includes('/ native')
+      ? 'native HLS uses browser ABR'
+      : 'load HLS or DASH first'
+    addEvent(`quality: ${adaptiveQualityControlLabel.value}`)
+  }
+
+  async function applyAdaptiveQualitySelection(): Promise<void> {
+    await withBusyControls(async () => {
+      if (adaptiveQualitySelection.value === automaticQualitySelection) {
+        restoreAutomaticAdaptiveQuality()
+        return
+      }
+
+      const selectedVariant = adaptiveVariants.value.find(variant => variant.id === adaptiveQualitySelection.value)
+
+      if (!selectedVariant) {
+        adaptiveQualityControlLabel.value = 'selected variant unavailable'
+        addEvent(`quality: ${adaptiveQualityControlLabel.value}`)
+        return
+      }
+
+      // AI modified: demonstrate vendor manual quality controls without adding a gaudio public API.
+      if (hlsAdapter.hlsInstance) {
+        const levelIndex = hlsAdapter.hlsInstance.levels.findIndex((level, index) => {
+          return String(level.id ?? index) === selectedVariant.id
+        })
+
+        if (levelIndex < 0) {
+          adaptiveQualityControlLabel.value = 'HLS level unavailable'
+          addEvent(`quality: ${adaptiveQualityControlLabel.value}`)
+          return
+        }
+
+        hlsAdapter.hlsInstance.nextLevel = levelIndex
+        adaptiveQualityControlLabel.value = `manual HLS ${variantChoiceLabel(selectedVariant)}`
+        addEvent(`quality: ${adaptiveQualityControlLabel.value}`)
+        return
+      }
+
+      if (dashAdapter.dashInstance) {
+        dashAdapter.updateSettings({
+          streaming: {
+            abr: {
+              autoSwitchBitrate: {
+                audio: false,
+              },
+            },
+          },
+        })
+        dashAdapter.dashInstance.setRepresentationForTypeById('audio', selectedVariant.id, true)
+        adaptiveQualityControlLabel.value = `manual DASH ${variantChoiceLabel(selectedVariant)}`
+        updateAdapterDiagnostics()
+        addEvent(`quality: ${adaptiveQualityControlLabel.value}`)
+        return
+      }
+
+      adaptiveQualityControlLabel.value = 'manual quality unavailable for this implementation'
+      addEvent(`quality: ${adaptiveQualityControlLabel.value}`)
+    })
+  }
+
   async function runAnalyzerPreview(): Promise<void> {
     await withBusyControls(async () => {
       const AudioContextClass = window.AudioContext ?? (window as WebAudioWindow).webkitAudioContext
@@ -598,6 +723,10 @@ export function useGaudioDemo() {
     adaptiveImplementationLabel,
     adaptiveVariantLabel,
     adaptiveBitrateLabel,
+    adaptiveVariants,
+    adaptiveQualityChoices,
+    adaptiveQualitySelection,
+    adaptiveQualityControlLabel,
     manifestVariantLabel,
     segmentLabel,
     bufferedLabel,
@@ -648,6 +777,7 @@ export function useGaudioDemo() {
     setPlaybackRate,
     applyHlsConfigUpdate,
     applyDashSettingsUpdate,
+    applyAdaptiveQualitySelection,
     runAnalyzerPreview,
     runEventEmitterPreview,
   }

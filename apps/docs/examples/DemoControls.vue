@@ -9,6 +9,9 @@ const props = defineProps<{
 
 const {
   activeSampleLabel,
+  adaptiveQualityChoices,
+  adaptiveQualitySelection,
+  applyAdaptiveQualitySelection,
   currentTimeLabel,
   durationLabel,
   fastSeek,
@@ -70,6 +73,15 @@ const {
         <option value="source-description">{{ text.controls.sourceModes.sourceDescription }}</option>
         <option value="http-source">{{ text.controls.sourceModes.httpSource }}</option>
         <option value="custom-source">{{ text.controls.sourceModes.customSource }}</option>
+      </select>
+    </label>
+
+    <label class="controls__field">
+      <span>{{ text.controls.quality }}</span>
+      <select v-model="adaptiveQualitySelection" :disabled="isBusy" @change="applyAdaptiveQualitySelection">
+        <option v-for="qualityChoice in adaptiveQualityChoices" :key="qualityChoice.id" :value="qualityChoice.id">
+          {{ qualityChoice.id === 'automatic' ? text.controls.automaticQuality : qualityChoice.label }}
+        </option>
       </select>
     </label>
 

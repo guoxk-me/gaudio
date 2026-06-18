@@ -201,6 +201,16 @@ describe('audioPlayer', () => {
     expect(engine.playCalls).toBe(1)
   })
 
+  it('does not duplicate playback when play loads with autoplay enabled', async () => {
+    const engine = new FakeAudioEngine()
+    const player = new AudioPlayer({ source: 'https://example.com/audio.mp3', autoplay: true }, engine)
+
+    await player.play()
+
+    expect(engine.loadedSources).toHaveLength(1)
+    expect(engine.playCalls).toBe(1)
+  })
+
   it('keeps the loaded source available after autoplay is blocked', async () => {
     const engine = new FakeAudioEngine()
     engine.playError = new GAudioError('PLAYBACK_BLOCKED', 'Browser blocked audio playback')

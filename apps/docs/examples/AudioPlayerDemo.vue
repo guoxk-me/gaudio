@@ -6,6 +6,7 @@ import DemoCapabilities from './DemoCapabilities.vue'
 import DemoCatalog from './DemoCatalog.vue'
 import DemoControls from './DemoControls.vue'
 import DemoStatus from './DemoStatus.vue'
+import DemoVisualization from './DemoVisualization.vue'
 import { useGaudioDemo } from './use-gaudio-demo'
 
 const { lang } = useData()
@@ -24,6 +25,7 @@ const text = computed(() => demoText[demoLocaleForLang(lang.value)])
       <DemoControls :demo="demo" :text="text" />
       <DemoStatus :demo="demo" :text="text" />
     </div>
+    <DemoVisualization :text="text" />
     <DemoCapabilities :demo="demo" :text="text" />
   </div>
 </template>

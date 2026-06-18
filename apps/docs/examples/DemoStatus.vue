@@ -11,6 +11,7 @@ const props = defineProps<{
 const {
   adaptiveBitrateLabel,
   adaptiveImplementationLabel,
+  adaptiveQualityControlLabel,
   adaptiveVariantLabel,
   bufferedLabel,
   eventLog,
@@ -38,6 +39,7 @@ const statuses = computed(() => [
   [props.text.status.labels.manifest, manifestVariantLabel.value],
   [props.text.status.labels.variant, adaptiveVariantLabel.value],
   [props.text.status.labels.bitrate, adaptiveBitrateLabel.value],
+  [props.text.status.labels.quality, adaptiveQualityControlLabel.value],
   [props.text.status.labels.segment, segmentLabel.value],
 ] as const)
 </script>

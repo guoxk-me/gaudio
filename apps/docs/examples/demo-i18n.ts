@@ -16,6 +16,8 @@ export const demoText = {
       sourceUrl: 'Source URL',
       protocol: 'Protocol',
       sourceMode: 'Source mode',
+      quality: 'Audio quality',
+      automaticQuality: 'Automatic ABR',
       loadUrl: 'Load source',
       play: 'Play',
       pause: 'Pause',
@@ -52,8 +54,22 @@ export const demoText = {
         manifest: 'Manifest',
         variant: 'Variant',
         bitrate: 'Bitrate',
+        quality: 'Quality',
         segment: 'Segment',
       },
+    },
+    visualizer: {
+      ariaLabel: 'Audio analyzer visualization',
+      title: 'Audio analyzer canvas',
+      description: 'Start a silent Web Audio source, read live frequency and waveform samples, and paint a moving spectrum on canvas.',
+      start: 'Start visualizer',
+      stop: 'Stop visualizer',
+      status: 'Status',
+      peak: 'Peak',
+      energy: 'Energy',
+      running: 'running',
+      stopped: 'stopped',
+      unavailable: 'AudioContext unavailable',
     },
     capabilities: {
       ariaLabel: 'gaudio API capabilities',
@@ -77,9 +93,9 @@ export const demoText = {
       apiCoverage: [
         ['AudioPlayer', 'Constructor options, load/play/pause/stop, seek/fastSeek, volume, rate, mute, loop, autoplay, preload, pitch, state, ranges, canPlayType, events, and dispose are shown in the controls and status panels.'],
         ['HttpAudioSource and AudioSource', 'Source mode switches between URL strings, source descriptions, HttpAudioSource, and a custom AudioSource with open/close counters.'],
-        ['HLS and DASH adapters', 'Adapters are registered from public subpaths, expose support diagnostics, and can update HLS config or DASH settings at runtime.'],
+        ['HLS and DASH adapters', 'Adapters are registered from public subpaths, expose support diagnostics, can update HLS config or DASH settings at runtime, and expose vendor instances for manual quality experiments.'],
         ['AdaptivePlaybackPreset', 'The demo initializes both adaptive adapters with the Balanced audio VOD preset.'],
-        ['AudioAnalyzer', 'The utility preview creates a Web Audio graph and reads frequency and waveform byte samples.'],
+        ['AudioAnalyzer', 'The utility preview creates a Web Audio graph, reads frequency and waveform byte samples, and the canvas visualizer paints those samples every animation frame.'],
         ['EventEmitter', 'The utility preview registers, emits, removes, and clears a typed listener.'],
         ['GAudioError and events', 'Typed errors and lifecycle events are captured in the live event log.'],
         ['MediaElementAudioEngine', 'Native media files route through the built-in media-element engine.'],
@@ -101,6 +117,8 @@ export const demoText = {
       sourceUrl: 'Source URL',
       protocol: '协议',
       sourceMode: 'Source 模式',
+      quality: '音频质量',
+      automaticQuality: '自动 ABR',
       loadUrl: '加载 Source',
       play: '播放',
       pause: '暂停',
@@ -137,8 +155,22 @@ export const demoText = {
         manifest: 'Manifest',
         variant: 'Variant',
         bitrate: '码率',
+        quality: '音质',
         segment: '分段',
       },
+    },
+    visualizer: {
+      ariaLabel: '音频分析可视化',
+      title: 'Audio analyzer canvas',
+      description: '启动一个静音 Web Audio source，实时读取频域与波形样本，并在 canvas 上绘制动态频谱。',
+      start: '启动频谱',
+      stop: '停止频谱',
+      status: '状态',
+      peak: '峰值',
+      energy: '能量',
+      running: '运行中',
+      stopped: '已停止',
+      unavailable: 'AudioContext 不可用',
     },
     capabilities: {
       ariaLabel: 'gaudio API 能力',
@@ -162,9 +194,9 @@ export const demoText = {
       apiCoverage: [
         ['AudioPlayer', '控制面板与状态面板展示构造参数、load/play/pause/stop、seek/fastSeek、音量、速度、静音、循环、自动播放、预加载、音高、状态、时间范围、canPlayType、事件和 dispose。'],
         ['HttpAudioSource and AudioSource', 'Source 模式可在 URL 字符串、Source description、HttpAudioSource 和带 open/close 计数的自定义 AudioSource 之间切换。'],
-        ['HLS and DASH adapters', '从公共子路径注册适配器，展示支持诊断，并可在运行时更新 HLS config 或 DASH settings。'],
+        ['HLS and DASH adapters', '从公共子路径注册适配器，展示支持诊断，可在运行时更新 HLS config 或 DASH settings，并通过 vendor instance 展示手动音质实验。'],
         ['AdaptivePlaybackPreset', 'demo 使用 Balanced 音频 VOD 预设初始化两个自适应适配器。'],
-        ['AudioAnalyzer', '工具预览会创建 Web Audio 图并读取频域与波形字节样本。'],
+        ['AudioAnalyzer', '工具预览会创建 Web Audio 图并读取频域与波形字节样本，canvas 可视化会在每一帧绘制这些样本。'],
         ['EventEmitter', '工具预览会注册、触发、移除并清空一个类型化监听器。'],
         ['GAudioError and events', '类型化错误与生命周期事件会进入实时事件日志。'],
         ['MediaElementAudioEngine', '原生媒体文件会路由到内置 media-element engine。'],
@@ -188,6 +220,8 @@ export interface DemoText {
     sourceUrl: string
     protocol: string
     sourceMode: string
+    quality: string
+    automaticQuality: string
     loadUrl: string
     play: string
     pause: string
@@ -224,8 +258,22 @@ export interface DemoText {
       manifest: string
       variant: string
       bitrate: string
+      quality: string
       segment: string
     }
+  }
+  visualizer: {
+    ariaLabel: string
+    title: string
+    description: string
+    start: string
+    stop: string
+    status: string
+    peak: string
+    energy: string
+    running: string
+    stopped: string
+    unavailable: string
   }
   capabilities: {
     ariaLabel: string

@@ -300,6 +300,10 @@ export class AudioPlayer {
   async play(): Promise<void> {
     if (this.state === 'idle') {
       await this.load()
+      if (this.shouldAutoplay) {
+        // AI modified: load() already owns the autoplay attempt for idle playback.
+        return
+      }
     }
 
     try {
