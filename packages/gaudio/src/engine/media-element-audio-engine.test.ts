@@ -1,7 +1,7 @@
 import type { GAudioErrorCode } from '../errors/errors'
 import type { AudioSource, AudioStreamHandle } from '../source/audio-source'
 import type { TimeRange } from './audio-engine-types'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { FakeAudioElement, FakeTimeRanges } from '../test-support/fake-media'
 import { MediaElementAudioEngine } from './media-element-audio-engine'
 
@@ -28,7 +28,79 @@ function mediaError(code: number): MediaError {
   return { code, message: 'media failed' } as MediaError
 }
 
+class FakeAudioGraphNode {
+  readonly connectedNodes: AudioNode[] = []
+  isDisconnected = false
+
+  connect(destinationNode: AudioNode): AudioNode {
+    this.connectedNodes.push(destinationNode)
+    return destinationNode
+  }
+
+  disconnect(): void {
+    this.isDisconnected = true
+  }
+}
+
+class FakeAnalyserNode extends FakeAudioGraphNode {
+  fftSize = 2048
+
+  get frequencyBinCount(): number {
+    return this.fftSize / 2
+  }
+
+  getByteFrequencyData(frequencyData: Uint8Array): void {
+    for (let index = 0; index < frequencyData.length; index += 1) {
+      frequencyData[index] = index + 20
+    }
+  }
+
+  getByteTimeDomainData(waveformData: Uint8Array): void {
+    for (let index = 0; index < waveformData.length; index += 1) {
+      waveformData[index] = 120 + index
+    }
+  }
+}
+
+class FakeMediaElementSourceNode extends FakeAudioGraphNode {
+  constructor(readonly audioElement: HTMLMediaElement) {
+    super()
+  }
+}
+
+class FakeAudioContext {
+  readonly destination = new FakeAudioGraphNode() as unknown as AudioDestinationNode
+  readonly analyserNode = new FakeAnalyserNode()
+  readonly sourceNodes: FakeMediaElementSourceNode[] = []
+  state: AudioContextState = 'running'
+  resumeCalls = 0
+  closeCalls = 0
+
+  createMediaElementSource(audioElement: HTMLMediaElement): MediaElementAudioSourceNode {
+    const sourceNode = new FakeMediaElementSourceNode(audioElement)
+    this.sourceNodes.push(sourceNode)
+    return sourceNode as unknown as MediaElementAudioSourceNode
+  }
+
+  createAnalyser(): AnalyserNode {
+    return this.analyserNode as unknown as AnalyserNode
+  }
+
+  async resume(): Promise<void> {
+    this.resumeCalls += 1
+  }
+
+  async close(): Promise<void> {
+    this.closeCalls += 1
+    this.state = 'closed'
+  }
+}
+
 describe('mediaElementEngine', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
   it('exposes media properties and complete time ranges', () => {
     const audioElement = new FakeAudioElement()
     audioElement.buffered = new FakeTimeRanges([{ start: 0, end: 10 }, { start: 20, end: 30 }])
@@ -62,6 +134,52 @@ describe('mediaElementEngine', () => {
     expect(engine.getAutoplay()).toBe(true)
     expect(engine.getPreservesPitch()).toBe(false)
     expect(engine.getPlayedRanges()).toEqual([{ start: 2, end: 8 }, { start: 12, end: 20 }])
+  })
+
+  it('creates a Web Audio analyzer without muting media playback', () => {
+    const audioContexts: FakeAudioContext[] = []
+    class TestAudioContext extends FakeAudioContext {
+      constructor() {
+        super()
+        audioContexts.push(this)
+      }
+    }
+    vi.stubGlobal('AudioContext', TestAudioContext)
+    const audioElement = new FakeAudioElement()
+    const engine = new MediaElementAudioEngine(audioElement as unknown as HTMLAudioElement)
+
+    const analyzer = engine.createAnalyzer({ fftSize: 1024 })
+    const audioContext = audioContexts[0]
+    const sourceNode = audioContext.sourceNodes[0]
+
+    expect(audioContext.analyserNode.fftSize).toBe(1024)
+    expect(sourceNode.audioElement).toBe(audioElement)
+    expect(sourceNode.connectedNodes).toContain(audioContext.destination)
+    expect(sourceNode.connectedNodes).toContain(audioContext.analyserNode)
+    expect([...analyzer.getFrequencyData({ binCount: 3 })]).toEqual([20, 21, 22])
+    expect([...analyzer.getWaveformData({ sampleCount: 3 })]).toEqual([120, 121, 122])
+  })
+
+  it('resumes and closes the owned audio analysis context with engine lifecycle', async () => {
+    const audioContexts: FakeAudioContext[] = []
+    class TestAudioContext extends FakeAudioContext {
+      constructor() {
+        super()
+        audioContexts.push(this)
+      }
+    }
+    vi.stubGlobal('AudioContext', TestAudioContext)
+    const audioElement = new FakeAudioElement()
+    const engine = new MediaElementAudioEngine(audioElement as unknown as HTMLAudioElement)
+    engine.createAnalyzer()
+    const audioContext = audioContexts[0]
+
+    await engine.play()
+    engine.dispose()
+
+    expect(audioContext.resumeCalls).toBe(1)
+    expect(audioContext.closeCalls).toBe(1)
+    expect(audioContext.sourceNodes[0].isDisconnected).toBe(true)
   })
 
   it('uses native fast seek when available', async () => {

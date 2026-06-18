@@ -2,7 +2,7 @@ import type { AdaptiveVariant, AudioProtocol, AudioSource, AudioSourceDescriptio
 import type { DashAudioAdapter } from 'gaudio/dash'
 import type { HlsAudioAdapter } from 'gaudio/hls'
 import type { DemoFormatGroup, DemoTrack } from './demo-samples'
-import { AdaptivePlaybackPreset, AudioAnalyzer, AudioPlayer, EventEmitter, HttpAudioSource } from 'gaudio'
+import { AdaptivePlaybackPreset, AudioPlayer, EventEmitter, HttpAudioSource } from 'gaudio'
 import { createDashAdapter } from 'gaudio/dash'
 import { createHlsAdapter } from 'gaudio/hls'
 import { computed, onMounted, onUnmounted, shallowRef } from 'vue'
@@ -41,12 +41,6 @@ interface AdaptiveQualityChoice {
 
 interface DemoEmitterEvents {
   preview: string
-}
-
-type AudioContextConstructor = typeof AudioContext
-
-interface WebAudioWindow extends Window {
-  webkitAudioContext?: AudioContextConstructor
 }
 
 function secondsForDisplay(seconds: number): string {
@@ -93,10 +87,6 @@ function browserSupportForDisplay(support: string, hasAdapterSupport: boolean): 
   }
 
   return hasAdapterSupport ? 'adapter' : 'unsupported'
-}
-
-function delay(milliseconds: number): Promise<void> {
-  return new Promise(resolve => window.setTimeout(resolve, milliseconds))
 }
 
 export function useGaudioDemo() {
@@ -630,38 +620,18 @@ export function useGaudioDemo() {
 
   async function runAnalyzerPreview(): Promise<void> {
     await withBusyControls(async () => {
-      const AudioContextClass = window.AudioContext ?? (window as WebAudioWindow).webkitAudioContext
+      const analyzer = player.getAnalyzer()
 
-      if (!AudioContextClass) {
-        analyzerStatus.value = 'AudioContext unavailable'
+      if (!analyzer) {
+        analyzerStatus.value = 'player analyzer unavailable'
+        addEvent('AudioPlayer analyzer unavailable')
         return
       }
 
-      const audioContext = new AudioContextClass()
-      const oscillator = audioContext.createOscillator()
-      const gain = audioContext.createGain()
-      const analyzer = new AudioAnalyzer(audioContext, oscillator, 1024)
-
-      gain.gain.value = 0
-      analyzer.connect(gain)
-      gain.connect(audioContext.destination)
-      oscillator.frequency.value = 440
-      oscillator.start()
-
-      try {
-        await audioContext.resume()
-        await delay(80)
-        frequencyPreview.value = samplesForDisplay(analyzer.getFrequencyData({ binCount: 8 }))
-        waveformPreview.value = samplesForDisplay(analyzer.getWaveformData({ sampleCount: 8 }))
-        analyzerStatus.value = 'captured 8 samples'
-        addEvent('AudioAnalyzer preview captured')
-      }
-      finally {
-        oscillator.stop()
-        analyzer.dispose()
-        gain.disconnect()
-        await audioContext.close()
-      }
+      frequencyPreview.value = samplesForDisplay(analyzer.getFrequencyData({ binCount: 8 }))
+      waveformPreview.value = samplesForDisplay(analyzer.getWaveformData({ sampleCount: 8 }))
+      analyzerStatus.value = 'captured 8 player samples'
+      addEvent('AudioPlayer analyzer preview captured')
     })
   }
 
@@ -698,6 +668,10 @@ export function useGaudioDemo() {
       volume: volume.value,
       playbackRate: playbackRate.value,
       preservesPitch: shouldPreservePitch.value,
+      // AI modified: demo analyzer samples now come from the public AudioPlayer configuration path.
+      analyzer: {
+        fftSize: 1024,
+      },
     })
     observePlayer(player)
     updateSourceLifecycle()

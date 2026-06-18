@@ -38,6 +38,7 @@ const player = new AudioPlayer({
   volume: 0.8,
   playbackRate: 1,
   preservesPitch: true,
+  analyzer: true,
 })
 
 player.on('statechange', state => console.log(state))
@@ -56,6 +57,7 @@ await player.play()
 | --- | --- | --- | --- |
 | `source` | `AudioSourceInput` | `undefined` | URL string, source description, `HttpAudioSource`, or custom `AudioSource`. Not loaded until `load()` or idle `play()`. |
 | `adapters` | `readonly AudioEngineAdapter[]` | `[]` | Optional protocol adapters used by the internal engine router for HLS and DASH. Do not pass when injecting a custom engine. |
+| `analyzer` | `boolean \| AudioPlayerAnalyzerOptions` | `undefined` | Enables player-owned Web Audio analysis after `load()`. Use `true` for defaults or pass `fftSize` and `createAnalyzer`. |
 | `preload` | `'none' \| 'metadata' \| 'auto'` | `'metadata'` | Browser preload hint applied to current and future sources. |
 | `autoplay` | `boolean` | `false` | Makes `load()` attempt `play()` after the source is ready. Browser policy rejection becomes `PLAYBACK_BLOCKED`. |
 | `muted` | `boolean` | `false` | Starts with muted output. |
@@ -109,6 +111,7 @@ const buffered = player.getBufferedRanges()
 const seekable = player.getSeekableRanges()
 const played = player.getPlayedRanges()
 const state = player.getState()
+const analyzer = player.getAnalyzer()
 ```
 
 `TimeRange` values use seconds:
@@ -202,7 +205,38 @@ If browser policy blocks playback, `load()` rejects with `GAudioError` code `PLA
 
 ## Audio analysis
 
-`AudioAnalyzer` reads frequency-domain and waveform bytes from a Web Audio graph. It analyzes an `AudioNode` that your application owns; `AudioPlayer` does not expose its internal media element as an analyzer source.
+Enable player-owned analysis when you want frequency-domain or waveform bytes for the active media source:
+
+```ts
+const player = new AudioPlayer({
+  source: 'https://example.com/audio.mp3',
+  analyzer: {
+    fftSize: 1024,
+  },
+})
+
+await player.load()
+
+const analyzer = player.getAnalyzer()
+const frequency = analyzer?.getFrequencyData({ binCount: 64 })
+const waveform = analyzer?.getWaveformData({ sampleCount: 128 })
+```
+
+The built-in media element, HLS, and DASH engines create a Web Audio media-element source when analysis is enabled. Cross-origin media must allow audio analysis through CORS, otherwise browsers can return silent sample data.
+
+Custom engines can support the simple `analyzer: true` path by exposing `createAnalyzer`. Applications that own a separate Web Audio graph can pass a custom factory:
+
+```ts
+const player = new AudioPlayer({
+  source: 'https://example.com/audio.mp3',
+  analyzer: {
+    fftSize: 2048,
+    createAnalyzer: ({ fftSize }) => new AudioAnalyzer(audioContext, sourceNode, fftSize),
+  },
+}, customEngine)
+```
+
+For lower-level usage, `AudioAnalyzer` can analyze any `AudioNode` that your application owns:
 
 ```ts
 import { AudioAnalyzer } from 'gaudio'

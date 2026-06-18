@@ -11,6 +11,7 @@ export type {
 } from './adapters/adaptive-audio-types'
 export { AudioAnalyzer } from './analysis/audio-analyzer'
 export type {
+  AudioAnalyzerOptions,
   FrequencyDataOptions,
   WaveformDataOptions,
 } from './analysis/audio-analyzer'
@@ -32,7 +33,13 @@ export type { GAudioErrorCode } from './errors/errors'
 export { EventEmitter } from './events/event-emitter'
 export { AudioPlayer } from './player/audio-player'
 export type { AudioPlayerEvents } from './player/audio-player-events'
-export type { AudioPlayerOptions, PlaybackState } from './player/audio-player-options'
+export type {
+  AudioPlayerAnalyzerContext,
+  AudioPlayerAnalyzerFactory,
+  AudioPlayerAnalyzerOptions,
+  AudioPlayerOptions,
+  PlaybackState,
+} from './player/audio-player-options'
 export type { AudioSource, AudioSourceInput, AudioSourceKind, AudioStreamHandle } from './source/audio-source'
 export type {
   AudioProtocol,

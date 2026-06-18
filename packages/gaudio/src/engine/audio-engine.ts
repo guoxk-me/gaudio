@@ -5,6 +5,7 @@ import type {
   AdaptiveStreamError,
   AdaptiveVariantUpdate,
 } from '../adapters/adaptive-audio-types'
+import type { AudioAnalyzer, AudioAnalyzerOptions } from '../analysis/audio-analyzer'
 import type { GAudioError } from '../errors/errors'
 import type { AudioSource } from '../source/audio-source'
 import type {
@@ -162,6 +163,14 @@ export interface AudioEngine {
    * @param mimeType MIME type with optional codec parameters.
    */
   canPlayType: (mimeType: string) => AudioFormatSupport
+  /**
+   * Creates an analyzer for the active engine signal when supported.
+   *
+   * Engines that do not expose a Web Audio signal can omit this method.
+   *
+   * @param options Analyzer node configuration.
+   */
+  createAnalyzer?: (options?: AudioAnalyzerOptions) => AudioAnalyzer | undefined
   /**
    * Registers an engine event listener.
    *

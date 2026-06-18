@@ -1,3 +1,4 @@
+import type { AudioAnalyzer } from '../analysis/audio-analyzer'
 import type { AudioEngine } from '../engine/audio-engine'
 import type { AudioEngineAdapter } from '../engine/audio-engine-adapter'
 import { describe, expect, it } from 'vitest'
@@ -37,6 +38,36 @@ class FakeDashAdapter implements AudioEngineAdapter {
   }
 }
 
+class FakeAnalyzer {
+  disposeCalls = 0
+
+  connect(): void {}
+
+  getFrequencyData(): Uint8Array {
+    return new Uint8Array()
+  }
+
+  getWaveformData(): Uint8Array {
+    return new Uint8Array()
+  }
+
+  dispose(): void {
+    this.disposeCalls += 1
+  }
+}
+
+class AnalyzerAudioEngine extends FakeAudioEngine {
+  readonly analyzers: FakeAnalyzer[] = []
+  readonly analyzerFftSizes: Array<number | undefined> = []
+
+  createAnalyzer(options: { fftSize?: number } = {}): AudioAnalyzer {
+    const analyzer = new FakeAnalyzer()
+    this.analyzers.push(analyzer)
+    this.analyzerFftSizes.push(options.fftSize)
+    return analyzer as unknown as AudioAnalyzer
+  }
+}
+
 describe('audioPlayer', () => {
   it('applies media options and exposes engine capabilities', () => {
     const engine = new FakeAudioEngine()
@@ -72,6 +103,93 @@ describe('audioPlayer', () => {
 
     expect(player.getAutoplay()).toBe(true)
     expect(player.getPreservesPitch()).toBe(false)
+  })
+
+  it('creates a configured analyzer after a source loads', async () => {
+    const engine = new AnalyzerAudioEngine()
+    const player = new AudioPlayer({
+      source: 'https://example.com/audio.mp3',
+      analyzer: {
+        fftSize: 1024,
+      },
+    }, engine)
+
+    expect(player.getAnalyzer()).toBeUndefined()
+
+    await player.load()
+
+    expect(player.getAnalyzer()).toBe(engine.analyzers[0])
+    expect(engine.analyzerFftSizes).toEqual([1024])
+  })
+
+  it('uses the default analyzer configuration for boolean analyzer options', async () => {
+    const engine = new AnalyzerAudioEngine()
+    const player = new AudioPlayer({
+      source: 'https://example.com/audio.mp3',
+      analyzer: true,
+    }, engine)
+
+    await player.load()
+
+    expect(player.getAnalyzer()).toBe(engine.analyzers[0])
+    expect(engine.analyzerFftSizes).toEqual([2048])
+  })
+
+  it('supports custom analyzer factories for injected engines', async () => {
+    const engine = new FakeAudioEngine()
+    const analyzer = new FakeAnalyzer()
+    const player = new AudioPlayer({
+      source: 'https://example.com/audio.mp3',
+      analyzer: {
+        fftSize: 512,
+        createAnalyzer: (context) => {
+          expect(context.engine).toBe(engine)
+          expect(context.fftSize).toBe(512)
+          return analyzer as unknown as AudioAnalyzer
+        },
+      },
+    }, engine)
+
+    await player.load()
+
+    expect(player.getAnalyzer()).toBe(analyzer)
+  })
+
+  it('releases player analyzers when sources change or the player is disposed', async () => {
+    const engine = new AnalyzerAudioEngine()
+    const player = new AudioPlayer({
+      source: 'https://example.com/first.mp3',
+      analyzer: true,
+    }, engine)
+
+    await player.load()
+    const firstAnalyzer = engine.analyzers[0]
+
+    player.setSource('https://example.com/second.mp3')
+
+    expect(firstAnalyzer.disposeCalls).toBe(1)
+    expect(player.getAnalyzer()).toBeUndefined()
+
+    await player.load()
+    const secondAnalyzer = engine.analyzers[1]
+    player.dispose()
+
+    expect(secondAnalyzer.disposeCalls).toBe(1)
+  })
+
+  it('does not create analyzer when analyzer options are disabled', async () => {
+    const engine = new AnalyzerAudioEngine()
+    const player = new AudioPlayer({
+      source: 'https://example.com/audio.mp3',
+      analyzer: {
+        enabled: false,
+      },
+    }, engine)
+
+    await player.load()
+
+    expect(player.getAnalyzer()).toBeUndefined()
+    expect(engine.analyzers).toHaveLength(0)
   })
 
   it('disables engine-native autoplay so player orchestration remains observable', () => {

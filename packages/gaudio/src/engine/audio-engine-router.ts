@@ -1,6 +1,7 @@
 // @env browser
 
 import type { AdaptiveAudioProtocol } from '../adapters/adaptive-audio-types'
+import type { AudioAnalyzer, AudioAnalyzerOptions } from '../analysis/audio-analyzer'
 import type { AudioProtocol, AudioSource } from '../source/audio-source'
 import type { AudioEngine, AudioEngineEvents } from './audio-engine'
 import type { AudioEngineAdapter } from './audio-engine-adapter'
@@ -195,6 +196,10 @@ export class AudioEngineRouter implements AudioEngine {
 
   canPlayType(mimeType: string): AudioFormatSupport {
     return this.activeEngine?.canPlayType(mimeType) ?? ''
+  }
+
+  createAnalyzer(options: AudioAnalyzerOptions = {}): AudioAnalyzer | undefined {
+    return this.activeEngine?.createAnalyzer?.(options)
   }
 
   on<EventName extends keyof AudioEngineEvents>(

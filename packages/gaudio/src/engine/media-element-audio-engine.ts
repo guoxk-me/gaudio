@@ -1,5 +1,6 @@
 // @env browser
 
+import type { AudioAnalyzerOptions } from '../analysis/audio-analyzer'
 import type { AudioSource } from '../source/audio-source'
 import type { AudioEngine, AudioEngineEvents } from './audio-engine'
 import type {
@@ -7,6 +8,7 @@ import type {
   PreloadMode,
   TimeRange,
 } from './audio-engine-types'
+import { AudioAnalyzer } from '../analysis/audio-analyzer'
 import { GAudioError } from '../errors/errors'
 import { EventEmitter } from '../events/event-emitter'
 import { mediaElementError } from './media-element-errors'
@@ -19,6 +21,13 @@ interface ActiveSourceSession {
   reject?: (error: GAudioError) => void
 }
 
+type AudioContextConstructor = typeof AudioContext
+
+interface WebAudioGlobal {
+  AudioContext?: AudioContextConstructor
+  webkitAudioContext?: AudioContextConstructor
+}
+
 /** {@link AudioEngine} implementation backed by an [HTMLAudioElement](https://developer.mozilla.org/docs/Web/API/HTMLAudioElement). */
 export class MediaElementAudioEngine implements AudioEngine {
   /** Media element used for native loading and playback. */
@@ -26,6 +35,9 @@ export class MediaElementAudioEngine implements AudioEngine {
   /** Event channel used to publish browser media lifecycle updates. */
   protected readonly events = new EventEmitter<AudioEngineEvents>()
   private activeSourceSession?: ActiveSourceSession
+  private audioContext?: AudioContext
+  private mediaElementSource?: MediaElementAudioSourceNode
+  private isMediaElementSourceAudible = false
   private shouldSuppressPause = false
 
   /**
@@ -118,6 +130,8 @@ export class MediaElementAudioEngine implements AudioEngine {
   async play(): Promise<void> {
     try {
       await this.audioElement.play()
+      // AI modified: Web Audio analysis contexts may need the same user gesture as media playback.
+      await this.audioContext?.resume()
     }
     catch (error) {
       throw new GAudioError('PLAYBACK_BLOCKED', 'Browser blocked audio playback', error)
@@ -281,6 +295,20 @@ export class MediaElementAudioEngine implements AudioEngine {
   }
 
   /**
+   * Creates an analyzer for the media element output.
+   *
+   * The media element source is also connected to the context destination so enabling analysis does not mute playback.
+   *
+   * @param options Analyzer node configuration.
+   */
+  createAnalyzer(options: AudioAnalyzerOptions = {}): AudioAnalyzer {
+    const audioContext = this.mediaAudioContext()
+    const mediaElementSource = this.mediaSourceNode(audioContext)
+
+    return new AudioAnalyzer(audioContext, mediaElementSource, options.fftSize)
+  }
+
+  /**
    * Registers an engine event listener.
    *
    * @param eventName Event to observe.
@@ -298,6 +326,7 @@ export class MediaElementAudioEngine implements AudioEngine {
   dispose(): void {
     this.removeMediaEventListeners()
     this.unload()
+    this.closeAudioAnalysis()
     this.events.clear()
   }
 
@@ -415,6 +444,52 @@ export class MediaElementAudioEngine implements AudioEngine {
 
   private loadAbortedError(): GAudioError {
     return new GAudioError('LOAD_ABORTED', 'Audio load was superseded by a newer source')
+  }
+
+  private mediaAudioContext(): AudioContext {
+    if (this.audioContext) {
+      return this.audioContext
+    }
+
+    const AudioContextClass = this.audioContextClass()
+    if (!AudioContextClass) {
+      throw new GAudioError('ENGINE_ERROR', 'Web Audio analysis is unavailable in this browser')
+    }
+
+    this.audioContext = new AudioContextClass()
+    return this.audioContext
+  }
+
+  private mediaSourceNode(audioContext: AudioContext): MediaElementAudioSourceNode {
+    if (!this.mediaElementSource) {
+      // AI modified: reuse the single media element source allowed by the Web Audio API.
+      this.mediaElementSource = audioContext.createMediaElementSource(this.audioElement)
+    }
+
+    if (!this.isMediaElementSourceAudible) {
+      this.mediaElementSource.connect(audioContext.destination)
+      this.isMediaElementSourceAudible = true
+    }
+
+    return this.mediaElementSource
+  }
+
+  private audioContextClass(): AudioContextConstructor | undefined {
+    const webAudioGlobal = globalThis as typeof globalThis & WebAudioGlobal
+
+    return webAudioGlobal.AudioContext ?? webAudioGlobal.webkitAudioContext
+  }
+
+  private closeAudioAnalysis(): void {
+    this.mediaElementSource?.disconnect()
+    this.mediaElementSource = undefined
+    this.isMediaElementSourceAudible = false
+
+    if (this.audioContext && this.audioContext.state !== 'closed') {
+      // AI modified: disposal is synchronous, so close the owned AudioContext without delaying engine teardown.
+      void this.audioContext.close()
+    }
+    this.audioContext = undefined
   }
 
   private readonly handleLoadStart = (): void => {

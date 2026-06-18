@@ -12,9 +12,20 @@ export interface WaveformDataOptions {
   sampleCount?: number
 }
 
+/** Configures an {@link AudioAnalyzer} created by a player or engine. */
+export interface AudioAnalyzerOptions {
+  /**
+   * FFT window size supported by [AnalyserNode.fftSize](https://developer.mozilla.org/docs/Web/API/AnalyserNode/fftSize).
+   *
+   * @defaultValue `2048`
+   */
+  fftSize?: number
+}
+
 /** Provides byte-based frequency and waveform samples from a Web Audio graph. */
 export class AudioAnalyzer {
   private readonly analyserNode: AnalyserNode
+  private readonly sourceNode: AudioNode
 
   /**
    * Creates and connects an analyzer node to an existing source node.
@@ -27,6 +38,7 @@ export class AudioAnalyzer {
    */
   constructor(audioContext: AudioContext, sourceNode: AudioNode, fftSize = 2048) {
     this.analyserNode = audioContext.createAnalyser()
+    this.sourceNode = sourceNode
     this.analyserNode.fftSize = fftSize
     sourceNode.connect(this.analyserNode)
   }
@@ -66,8 +78,10 @@ export class AudioAnalyzer {
     return waveformData
   }
 
-  /** Disconnects the internal analyzer node from all destinations. */
+  /** Disconnects the source input and internal analyzer output destinations. */
   dispose(): void {
+    // AI modified: releasing player-owned analyzers must remove the source-to-analyzer edge as well.
+    this.sourceNode.disconnect(this.analyserNode)
     this.analyserNode.disconnect()
   }
 }

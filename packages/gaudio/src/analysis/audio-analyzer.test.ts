@@ -42,10 +42,15 @@ class FakeAudioContext {
 
 class FakeAudioNode {
   readonly connectedNodes: AudioNode[] = []
+  readonly disconnectedNodes: AudioNode[] = []
 
   connect(destinationNode: AudioNode): AudioNode {
     this.connectedNodes.push(destinationNode)
     return destinationNode
+  }
+
+  disconnect(destinationNode: AudioNode): void {
+    this.disconnectedNodes.push(destinationNode)
   }
 }
 
@@ -80,9 +85,10 @@ describe('audioAnalyzer', () => {
 
   it('returns requested sample counts and disconnects on dispose', () => {
     const analyserNode = new FakeAnalyserNode()
+    const sourceNode = new FakeAudioNode()
     const analyzer = new AudioAnalyzer(
       new FakeAudioContext(analyserNode) as unknown as AudioContext,
-      new FakeAudioNode() as unknown as AudioNode,
+      sourceNode as unknown as AudioNode,
     )
     const destinationNode = new FakeAudioNode()
 
@@ -92,6 +98,7 @@ describe('audioAnalyzer', () => {
     expect([...analyzer.getFrequencyData({ binCount: 3 })]).toEqual([10, 11, 12])
     expect([...analyzer.getWaveformData({ sampleCount: 3 })]).toEqual([128, 129, 130])
     expect(analyserNode.connectedNodes).toEqual([destinationNode])
+    expect(sourceNode.disconnectedNodes).toEqual([analyserNode])
     expect(analyserNode.isDisconnected).toBe(true)
   })
 })

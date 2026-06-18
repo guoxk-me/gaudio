@@ -34,7 +34,7 @@ describe('interactive audio example', () => {
     expect(demoComposable).toContain('from \'gaudio\'')
     expect(demoComposable).toContain('from \'gaudio/hls\'')
     expect(demoComposable).toContain('from \'gaudio/dash\'')
-    expect(demoComposable).toContain('AudioAnalyzer')
+    expect(demoComposable).toContain('getAnalyzer')
     expect(demoComposable).toContain('EventEmitter')
     expect(demoComposable).toContain('HttpAudioSource')
     expect(demoComposable).toContain('AdaptivePlaybackPreset')

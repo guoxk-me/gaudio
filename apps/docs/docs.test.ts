@@ -52,11 +52,13 @@ describe('documentation application', () => {
       'getting-started.md',
       'adaptive-playback.md',
       'events.md',
+      'api-reference.md',
     ]))
     expect(chineseGuideFiles).toEqual(expect.arrayContaining([
       'getting-started.md',
       'adaptive-playback.md',
       'events.md',
+      'api-reference.md',
     ]))
     expect(englishHome).toContain('Pre-release')
     expect(chineseHome).toContain('预发布')

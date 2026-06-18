@@ -1,18 +1,23 @@
+import type { AudioAnalyzer } from '../analysis/audio-analyzer'
 import type { AudioEngine, AudioEngineEvents } from '../engine/audio-engine'
 import type { AudioFormatSupport, PreloadMode, TimeRange } from '../engine/audio-engine-types'
 import type { AudioSource, AudioSourceInput } from '../source/audio-source'
 import type { AudioPlayerEvents } from './audio-player-events'
-import type { AudioPlayerOptions, PlaybackState } from './audio-player-options'
+import type { AudioPlayerAnalyzerOptions, AudioPlayerOptions, PlaybackState } from './audio-player-options'
 import { audioEngineEventNames } from '../engine/audio-engine'
 import { AudioEngineRouter } from '../engine/audio-engine-router'
 import { GAudioError } from '../errors/errors'
 import { EventEmitter } from '../events/event-emitter'
 import { HttpAudioSource } from '../source/http-audio-source'
 
+const defaultAnalyzerFftSize = 2048
+
 /** High-level controller for loading, playing, observing, and switching audio sources. */
 export class AudioPlayer {
   private readonly events = new EventEmitter<AudioPlayerEvents>()
   private readonly engine: AudioEngine
+  private readonly analyzerOptions?: AudioPlayerAnalyzerOptions
+  private analyzer?: AudioAnalyzer
   private source?: AudioSource
   private state: PlaybackState = 'idle'
   private loadRequestId = 0
@@ -34,6 +39,7 @@ export class AudioPlayer {
 
     // AI modified: the router owns protocol engines only when callers do not inject a custom engine.
     this.engine = engine ?? new AudioEngineRouter({ adapters: options.adapters })
+    this.analyzerOptions = this.playerAnalyzerOptions(options.analyzer)
     this.shouldAutoplay = options.autoplay ?? false
 
     try {
@@ -227,6 +233,16 @@ export class AudioPlayer {
   }
 
   /**
+   * Returns the analyzer created for the loaded source, when enabled and supported.
+   *
+   * The analyzer is created after a successful {@link load}. Custom engines can support this by exposing
+   * `createAnalyzer`, or callers can provide `options.analyzer.createAnalyzer`.
+   */
+  getAnalyzer(): AudioAnalyzer | undefined {
+    return this.analyzer
+  }
+
+  /**
    * Replaces the current source without loading it.
    *
    * Any active load is cancelled, the current engine is unloaded, and state returns to `idle`.
@@ -235,6 +251,7 @@ export class AudioPlayer {
    */
   setSource(source: AudioSourceInput): void {
     this.loadRequestId += 1
+    this.releaseAnalyzer()
     this.engine.unload()
     this.source = typeof source === 'string' || !('open' in source)
       ? new HttpAudioSource(source)
@@ -259,6 +276,7 @@ export class AudioPlayer {
 
     const loadRequestId = ++this.loadRequestId
     this.hasLoadedSource = false
+    this.releaseAnalyzer()
     this.setState('loading')
 
     try {
@@ -284,6 +302,16 @@ export class AudioPlayer {
 
     if (loadRequestId === this.loadRequestId) {
       this.hasLoadedSource = true
+      try {
+        this.ensureAnalyzer()
+      }
+      catch (error) {
+        const playerError = error instanceof GAudioError
+          ? error
+          : new GAudioError('ENGINE_ERROR', 'Audio analyzer could not be created', error)
+        this.publishError(playerError)
+        throw playerError
+      }
       this.setState('ready')
       if (this.shouldAutoplay) {
         // AI modified: explicit playback surfaces autoplay rejection and preserves the loaded source.
@@ -377,11 +405,48 @@ export class AudioPlayer {
    */
   dispose(): void {
     this.loadRequestId += 1
+    this.releaseAnalyzer()
     this.engine.dispose()
     this.events.clear()
     this.source = undefined
     this.hasLoadedSource = false
     this.state = 'idle'
+  }
+
+  private playerAnalyzerOptions(
+    analyzerOption: AudioPlayerOptions['analyzer'],
+  ): AudioPlayerAnalyzerOptions | undefined {
+    if (analyzerOption === undefined || analyzerOption === false) {
+      return undefined
+    }
+    if (analyzerOption === true) {
+      return { enabled: true, fftSize: defaultAnalyzerFftSize }
+    }
+
+    return analyzerOption.enabled === false
+      ? undefined
+      : {
+          ...analyzerOption,
+          fftSize: analyzerOption.fftSize ?? defaultAnalyzerFftSize,
+        }
+  }
+
+  private ensureAnalyzer(): void {
+    if (!this.analyzerOptions || this.analyzer) {
+      return
+    }
+
+    const fftSize = this.analyzerOptions.fftSize ?? defaultAnalyzerFftSize
+    // AI modified: player-level analyzer config supports both engine-native and caller-supplied Web Audio hooks.
+    this.analyzer = this.analyzerOptions.createAnalyzer?.({
+      engine: this.engine,
+      fftSize,
+    }) ?? this.engine.createAnalyzer?.({ fftSize })
+  }
+
+  private releaseAnalyzer(): void {
+    this.analyzer?.dispose()
+    this.analyzer = undefined
   }
 
   private connectEngineEvents(): void {

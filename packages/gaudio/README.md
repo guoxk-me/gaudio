@@ -36,6 +36,7 @@ const player = new AudioPlayer({
   source: 'https://example.com/audio.mp3',
   preload: 'auto',
   volume: 0.8,
+  analyzer: true,
 })
 
 player.on('statechange', state => console.log(state))
@@ -64,6 +65,7 @@ player.setPreload('metadata')
 player.getBufferedRanges()
 player.getSeekableRanges()
 player.getPlayedRanges()
+player.getAnalyzer()
 player.dispose()
 ```
 
@@ -118,7 +120,26 @@ gaudio reports automatic adaptive quality through `manifestloaded` and `variantc
 
 ## Audio analysis
 
-`AudioAnalyzer` reads frequency and waveform byte samples from a Web Audio `AudioNode`:
+Use the player-level analyzer option for the built-in media element, HLS, and DASH engines:
+
+```ts
+const player = new AudioPlayer({
+  source: 'https://example.com/audio.mp3',
+  analyzer: {
+    fftSize: 1024,
+  },
+})
+
+await player.load()
+
+const analyzer = player.getAnalyzer()
+const frequency = analyzer?.getFrequencyData({ binCount: 64 })
+const waveform = analyzer?.getWaveformData({ sampleCount: 128 })
+```
+
+Custom engines can expose `createAnalyzer`, or applications can pass `analyzer.createAnalyzer` to connect their own Web Audio graph.
+
+For lower-level Web Audio usage, `AudioAnalyzer` reads frequency and waveform byte samples from an `AudioNode`:
 
 ```ts
 import { AudioAnalyzer } from 'gaudio'

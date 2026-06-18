@@ -20,4 +20,6 @@ features:
     details: 只在应用需要时接入 HLS 或 DASH，不让核心播放场景加载供应商库。
   - title: 浏览器原生生命周期
     details: 观察媒体就绪、缓冲、跳转、自适应变体、分段加载和类型化错误。
+  - title: Player 持有的音频分析
+    details: 通过 AudioPlayer 配置直接启用频域和波形采样，也可以在自定义 engine 中接入应用自己的 Web Audio 图。
 ---

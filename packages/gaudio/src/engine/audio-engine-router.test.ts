@@ -1,3 +1,4 @@
+import type { AudioAnalyzer } from '../analysis/audio-analyzer'
 import type { AudioEngine } from './audio-engine'
 import type { AudioEngineAdapter } from './audio-engine-adapter'
 import { describe, expect, it } from 'vitest'
@@ -21,6 +22,29 @@ class FakeAdapter implements AudioEngineAdapter {
 
   isSupported(): boolean {
     return this.supported
+  }
+}
+
+class FakeAnalyzer {
+  dispose(): void {}
+
+  connect(): void {}
+
+  getFrequencyData(): Uint8Array {
+    return new Uint8Array()
+  }
+
+  getWaveformData(): Uint8Array {
+    return new Uint8Array()
+  }
+}
+
+class AnalyzerAudioEngine extends FakeAudioEngine {
+  readonly analyzerFftSizes: Array<number | undefined> = []
+
+  createAnalyzer(options: { fftSize?: number } = {}): AudioAnalyzer {
+    this.analyzerFftSizes.push(options.fftSize)
+    return new FakeAnalyzer() as unknown as AudioAnalyzer
   }
 }
 
@@ -134,5 +158,24 @@ describe('audioEngineRouter', () => {
     dashEngine.emit('durationchange', { duration: 30 })
 
     expect(durations).toEqual([10, 30])
+  })
+
+  it('creates analyzers from the active routed engine', async () => {
+    const mediaEngine = new AnalyzerAudioEngine()
+    const hlsEngine = new AnalyzerAudioEngine()
+    const router = new AudioEngineRouter({
+      adapters: [new FakeAdapter('hls', hlsEngine)],
+      mediaEngineFactory: () => mediaEngine,
+    })
+
+    expect(router.createAnalyzer({ fftSize: 512 })).toBeUndefined()
+
+    await router.load(new HttpAudioSource('/episode.mp3'))
+    expect(router.createAnalyzer({ fftSize: 1024 })).toBeDefined()
+    await router.load(new HttpAudioSource('/stream.m3u8'))
+    expect(router.createAnalyzer({ fftSize: 2048 })).toBeDefined()
+
+    expect(mediaEngine.analyzerFftSizes).toEqual([1024])
+    expect(hlsEngine.analyzerFftSizes).toEqual([2048])
   })
 })

@@ -20,4 +20,6 @@ features:
     details: Add HLS or DASH support without loading vendor libraries in core-only applications.
   - title: Browser-native lifecycle
     details: Observe media readiness, buffering, seeking, adaptive variants, segments, and typed failures.
+  - title: Player-owned analysis
+    details: Enable frequency and waveform sampling through AudioPlayer configuration, or connect custom Web Audio graphs when your engine owns the signal.
 ---

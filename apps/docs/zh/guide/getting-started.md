@@ -38,6 +38,7 @@ const player = new AudioPlayer({
   volume: 0.8,
   playbackRate: 1,
   preservesPitch: true,
+  analyzer: true,
 })
 
 player.on('statechange', state => console.log(state))
@@ -56,6 +57,7 @@ await player.play()
 | --- | --- | --- | --- |
 | `source` | `AudioSourceInput` | `undefined` | URL 字符串、source description、`HttpAudioSource` 或自定义 `AudioSource`。只有 `load()` 或 idle 状态下的 `play()` 才会真正加载。 |
 | `adapters` | `readonly AudioEngineAdapter[]` | `[]` | 内部 engine router 使用的可选协议适配器，用于 HLS 和 DASH。注入自定义 engine 时不要同时传入。 |
+| `analyzer` | `boolean \| AudioPlayerAnalyzerOptions` | `undefined` | `load()` 成功后启用 player 持有的 Web Audio 分析。传 `true` 使用默认值，也可以传 `fftSize` 和 `createAnalyzer`。 |
 | `preload` | `'none' \| 'metadata' \| 'auto'` | `'metadata'` | 应用于当前和后续 source 的浏览器 preload hint。 |
 | `autoplay` | `boolean` | `false` | 让 `load()` 在 source 就绪后尝试 `play()`。浏览器策略拦截会变成 `PLAYBACK_BLOCKED`。 |
 | `muted` | `boolean` | `false` | 初始静音。 |
@@ -109,6 +111,7 @@ const buffered = player.getBufferedRanges()
 const seekable = player.getSeekableRanges()
 const played = player.getPlayedRanges()
 const state = player.getState()
+const analyzer = player.getAnalyzer()
 ```
 
 `TimeRange` 使用秒作为单位：
@@ -202,7 +205,38 @@ catch (error) {
 
 ## 音频分析
 
-`AudioAnalyzer` 从 Web Audio 图读取频域和波形字节。它分析的是应用自己持有的 `AudioNode`；`AudioPlayer` 当前不会暴露内部 media element 作为 analyzer source。
+如果需要读取当前媒体 source 的频域或波形字节，可以启用 player 持有的 analyzer：
+
+```ts
+const player = new AudioPlayer({
+  source: 'https://example.com/audio.mp3',
+  analyzer: {
+    fftSize: 1024,
+  },
+})
+
+await player.load()
+
+const analyzer = player.getAnalyzer()
+const frequency = analyzer?.getFrequencyData({ binCount: 64 })
+const waveform = analyzer?.getWaveformData({ sampleCount: 128 })
+```
+
+内置 media element、HLS 和 DASH engine 会在开启分析时创建 Web Audio media-element source。跨域媒体需要通过 CORS 允许音频分析，否则浏览器可能返回静音样本。
+
+自定义 engine 可以暴露 `createAnalyzer` 来支持简单的 `analyzer: true` 路径。应用如果自己持有 Web Audio 图，也可以传自定义工厂：
+
+```ts
+const player = new AudioPlayer({
+  source: 'https://example.com/audio.mp3',
+  analyzer: {
+    fftSize: 2048,
+    createAnalyzer: ({ fftSize }) => new AudioAnalyzer(audioContext, sourceNode, fftSize),
+  },
+}, customEngine)
+```
+
+低阶使用时，`AudioAnalyzer` 仍然可以分析应用自己持有的任意 `AudioNode`：
 
 ```ts
 import { AudioAnalyzer } from 'gaudio'
