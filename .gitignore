@@ -1,3 +1,8 @@
 node_modules
+.pnpm-store
 dist
 demo/dist
+.turbo
+apps/docs/.vitepress/cache
+apps/docs/.vitepress/dist
+apps/docs/api

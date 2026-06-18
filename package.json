@@ -1,44 +1,20 @@
 {
-  "name": "gaudio",
-  "type": "module",
-  "version": "0.2.0",
-  "description": "A browser-first TypeScript audio streaming library.",
-  "sideEffects": false,
-  "exports": {
-    ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js",
-      "require": "./dist/index.cjs"
-    }
-  },
-  "main": "./dist/index.cjs",
-  "module": "./dist/index.js",
-  "types": "./dist/index.d.ts",
-  "files": [
-    "README.md",
-    "dist"
-  ],
+  "name": "gaudio-workspace",
+  "private": true,
+  "packageManager": "pnpm@10.28.0",
   "scripts": {
-    "build": "tsdown",
-    "demo": "vite --config demo/vite.config.ts",
-    "demo:build": "vite build --config demo/vite.config.ts",
-    "dev": "tsdown --watch",
-    "lint": "eslint .",
-    "test": "vitest run",
-    "typecheck": "pnpm run typecheck:library && pnpm run typecheck:demo",
-    "typecheck:demo": "vue-tsc --noEmit -p demo/tsconfig.json",
-    "typecheck:library": "tsc --noEmit"
+    "build": "turbo run build",
+    "dev": "turbo run dev",
+    "docs:build": "turbo run build --filter=@gaudio/docs",
+    "docs:dev": "turbo run dev --filter=@gaudio/docs...",
+    "lint": "pnpm run lint:workspace && eslint eslint.config.mjs",
+    "lint:workspace": "turbo run lint",
+    "test": "turbo run test",
+    "typecheck": "turbo run typecheck"
   },
   "devDependencies": {
     "@antfu/eslint-config": "^9.0.0",
-    "@types/node": "^25.9.3",
-    "@vitejs/plugin-vue": "^6.0.7",
     "eslint": "^10.4.1",
-    "tsdown": "^0.22.2",
-    "typescript": "^6.0.3",
-    "vite": "^8.0.16",
-    "vitest": "^4.1.8",
-    "vue": "^3.5.37",
-    "vue-tsc": "3.2.9"
+    "turbo": "^2.9.18"
   }
 }
