@@ -34,6 +34,32 @@ Source API：
 | `play()` | `Promise<void>` | 开始或恢复播放；`idle` 时会先加载。 |
 | `dispose()` | `void` | 释放 source 生命周期、engine、analyzer、vendor instance 和监听器。 |
 
+播放列表 API：
+
+| API | 返回 | 说明 |
+| --- | --- | --- |
+| `setPlaylist(playlist, options?)` | `void` | 选择一个播放列表 track，但不立即加载。空列表会清除当前 source。 |
+| `getPlaylist()` | `readonly AudioPlaylistTrack[]` | 当前播放列表 tracks。 |
+| `getPlaylistIndex()` | `number` | 当前选中的 track index；没有播放列表时为 `-1`。 |
+| `selectPlaylistTrack(index, options?)` | `Promise<void>` | 按 index 选择并加载 track。 |
+| `next(options?)` | `Promise<boolean>` | 加载下一首，并返回是否存在下一首。 |
+| `previous(options?)` | `Promise<boolean>` | 加载上一首，并返回是否存在上一首。 |
+
+```ts
+player.setPlaylist([
+  {
+    source: 'https://example.com/episode-1.mp3',
+    fallbackSources: ['https://cdn.example.com/episode-1.mp3'],
+  },
+  { source: 'https://example.com/episode-2.mp3' },
+])
+
+await player.load()
+await player.next({ autoplay: true })
+```
+
+播放列表 track 在 `ended` 后会自动续播下一首。某个 track 加载失败时，gaudio 会按顺序尝试它的 `fallbackSources`，全部失败后才发出加载错误。
+
 播放控制：
 
 | API | 返回 | 说明 |
@@ -149,6 +175,14 @@ const analyzer = new AudioAnalyzer(audioContext, sourceNode, fftSize)
 | `AudioStreamHandle` | `{ readonly url: string }`。 |
 | `AudioProtocol` | `'media' \| 'hls' \| 'dash'`。 |
 | `AudioSourceKind` | `'url' \| 'blob'`。 |
+
+播放列表类型：
+
+| 类型 | 字段 |
+| --- | --- |
+| `AudioPlaylistTrack` | `source`, `fallbackSources?` |
+| `AudioPlaylistOptions` | `startIndex?` |
+| `AudioPlaylistNavigationOptions` | `autoplay?` |
 
 ## 事件与错误
 

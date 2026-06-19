@@ -546,4 +546,89 @@ describe('audioPlayer', () => {
     expect(errors).toEqual([])
     expect(player.getState()).toBe('idle')
   })
+
+  it('selects playlist tracks with next and previous', async () => {
+    const engine = new FakeAudioEngine()
+    const player = new AudioPlayer({}, engine)
+
+    player.setPlaylist([
+      { source: 'https://example.com/first.mp3' },
+      { source: 'https://example.com/second.mp3' },
+      { source: 'https://example.com/third.mp3' },
+    ])
+
+    expect(player.getPlaylistIndex()).toBe(0)
+    expect(player.getSource()).toMatchObject({ url: 'https://example.com/first.mp3' })
+
+    await player.load()
+    await player.next()
+    await player.previous()
+
+    expect(player.getPlaylist().map(track => track.source)).toEqual([
+      'https://example.com/first.mp3',
+      'https://example.com/second.mp3',
+      'https://example.com/third.mp3',
+    ])
+    expect(engine.loadedSources.map(source => source.url)).toEqual([
+      'https://example.com/first.mp3',
+      'https://example.com/second.mp3',
+      'https://example.com/first.mp3',
+    ])
+    expect(player.getPlaylistIndex()).toBe(0)
+  })
+
+  it('continues with the next playlist track after playback ends', async () => {
+    const engine = new FakeAudioEngine()
+    const player = new AudioPlayer({}, engine)
+
+    player.setPlaylist([
+      { source: 'https://example.com/first.mp3' },
+      { source: 'https://example.com/second.mp3' },
+    ])
+
+    await player.load()
+    engine.emit('ended', undefined)
+    await new Promise(resolve => setTimeout(resolve, 0))
+
+    expect(player.getPlaylistIndex()).toBe(1)
+    expect(engine.loadedSources.map(source => source.url)).toEqual([
+      'https://example.com/first.mp3',
+      'https://example.com/second.mp3',
+    ])
+    expect(engine.playCalls).toBe(1)
+  })
+
+  it('loads a playlist fallback source when the primary source fails', async () => {
+    class FallbackAudioEngine extends FakeAudioEngine {
+      override async load(source: Parameters<FakeAudioEngine['load']>[0]): Promise<void> {
+        await super.load(source)
+
+        if (source.url === 'https://example.com/primary.mp3') {
+          throw new GAudioError('NETWORK_ERROR', 'Primary source failed')
+        }
+      }
+    }
+
+    const engine = new FallbackAudioEngine()
+    const player = new AudioPlayer({}, engine)
+    const errors: GAudioError[] = []
+
+    player.on('error', error => errors.push(error))
+    player.setPlaylist([
+      {
+        source: 'https://example.com/primary.mp3',
+        fallbackSources: ['https://example.com/fallback.mp3'],
+      },
+    ])
+
+    await player.load()
+
+    expect(engine.loadedSources.map(source => source.url)).toEqual([
+      'https://example.com/primary.mp3',
+      'https://example.com/fallback.mp3',
+    ])
+    expect(player.getSource()).toMatchObject({ url: 'https://example.com/fallback.mp3' })
+    expect(player.getPlaylistIndex()).toBe(0)
+    expect(errors).toEqual([])
+  })
 })

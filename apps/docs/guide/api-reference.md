@@ -34,6 +34,32 @@ Source APIs:
 | `play()` | `Promise<void>` | Starts or resumes playback; loads first when state is `idle`. |
 | `dispose()` | `void` | Releases source lifecycle, engine, analyzer, vendor instances, and listeners. |
 
+Playlist APIs:
+
+| API | Returns | Notes |
+| --- | --- | --- |
+| `setPlaylist(playlist, options?)` | `void` | Selects a playlist track without loading it. Empty playlists clear the active source. |
+| `getPlaylist()` | `readonly AudioPlaylistTrack[]` | Current playlist tracks. |
+| `getPlaylistIndex()` | `number` | Selected track index, or `-1` when no playlist is active. |
+| `selectPlaylistTrack(index, options?)` | `Promise<void>` | Selects and loads a track by index. |
+| `next(options?)` | `Promise<boolean>` | Loads the next track and returns whether one existed. |
+| `previous(options?)` | `Promise<boolean>` | Loads the previous track and returns whether one existed. |
+
+```ts
+player.setPlaylist([
+  {
+    source: 'https://example.com/episode-1.mp3',
+    fallbackSources: ['https://cdn.example.com/episode-1.mp3'],
+  },
+  { source: 'https://example.com/episode-2.mp3' },
+])
+
+await player.load()
+await player.next({ autoplay: true })
+```
+
+Playlist tracks automatically continue to the next track after `ended`. A track's `fallbackSources` are attempted in order before gaudio emits a load error.
+
 Playback controls:
 
 | API | Returns | Notes |
@@ -149,6 +175,14 @@ const analyzer = new AudioAnalyzer(audioContext, sourceNode, fftSize)
 | `AudioStreamHandle` | `{ readonly url: string }`. |
 | `AudioProtocol` | `'media' \| 'hls' \| 'dash'`. |
 | `AudioSourceKind` | `'url' \| 'blob'`. |
+
+Playlist types:
+
+| Type | Fields |
+| --- | --- |
+| `AudioPlaylistTrack` | `source`, `fallbackSources?` |
+| `AudioPlaylistOptions` | `startIndex?` |
+| `AudioPlaylistNavigationOptions` | `autoplay?` |
 
 ## Events And Errors
 

@@ -72,6 +72,26 @@ player.dispose()
 
 Volume must be between `0` and `1`. Playback rate must be greater than `0`. Seek targets must be non-negative.
 
+## Playlists and fallback sources
+
+Use a playlist when an application owns track order, previous/next controls, and automatic continuation:
+
+```ts
+player.setPlaylist([
+  {
+    source: 'https://example.com/episode-1.mp3',
+    fallbackSources: ['https://cdn.example.com/episode-1.mp3'],
+  },
+  { source: 'https://example.com/episode-2.mp3' },
+])
+
+await player.load()
+await player.next()
+await player.previous()
+```
+
+When a playlist track ends, gaudio automatically loads and plays the next track. If a track fails to load, its `fallbackSources` are attempted in order before an error is emitted.
+
 ## Source inputs
 
 ```ts

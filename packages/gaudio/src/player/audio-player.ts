@@ -5,6 +5,7 @@ import type { AudioFormatSupport, PreloadMode, TimeRange } from '../engine/audio
 import type { AudioSource, AudioSourceInput } from '../source/audio-source'
 import type { AudioPlayerEvents } from './audio-player-events'
 import type { AudioPlayerAnalyzerOptions, AudioPlayerOptions, PlaybackState } from './audio-player-options'
+import type { AudioPlaylistNavigationOptions, AudioPlaylistOptions, AudioPlaylistTrack } from './audio-playlist'
 import { audioEngineEventNames } from '../engine/audio-engine'
 import { AudioEngineRouter } from '../engine/audio-engine-router'
 import { GAudioError } from '../errors/errors'
@@ -20,6 +21,8 @@ export class AudioPlayer {
   private readonly analyzerOptions?: AudioPlayerAnalyzerOptions
   private analyzer?: AudioAnalyzer
   private source?: AudioSource
+  private playlist: readonly AudioPlaylistTrack[] = []
+  private playlistIndex = -1
   private state: PlaybackState = 'idle'
   private loadRequestId = 0
   private hasLoadedSource = false
@@ -45,9 +48,7 @@ export class AudioPlayer {
 
     try {
       if (options.source) {
-        this.source = typeof options.source === 'string' || !('open' in options.source)
-          ? new HttpAudioSource(options.source)
-          : options.source
+        this.source = this.audioSourceForInput(options.source)
       }
 
       this.engine.setPreload(options.preload ?? 'metadata')
@@ -79,6 +80,16 @@ export class AudioPlayer {
   /** @returns The current configured source, or `undefined` when none is configured. */
   getSource(): AudioSource | undefined {
     return this.source
+  }
+
+  /** @returns The current playlist tracks. */
+  getPlaylist(): readonly AudioPlaylistTrack[] {
+    return this.playlist
+  }
+
+  /** @returns The selected playlist index, or `-1` when no playlist is active. */
+  getPlaylistIndex(): number {
+    return this.playlistIndex
   }
 
   /** @returns The current playback position in seconds. */
@@ -284,12 +295,94 @@ export class AudioPlayer {
    * @param source URL, source description, or custom source implementation.
    */
   setSource(source: AudioSourceInput): void {
+    this.playlist = []
+    this.playlistIndex = -1
+    this.selectSource(source)
+  }
+
+  /**
+   * Replaces the current playlist and selects a track without loading it.
+   *
+   * @param playlist Tracks to make available for sequential playback.
+   * @param options Selection options for the initial track.
+   */
+  setPlaylist(playlist: readonly AudioPlaylistTrack[], options: AudioPlaylistOptions = {}): void {
+    this.playlist = playlist.map(track => ({
+      source: track.source,
+      fallbackSources: track.fallbackSources ? [...track.fallbackSources] : undefined,
+    }))
+
+    if (this.playlist.length === 0) {
+      this.playlistIndex = -1
+      this.loadRequestId += 1
+      this.releaseAnalyzer()
+      this.engine.unload()
+      this.source = undefined
+      this.hasLoadedSource = false
+      this.setState('idle')
+      return
+    }
+
+    const startIndex = options.startIndex ?? 0
+    this.assertPlaylistIndex(startIndex)
+    this.playlistIndex = startIndex
+    // AI modified: playlist selection reuses the same source lifecycle as direct source changes.
+    this.selectSource(this.playlist[startIndex].source)
+  }
+
+  /**
+   * Loads the next playlist track when one is available.
+   *
+   * @param options Playback behavior after the track loads.
+   * @returns `true` when a next track was selected.
+   */
+  async next(options: AudioPlaylistNavigationOptions = {}): Promise<boolean> {
+    if (this.playlistIndex < 0 || this.playlistIndex >= this.playlist.length - 1) {
+      return false
+    }
+
+    await this.selectPlaylistTrack(this.playlistIndex + 1, options)
+    return true
+  }
+
+  /**
+   * Loads the previous playlist track when one is available.
+   *
+   * @param options Playback behavior after the track loads.
+   * @returns `true` when a previous track was selected.
+   */
+  async previous(options: AudioPlaylistNavigationOptions = {}): Promise<boolean> {
+    if (this.playlistIndex <= 0) {
+      return false
+    }
+
+    await this.selectPlaylistTrack(this.playlistIndex - 1, options)
+    return true
+  }
+
+  /**
+   * Selects and loads a playlist track by index.
+   *
+   * @param index Zero-based playlist track index.
+   * @param options Playback behavior after the track loads.
+   */
+  async selectPlaylistTrack(index: number, options: AudioPlaylistNavigationOptions = {}): Promise<void> {
+    this.assertPlaylistIndex(index)
+    this.playlistIndex = index
+    this.selectSource(this.playlist[index].source)
+
+    await this.load()
+
+    if (options.autoplay) {
+      await this.play()
+    }
+  }
+
+  private selectSource(source: AudioSourceInput): void {
     this.loadRequestId += 1
     this.releaseAnalyzer()
     this.engine.unload()
-    this.source = typeof source === 'string' || !('open' in source)
-      ? new HttpAudioSource(source)
-      : source
+    this.source = this.audioSourceForInput(source)
     this.hasLoadedSource = false
     this.setState('idle')
   }
@@ -314,7 +407,7 @@ export class AudioPlayer {
     this.setState('loading')
 
     try {
-      await this.engine.load(this.source)
+      await this.loadCurrentSource()
     }
     catch (error) {
       if (error instanceof GAudioError && error.code === 'LOAD_ABORTED') {
@@ -532,6 +625,7 @@ export class AudioPlayer {
           this.engine.on(eventName, (payload) => {
             this.setState('ended')
             this.events.emit(eventName, payload)
+            this.continuePlaylistAfterEnded()
           })
           break
         case 'error':
@@ -550,6 +644,63 @@ export class AudioPlayer {
   private publishError(error: GAudioError): void {
     this.setState('error')
     this.events.emit('error', error)
+  }
+
+  private async loadCurrentSource(): Promise<void> {
+    const sources = this.playlistSourceCandidates()
+    let loadError: unknown
+
+    for (const source of sources) {
+      this.source = source
+
+      try {
+        await this.engine.load(source)
+        return
+      }
+      catch (error) {
+        if (error instanceof GAudioError && error.code === 'LOAD_ABORTED') {
+          throw error
+        }
+
+        loadError = error
+      }
+    }
+
+    throw loadError
+  }
+
+  private playlistSourceCandidates(): AudioSource[] {
+    if (this.playlistIndex < 0) {
+      return this.source ? [this.source] : []
+    }
+
+    const playlistTrack = this.playlist[this.playlistIndex]
+    if (!playlistTrack) {
+      return this.source ? [this.source] : []
+    }
+
+    return [
+      playlistTrack.source,
+      ...(playlistTrack.fallbackSources ?? []),
+    ].map(source => this.audioSourceForInput(source))
+  }
+
+  private audioSourceForInput(source: AudioSourceInput): AudioSource {
+    return typeof source === 'string' || !('open' in source)
+      ? new HttpAudioSource(source)
+      : source
+  }
+
+  private assertPlaylistIndex(index: number): void {
+    if (!Number.isInteger(index) || index < 0 || index >= this.playlist.length) {
+      throw new RangeError('Playlist index must reference an existing track')
+    }
+  }
+
+  private continuePlaylistAfterEnded(): void {
+    void this.next({ autoplay: true }).catch(() => {
+      // AI modified: load() already emits the terminal error; suppress the background promise.
+    })
   }
 
   private setState(state: PlaybackState): void {

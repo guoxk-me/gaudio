@@ -41,6 +41,11 @@ export type {
   AudioPlayerOptions,
   PlaybackState,
 } from './player/audio-player-options'
+export type {
+  AudioPlaylistNavigationOptions,
+  AudioPlaylistOptions,
+  AudioPlaylistTrack,
+} from './player/audio-playlist'
 export type { AudioSource, AudioSourceInput, AudioSourceKind, AudioStreamHandle } from './source/audio-source'
 export type {
   AudioProtocol,
