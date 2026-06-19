@@ -1,3 +1,4 @@
+import type { AdaptivePlaybackInfo, AdaptiveQualitySelection, AdaptiveVariant } from '../adapters/adaptive-audio-types'
 import type { AudioAnalyzer } from '../analysis/audio-analyzer'
 import type { AudioEngine, AudioEngineEvents } from '../engine/audio-engine'
 import type { AudioFormatSupport, PreloadMode, TimeRange } from '../engine/audio-engine-types'
@@ -73,6 +74,11 @@ export class AudioPlayer {
   /** @returns The current public playback lifecycle state. */
   getState(): PlaybackState {
     return this.state
+  }
+
+  /** @returns The current configured source, or `undefined` when none is configured. */
+  getSource(): AudioSource | undefined {
+    return this.source
   }
 
   /** @returns The current playback position in seconds. */
@@ -242,6 +248,34 @@ export class AudioPlayer {
     return this.analyzer
   }
 
+  /** @returns Active adaptive playback implementation details, when an adaptive source is loaded. */
+  getActiveAdaptivePlayback(): AdaptivePlaybackInfo | undefined {
+    return this.engine.getActiveAdaptivePlayback?.()
+  }
+
+  /** @returns Variants discovered for the active adaptive source. */
+  getAdaptiveVariants(): readonly AdaptiveVariant[] {
+    return this.engine.getAdaptiveVariants?.() ?? []
+  }
+
+  /** @returns `'auto'` for automatic ABR or the selected variant identifier. */
+  getAdaptiveQualitySelection(): AdaptiveQualitySelection {
+    return this.engine.getAdaptiveQualitySelection?.() ?? 'auto'
+  }
+
+  /**
+   * Selects automatic adaptive quality or a specific variant identifier.
+   *
+   * @param variantId `'auto'` for automatic ABR or a variant identifier from {@link getAdaptiveVariants}.
+   */
+  async setAdaptiveQuality(variantId: AdaptiveQualitySelection): Promise<void> {
+    if (!this.engine.setAdaptiveQuality) {
+      throw new GAudioError('PROTOCOL_UNSUPPORTED', 'Adaptive quality selection is unavailable for the active source')
+    }
+
+    await this.engine.setAdaptiveQuality(variantId)
+  }
+
   /**
    * Replaces the current source without loading it.
    *
@@ -396,6 +430,30 @@ export class AudioPlayer {
     handler: (payload: AudioPlayerEvents[EventName]) => void,
   ): () => void {
     return this.events.on(eventName, handler)
+  }
+
+  /**
+   * Registers a typed listener that is removed after the next matching player event.
+   *
+   * @param eventName Event to observe once.
+   * @param handler Listener invoked with the next event payload.
+   * @returns A function that removes this listener before it runs.
+   */
+  once<EventName extends keyof AudioPlayerEvents>(
+    eventName: EventName,
+    handler: (payload: AudioPlayerEvents[EventName]) => void,
+  ): () => void {
+    return this.events.once(eventName, handler)
+  }
+
+  /**
+   * Removes player event listeners.
+   *
+   * @param eventName Optional event name. When omitted, every player listener is removed.
+   */
+  removeAllListeners<EventName extends keyof AudioPlayerEvents>(eventName?: EventName): void {
+    // AI modified: expose scoped listener cleanup without forcing applications to dispose playback.
+    this.events.clear(eventName)
   }
 
   /**

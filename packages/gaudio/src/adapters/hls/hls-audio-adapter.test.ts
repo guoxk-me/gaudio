@@ -15,6 +15,8 @@ class FakeHls {
   readonly listeners = new Map<Events, HlsListener[]>()
   readonly loadedSources: string[] = []
   levels: Array<{ id: number, bitrate: number, codecSet: string }> = []
+  loadLevel = -1
+  nextLevel = -1
   attachedMedia?: HTMLMediaElement
   destroyCalls = 0
 
@@ -319,6 +321,45 @@ describe('hlsAudioAdapter', () => {
     expect(segmentLoads[0]).toMatchObject({ url: '/segment-1.m4s', variantId: '1', duration: 4 })
     expect(streamErrors[0]).toMatchObject({ category: 'segment', isFatal: false })
     expect(fatalErrors).toEqual([])
+  })
+
+  it('selects HLS variants through the unified adaptive quality API', async () => {
+    const harness = adapterHarness({ strategy: 'hls-only' })
+    const engine = await loadEngine(harness)
+    const variantChanges: AudioEngineEvents['variantchange'][] = []
+    engine.on('variantchange', payload => variantChanges.push(payload))
+    const hls = harness.hlsInstances[0]
+    hls.levels = [
+      { id: 10, bitrate: 64_000, codecSet: 'mp4a.40.2' },
+      { id: 20, bitrate: 128_000, codecSet: 'mp4a.40.2' },
+    ]
+    hls.emit(Events.MANIFEST_LOADED, {
+      url: '/stream.m3u8',
+      levels: [
+        { id: 10, bitrate: 64_000, audioCodec: 'mp4a.40.2' },
+        { id: 20, bitrate: 128_000, audioCodec: 'mp4a.40.2' },
+      ],
+    })
+
+    expect(engine.getAdaptiveVariants?.()).toEqual([
+      { id: '10', bitrate: 64_000, codecs: 'mp4a.40.2' },
+      { id: '20', bitrate: 128_000, codecs: 'mp4a.40.2' },
+    ])
+
+    await engine.setAdaptiveQuality?.('20')
+
+    expect(hls.nextLevel).toBe(1)
+    expect(engine.getAdaptiveQualitySelection?.()).toBe('20')
+    expect(variantChanges.at(-1)).toMatchObject({
+      variantId: '20',
+      bitrate: 128_000,
+      reason: 'manual',
+    })
+
+    await engine.setAdaptiveQuality?.('auto')
+
+    expect(hls.loadLevel).toBe(-1)
+    expect(engine.getAdaptiveQualitySelection?.()).toBe('auto')
   })
 
   it.each([

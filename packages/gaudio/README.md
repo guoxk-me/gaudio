@@ -21,7 +21,7 @@ pnpm add gaudio dashjs
 
 | Import | Contents |
 | --- | --- |
-| `gaudio` | `AudioPlayer`, `HttpAudioSource`, `AudioAnalyzer`, `EventEmitter`, core types, adaptive event types, `AdaptivePlaybackPreset` |
+| `gaudio` | `AudioPlayer`, `HttpAudioSource`, `BlobAudioSource`, `AudioAnalyzer`, `EventEmitter`, core types, adaptive event types, `AdaptivePlaybackPreset` |
 | `gaudio/hls` | `createHlsAdapter`, HLS adapter types, `HlsConfig` |
 | `gaudio/dash` | `createDashAdapter`, DASH adapter types, dash.js type re-exports |
 
@@ -66,6 +66,7 @@ player.getBufferedRanges()
 player.getSeekableRanges()
 player.getPlayedRanges()
 player.getAnalyzer()
+player.getSource()
 player.dispose()
 ```
 
@@ -74,7 +75,7 @@ Volume must be between `0` and `1`. Playback rate must be greater than `0`. Seek
 ## Source inputs
 
 ```ts
-import { AudioPlayer, HttpAudioSource } from 'gaudio'
+import { AudioPlayer, BlobAudioSource, HttpAudioSource } from 'gaudio'
 
 player.setSource('https://example.com/audio.mp3')
 
@@ -89,6 +90,9 @@ player.setSource(new HttpAudioSource({
   protocol: 'dash',
   mimeType: 'application/dash+xml',
 }))
+
+const fileSource = new BlobAudioSource(file)
+player.setSource(fileSource)
 ```
 
 Custom `AudioSource` objects can lazily open signed URLs, local object URLs, or app-owned resources through `open()` and `close()`.
@@ -116,7 +120,25 @@ const player = new AudioPlayer({
 
 `Balanced` is used when `preset` is omitted. Choose `FastStart` for smaller startup buffers or `Stable` for weak and variable networks. Presets configure audio VOD loading, buffering, memory limits, ABR, request retries, timeouts, and stall recovery. Explicit vendor configuration overrides the selected preset.
 
-gaudio reports automatic adaptive quality through `manifestloaded` and `variantchange`. A unified manual quality API is not part of the current public surface; advanced integrations can use the exposed `hlsInstance` or `dashInstance`.
+gaudio reports adaptive quality through `manifestloaded` and `variantchange`. Use the player-level API for protocol-neutral quality controls:
+
+```ts
+const variants = player.getAdaptiveVariants()
+await player.setAdaptiveQuality('auto')
+await player.setAdaptiveQuality(variants[0].id)
+```
+
+Native HLS still uses browser-owned ABR and does not expose manual variants. Advanced integrations can still inspect the exposed `hlsInstance` or `dashInstance` from adapter subpaths.
+
+## Events
+
+```ts
+const unsubscribe = player.on('playing', () => console.log('playing'))
+
+player.once('ended', () => console.log('done'))
+player.removeAllListeners('timeupdate')
+unsubscribe()
+```
 
 ## Audio analysis
 

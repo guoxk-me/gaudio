@@ -80,7 +80,7 @@ const {
       <span>{{ text.controls.quality }}</span>
       <select v-model="adaptiveQualitySelection" :disabled="isBusy" @change="applyAdaptiveQualitySelection">
         <option v-for="qualityChoice in adaptiveQualityChoices" :key="qualityChoice.id" :value="qualityChoice.id">
-          {{ qualityChoice.id === 'automatic' ? text.controls.automaticQuality : qualityChoice.label }}
+          {{ qualityChoice.id === 'auto' ? text.controls.automaticQuality : qualityChoice.label }}
         </option>
       </select>
     </label>

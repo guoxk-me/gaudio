@@ -39,11 +39,12 @@ describe('documentation application', () => {
   })
 
   it('ships bilingual guide pages without migration documentation', async () => {
-    const [englishGuideFiles, chineseGuideFiles, englishHome, chineseHome] = await Promise.all([
+    const [englishGuideFiles, chineseGuideFiles, englishHome, chineseHome, homeShowcase] = await Promise.all([
       readdir(resolve(docsRoot, 'guide')),
       readdir(resolve(docsRoot, 'zh/guide')),
       readFile(resolve(docsRoot, 'index.md'), 'utf8'),
       readFile(resolve(docsRoot, 'zh/index.md'), 'utf8'),
+      readFile(resolve(docsRoot, '.vitepress/theme/components/HomeShowcase.vue'), 'utf8'),
     ])
 
     expect(englishGuideFiles).not.toContain('migration.md')
@@ -61,6 +62,9 @@ describe('documentation application', () => {
       'api-reference.md',
     ]))
     expect(englishHome).toContain('Pre-release')
+    expect(englishHome).toContain('<HomeShowcase />')
+    expect(homeShowcase).toContain('Core playback in one object')
+    expect(homeShowcase).toContain('setAdaptiveQuality')
     expect(chineseHome).toContain('预发布')
   })
 })

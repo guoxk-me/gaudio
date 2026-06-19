@@ -68,14 +68,32 @@ State and capability APIs:
 | `getBufferedRanges()` | `readonly TimeRange[]` | Buffered ranges in seconds. |
 | `getSeekableRanges()` | `readonly TimeRange[]` | Seekable ranges in seconds. |
 | `getPlayedRanges()` | `readonly TimeRange[]` | Played ranges in seconds. |
-| `canPlayType(mimeType)` | `AudioFormatSupport` | Browser media support: `''`, `'maybe'`, or `'probably'`. |
+| `canPlayType(mimeType)` | `AudioFormatSupport` | Native media support plus registered HLS/DASH adapter support: `''`, `'maybe'`, or `'probably'`. |
 | `getAnalyzer()` | `AudioAnalyzer \| undefined` | Analyzer created after `load()` when configured and supported. |
+| `getSource()` | `AudioSource \| undefined` | Current configured source. |
 
 Events:
 
 | API | Returns | Notes |
 | --- | --- | --- |
 | `on(eventName, handler)` | `() => void` | Registers a typed `AudioPlayerEvents` listener and returns an unsubscribe function. |
+| `once(eventName, handler)` | `() => void` | Registers a typed listener for the next matching event. |
+| `removeAllListeners(eventName?)` | `void` | Removes listeners for one event or all player listeners. |
+
+Adaptive quality:
+
+| API | Returns | Notes |
+| --- | --- | --- |
+| `getActiveAdaptivePlayback()` | `AdaptivePlaybackInfo \| undefined` | Active HLS/DASH implementation. |
+| `getAdaptiveVariants()` | `readonly AdaptiveVariant[]` | Variants discovered from the current manifest. |
+| `getAdaptiveQualitySelection()` | `AdaptiveQualitySelection` | `'auto'` or the selected variant id. |
+| `setAdaptiveQuality(variantId)` | `Promise<void>` | Selects `'auto'` ABR or a variant id. Native HLS may reject manual selection. |
+
+```ts
+const variants = player.getAdaptiveVariants()
+await player.setAdaptiveQuality('auto')
+await player.setAdaptiveQuality(variants[0].id)
+```
 
 ## AudioPlayerOptions
 
@@ -121,6 +139,7 @@ const analyzer = new AudioAnalyzer(audioContext, sourceNode, fftSize)
 | API or type | Purpose |
 | --- | --- |
 | `HttpAudioSource` | URL-backed source class used internally for strings and source descriptions. |
+| `BlobAudioSource` | Blob/File-backed source that owns and revokes its object URL. |
 | `new HttpAudioSource(source)` | Accepts `string \| AudioSourceDescription`. |
 | `HttpAudioSource.open()` | Resolves `{ url }` without making a network request. |
 | `HttpAudioSource.close()` | No-op cleanup for plain URLs. |
@@ -129,7 +148,7 @@ const analyzer = new AudioAnalyzer(audioContext, sourceNode, fftSize)
 | `AudioSource` | Custom lazy source contract with `kind`, optional metadata, `open()`, and `close()`. |
 | `AudioStreamHandle` | `{ readonly url: string }`. |
 | `AudioProtocol` | `'media' \| 'hls' \| 'dash'`. |
-| `AudioSourceKind` | `'url'`. |
+| `AudioSourceKind` | `'url' \| 'blob'`. |
 
 ## Events And Errors
 
@@ -167,6 +186,7 @@ Shared adaptive exports from `gaudio`:
 | `AdaptiveManifestUpdate` | Manifest URL and discovered variants. |
 | `AdaptiveVariant` | Variant id, bitrate, and optional codecs. |
 | `AdaptiveVariantUpdate` | Initial or automatic adaptive variant selection. |
+| `AdaptiveQualitySelection` | `'auto'` or a manual variant id. |
 | `AdaptiveSegmentUpdate` | Segment request URL, variant, and duration when available. |
 | `AdaptiveStreamError` | Recoverable or fatal adaptive failure information. |
 
@@ -214,6 +234,7 @@ Import from `gaudio/dash`.
 | API | Returns |
 | --- | --- |
 | `on(eventName, handler)` | `() => void` |
+| `once(eventName, handler)` | `() => void` |
 | `off(eventName, handler)` | `void` |
 | `emit(eventName, payload)` | `void` |
-| `clear()` | `void` |
+| `clear(eventName?)` | `void` |

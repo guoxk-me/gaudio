@@ -6,6 +6,7 @@
     "api": "typedoc",
     "build": "pnpm run api && vitepress build .",
     "dev": "pnpm run api && vitepress dev .",
+    "e2e": "playwright test --config ../../playwright.config.ts",
     "lint": "eslint .",
     "test": "vitest run",
     "typecheck": "vue-tsc --noEmit -p tsconfig.json"

@@ -68,14 +68,32 @@ Source API：
 | `getBufferedRanges()` | `readonly TimeRange[]` | 已缓冲区间，单位秒。 |
 | `getSeekableRanges()` | `readonly TimeRange[]` | 可跳转区间，单位秒。 |
 | `getPlayedRanges()` | `readonly TimeRange[]` | 已播放区间，单位秒。 |
-| `canPlayType(mimeType)` | `AudioFormatSupport` | 浏览器媒体支持：`''`、`'maybe'` 或 `'probably'`。 |
+| `canPlayType(mimeType)` | `AudioFormatSupport` | 原生媒体支持加已注册 HLS/DASH adapter 支持：`''`、`'maybe'` 或 `'probably'`。 |
 | `getAnalyzer()` | `AudioAnalyzer \| undefined` | 配置并支持 analyzer 时，在 `load()` 后返回 analyzer。 |
+| `getSource()` | `AudioSource \| undefined` | 当前配置的 source。 |
 
 事件：
 
 | API | 返回 | 说明 |
 | --- | --- | --- |
 | `on(eventName, handler)` | `() => void` | 注册类型化 `AudioPlayerEvents` 监听器，并返回取消函数。 |
+| `once(eventName, handler)` | `() => void` | 只监听下一次匹配事件。 |
+| `removeAllListeners(eventName?)` | `void` | 移除某个事件或全部 player 监听器。 |
+
+自适应音质：
+
+| API | 返回 | 说明 |
+| --- | --- | --- |
+| `getActiveAdaptivePlayback()` | `AdaptivePlaybackInfo \| undefined` | 当前 HLS/DASH 实现。 |
+| `getAdaptiveVariants()` | `readonly AdaptiveVariant[]` | 当前 manifest 发现的 variants。 |
+| `getAdaptiveQualitySelection()` | `AdaptiveQualitySelection` | `'auto'` 或已选择的 variant id。 |
+| `setAdaptiveQuality(variantId)` | `Promise<void>` | 选择 `'auto'` ABR 或指定 variant id。原生 HLS 可能拒绝手动选择。 |
+
+```ts
+const variants = player.getAdaptiveVariants()
+await player.setAdaptiveQuality('auto')
+await player.setAdaptiveQuality(variants[0].id)
+```
 
 ## AudioPlayerOptions
 
@@ -121,6 +139,7 @@ const analyzer = new AudioAnalyzer(audioContext, sourceNode, fftSize)
 | API 或类型 | 用途 |
 | --- | --- |
 | `HttpAudioSource` | URL-backed source class，字符串和 source description 会走这个包装。 |
+| `BlobAudioSource` | Blob/File-backed source，会持有并释放自己的 object URL。 |
 | `new HttpAudioSource(source)` | 接收 `string \| AudioSourceDescription`。 |
 | `HttpAudioSource.open()` | 不发起网络请求，resolve `{ url }`。 |
 | `HttpAudioSource.close()` | 普通 URL 的 no-op cleanup。 |
@@ -129,7 +148,7 @@ const analyzer = new AudioAnalyzer(audioContext, sourceNode, fftSize)
 | `AudioSource` | 自定义懒加载 source contract，包含 `kind`、可选 metadata、`open()` 和 `close()`。 |
 | `AudioStreamHandle` | `{ readonly url: string }`。 |
 | `AudioProtocol` | `'media' \| 'hls' \| 'dash'`。 |
-| `AudioSourceKind` | `'url'`。 |
+| `AudioSourceKind` | `'url' \| 'blob'`。 |
 
 ## 事件与错误
 
@@ -167,6 +186,7 @@ Payload 类型：
 | `AdaptiveManifestUpdate` | Manifest URL 和发现的 variants。 |
 | `AdaptiveVariant` | Variant id、bitrate 和可选 codecs。 |
 | `AdaptiveVariantUpdate` | 初始或自动自适应 variant 选择。 |
+| `AdaptiveQualitySelection` | `'auto'` 或手动 variant id。 |
 | `AdaptiveSegmentUpdate` | 可用时包含 segment request URL、variant 和 duration。 |
 | `AdaptiveStreamError` | 可恢复或 fatal 自适应失败信息。 |
 
@@ -214,6 +234,7 @@ Adapter contract：
 | API | 返回 |
 | --- | --- |
 | `on(eventName, handler)` | `() => void` |
+| `once(eventName, handler)` | `() => void` |
 | `off(eventName, handler)` | `void` |
 | `emit(eventName, payload)` | `void` |
-| `clear()` | `void` |
+| `clear(eventName?)` | `void` |

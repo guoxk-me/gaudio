@@ -12,7 +12,7 @@ export interface AudioSourceDescription {
 }
 
 /** Identifies the resource shape exposed by an {@link AudioSource}. */
-export type AudioSourceKind = 'url'
+export type AudioSourceKind = 'url' | 'blob'
 
 /** Contains the playable resource produced when an {@link AudioSource} is opened. */
 export interface AudioStreamHandle {

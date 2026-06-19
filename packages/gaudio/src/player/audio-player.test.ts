@@ -400,6 +400,92 @@ describe('audioPlayer', () => {
     expect(receivedEvents).toEqual(['seeking:12', 'volume:0.5:true', 'rate:1.25'])
   })
 
+  it('returns the current source object', () => {
+    const engine = new FakeAudioEngine()
+    const player = new AudioPlayer({ source: 'https://example.com/audio.mp3' }, engine)
+
+    expect(player.getSource()).toMatchObject({
+      url: 'https://example.com/audio.mp3',
+      kind: 'url',
+    })
+
+    player.setSource({
+      url: 'https://example.com/stream.m3u8',
+      protocol: 'hls',
+    })
+
+    expect(player.getSource()).toMatchObject({
+      url: 'https://example.com/stream.m3u8',
+      protocol: 'hls',
+    })
+  })
+
+  it('reports adapter MIME support before an adaptive source is loaded', () => {
+    const hlsAdapter = new FakeHlsAdapter(new FakeAudioEngine())
+    const dashAdapter = new FakeDashAdapter(new FakeAudioEngine())
+    const player = new AudioPlayer({ adapters: [hlsAdapter, dashAdapter] })
+
+    expect(player.canPlayType('application/vnd.apple.mpegurl')).toBe('probably')
+    expect(player.canPlayType('application/dash+xml')).toBe('probably')
+    expect(player.canPlayType('audio/unknown')).toBe('')
+  })
+
+  it('exposes active adaptive playback and unified quality selection', async () => {
+    const engine = new FakeAudioEngine()
+    engine.activeAdaptivePlayback = { protocol: 'hls', implementation: 'hls.js' }
+    engine.adaptiveVariants.push(
+      { id: 'low', bitrate: 64_000, codecs: 'mp4a.40.2' },
+      { id: 'high', bitrate: 192_000, codecs: 'mp4a.40.2' },
+    )
+    const player = new AudioPlayer({}, engine)
+
+    expect(player.getActiveAdaptivePlayback()).toEqual({ protocol: 'hls', implementation: 'hls.js' })
+    expect(player.getAdaptiveVariants()).toEqual([
+      { id: 'low', bitrate: 64_000, codecs: 'mp4a.40.2' },
+      { id: 'high', bitrate: 192_000, codecs: 'mp4a.40.2' },
+    ])
+    expect(player.getAdaptiveQualitySelection()).toBe('auto')
+
+    await player.setAdaptiveQuality('high')
+
+    expect(player.getAdaptiveQualitySelection()).toBe('high')
+  })
+
+  it('supports one-time player event listeners', () => {
+    const engine = new FakeAudioEngine()
+    const player = new AudioPlayer({}, engine)
+    const states: string[] = []
+
+    player.once('statechange', state => states.push(state))
+
+    engine.emit('playing', undefined)
+    engine.emit('pause', undefined)
+
+    expect(states).toEqual(['playing'])
+  })
+
+  it('removes player listeners by event name or all at once', () => {
+    const engine = new FakeAudioEngine()
+    const player = new AudioPlayer({}, engine)
+    const states: string[] = []
+    const playEvents: string[] = []
+
+    player.on('statechange', state => states.push(state))
+    player.on('play', () => playEvents.push('play'))
+
+    player.removeAllListeners('statechange')
+    engine.emit('playing', undefined)
+    engine.emit('play', undefined)
+
+    expect(states).toEqual([])
+    expect(playEvents).toEqual(['play'])
+
+    player.removeAllListeners()
+    engine.emit('play', undefined)
+
+    expect(playEvents).toEqual(['play'])
+  })
+
   it('stops at ready without loading the source again', async () => {
     const engine = new FakeAudioEngine()
     const player = new AudioPlayer({ source: 'https://example.com/audio.mp3' }, engine)

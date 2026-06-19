@@ -49,8 +49,11 @@ export interface AdaptiveVariantUpdate extends AdaptivePlaybackInfo {
   /** Newly selected bitrate in bits per second, when known. */
   bitrate?: number
   /** Reason the implementation selected the variant. */
-  reason: 'initial' | 'automatic'
+  reason: 'initial' | 'automatic' | 'manual'
 }
+
+/** Identifies automatic adaptive selection or a manually selected variant. */
+export type AdaptiveQualitySelection = 'auto' | string
 
 /** Reports the start or completion of an adaptive media segment request. */
 export interface AdaptiveSegmentUpdate extends AdaptivePlaybackInfo {

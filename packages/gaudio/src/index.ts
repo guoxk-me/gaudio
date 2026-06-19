@@ -4,6 +4,7 @@ export type {
   AdaptiveManifestUpdate,
   AdaptivePlaybackImplementation,
   AdaptivePlaybackInfo,
+  AdaptiveQualitySelection,
   AdaptiveSegmentUpdate,
   AdaptiveStreamError,
   AdaptiveVariant,
@@ -45,4 +46,6 @@ export type {
   AudioProtocol,
   AudioSourceDescription,
 } from './source/audio-source'
+export { BlobAudioSource } from './source/blob-audio-source'
+export type { BlobAudioSourceOptions } from './source/blob-audio-source'
 export { HttpAudioSource } from './source/http-audio-source'

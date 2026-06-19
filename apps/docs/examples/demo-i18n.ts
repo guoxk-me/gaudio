@@ -93,7 +93,7 @@ export const demoText = {
       apiCoverage: [
         ['AudioPlayer', 'Constructor options, load/play/pause/stop, seek/fastSeek, volume, rate, mute, loop, autoplay, preload, pitch, state, ranges, canPlayType, events, and dispose are shown in the controls and status panels.'],
         ['HttpAudioSource and AudioSource', 'Source mode switches between URL strings, source descriptions, HttpAudioSource, and a custom AudioSource with open/close counters.'],
-        ['HLS and DASH adapters', 'Adapters are registered from public subpaths, expose support diagnostics, can update HLS config or DASH settings at runtime, and expose vendor instances for manual quality experiments.'],
+        ['HLS and DASH adapters', 'Adapters are registered from public subpaths, expose support diagnostics, can update HLS config or DASH settings at runtime, and power the unified manual quality API.'],
         ['AdaptivePlaybackPreset', 'The demo initializes both adaptive adapters with the Balanced audio VOD preset.'],
         ['AudioAnalyzer', 'The utility preview creates a Web Audio graph, reads frequency and waveform byte samples, and the canvas visualizer paints those samples every animation frame.'],
         ['EventEmitter', 'The utility preview registers, emits, removes, and clears a typed listener.'],
@@ -194,7 +194,7 @@ export const demoText = {
       apiCoverage: [
         ['AudioPlayer', '控制面板与状态面板展示构造参数、load/play/pause/stop、seek/fastSeek、音量、速度、静音、循环、自动播放、预加载、音高、状态、时间范围、canPlayType、事件和 dispose。'],
         ['HttpAudioSource and AudioSource', 'Source 模式可在 URL 字符串、Source description、HttpAudioSource 和带 open/close 计数的自定义 AudioSource 之间切换。'],
-        ['HLS and DASH adapters', '从公共子路径注册适配器，展示支持诊断，可在运行时更新 HLS config 或 DASH settings，并通过 vendor instance 展示手动音质实验。'],
+        ['HLS and DASH adapters', '从公共子路径注册适配器，展示支持诊断，可在运行时更新 HLS config 或 DASH settings，并支撑统一手动音质 API。'],
         ['AdaptivePlaybackPreset', 'demo 使用 Balanced 音频 VOD 预设初始化两个自适应适配器。'],
         ['AudioAnalyzer', '工具预览会创建 Web Audio 图并读取频域与波形字节样本，canvas 可视化会在每一帧绘制这些样本。'],
         ['EventEmitter', '工具预览会注册、触发、移除并清空一个类型化监听器。'],

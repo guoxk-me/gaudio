@@ -10,6 +10,7 @@ describe('interactive audio example', () => {
       examplePage,
       demoComponent,
       demoCapabilities,
+      demoPlayerSurface,
       demoVisualization,
       demoComposable,
       demoSamples,
@@ -18,6 +19,7 @@ describe('interactive audio example', () => {
       readFile(resolve(examplesRoot, 'index.md'), 'utf8'),
       readFile(resolve(examplesRoot, 'AudioPlayerDemo.vue'), 'utf8'),
       readFile(resolve(examplesRoot, 'DemoCapabilities.vue'), 'utf8'),
+      readFile(resolve(examplesRoot, 'DemoPlayerSurface.vue'), 'utf8'),
       readFile(resolve(examplesRoot, 'DemoVisualization.vue'), 'utf8'),
       readFile(resolve(examplesRoot, 'use-gaudio-demo.ts'), 'utf8'),
       readFile(resolve(examplesRoot, 'demo-samples.ts'), 'utf8'),
@@ -27,6 +29,7 @@ describe('interactive audio example', () => {
     expect(examplePage).toContain('<ClientOnly>')
     expect(examplePage).toContain('AudioPlayerDemo')
     expect(demoComponent).toContain('DemoCatalog')
+    expect(demoComponent).toContain('DemoPlayerSurface')
     expect(demoComponent).toContain('DemoControls')
     expect(demoComponent).toContain('DemoStatus')
     expect(demoComponent).toContain('DemoCapabilities')
@@ -41,8 +44,7 @@ describe('interactive audio example', () => {
     expect(demoComposable).toContain('canPlayType')
     expect(demoComposable).toContain('updateConfig')
     expect(demoComposable).toContain('updateSettings')
-    expect(demoComposable).toContain('setRepresentationForTypeById')
-    expect(demoComposable).toContain('nextLevel')
+    expect(demoComposable).toContain('setAdaptiveQuality')
     expect(demoComposable).toContain('adaptiveQualityChoices')
     expect(demoComposable).not.toContain('packages/gaudio/src')
     expect(demoComposable).toContain('onMounted')
@@ -50,6 +52,8 @@ describe('interactive audio example', () => {
     expect(demoSamples).toContain('import.meta.env.BASE_URL')
     expect(demoCapabilities).toContain('capabilityRows')
     expect(demoCapabilities).toContain('browserSupportRows')
+    expect(demoPlayerSurface).toContain('Music player demo')
+    expect(demoPlayerSurface).toContain('music-player__waveform')
     expect(demoVisualization).toContain('<canvas')
     expect(demoVisualization).toContain('AudioAnalyzer')
     expect(demoVisualization).toContain('requestAnimationFrame')

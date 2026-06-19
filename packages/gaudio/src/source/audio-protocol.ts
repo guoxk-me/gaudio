@@ -5,17 +5,27 @@ const hlsMimeTypes = new Set([
   'application/x-mpegurl',
 ])
 
+export function audioProtocolForMimeType(mimeType: string | undefined): AudioProtocol | undefined {
+  const mimeTypeKey = mimeType?.toLowerCase()
+
+  if (mimeTypeKey && hlsMimeTypes.has(mimeTypeKey)) {
+    return 'hls'
+  }
+  if (mimeTypeKey === 'application/dash+xml') {
+    return 'dash'
+  }
+
+  return undefined
+}
+
 export function resolveAudioProtocol(source: AudioSource): AudioProtocol {
   if (source.protocol) {
     return source.protocol
   }
 
-  const mimeType = source.mimeType?.toLowerCase()
-  if (mimeType && hlsMimeTypes.has(mimeType)) {
-    return 'hls'
-  }
-  if (mimeType === 'application/dash+xml') {
-    return 'dash'
+  const protocol = audioProtocolForMimeType(source.mimeType)
+  if (protocol) {
+    return protocol
   }
 
   if (!source.url) {

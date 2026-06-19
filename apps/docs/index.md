@@ -23,3 +23,5 @@ features:
   - title: Player-owned analysis
     details: Enable frequency and waveform sampling through AudioPlayer configuration, or connect custom Web Audio graphs when your engine owns the signal.
 ---
+
+<HomeShowcase />

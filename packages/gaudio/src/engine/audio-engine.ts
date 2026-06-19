@@ -1,8 +1,10 @@
 import type {
   AdaptiveManifestUpdate,
   AdaptivePlaybackInfo,
+  AdaptiveQualitySelection,
   AdaptiveSegmentUpdate,
   AdaptiveStreamError,
+  AdaptiveVariant,
   AdaptiveVariantUpdate,
 } from '../adapters/adaptive-audio-types'
 import type { AudioAnalyzer, AudioAnalyzerOptions } from '../analysis/audio-analyzer'
@@ -163,6 +165,18 @@ export interface AudioEngine {
    * @param mimeType MIME type with optional codec parameters.
    */
   canPlayType: (mimeType: string) => AudioFormatSupport
+  /** Returns the active adaptive playback implementation, when one is loaded. */
+  getActiveAdaptivePlayback?: () => AdaptivePlaybackInfo | undefined
+  /** Returns currently known adaptive variants for the active source. */
+  getAdaptiveVariants?: () => readonly AdaptiveVariant[]
+  /** Returns the automatic or manual adaptive quality selection. */
+  getAdaptiveQualitySelection?: () => AdaptiveQualitySelection
+  /**
+   * Selects automatic adaptive quality or a specific variant identifier.
+   *
+   * @param variantId `'auto'` for automatic ABR or a variant identifier from {@link getAdaptiveVariants}.
+   */
+  setAdaptiveQuality?: (variantId: AdaptiveQualitySelection) => Promise<void>
   /**
    * Creates an analyzer for the active engine signal when supported.
    *

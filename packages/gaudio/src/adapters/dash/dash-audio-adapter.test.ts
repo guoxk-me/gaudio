@@ -26,6 +26,7 @@ class FakeDashPlayer {
   readonly listeners = new Map<string, DashListener[]>()
   readonly initializeCalls: Array<{ media: HTMLMediaElement, url: string, autoplay: boolean }> = []
   readonly settingsUpdates: MediaPlayerSettingClass[] = []
+  readonly representationSelections: Array<{ type: string, id: string, shouldSwitch: boolean }> = []
   representations: Representation[] = []
   resetCalls = 0
 
@@ -45,6 +46,10 @@ class FakeDashPlayer {
 
   getRepresentationsByType(_type: string): Representation[] {
     return this.representations
+  }
+
+  setRepresentationForTypeById(type: string, id: string, shouldSwitch: boolean): void {
+    this.representationSelections.push({ type, id, shouldSwitch })
   }
 
   reset(): void {
@@ -414,6 +419,62 @@ describe('dashAudioAdapter', () => {
     expect(segmentLoads[0]).toMatchObject({ url: '/segment-1.m4s', variantId: 'audio-128', duration: 4 })
     expect(streamErrors[0]).toMatchObject({ category: 'segment', isFatal: false })
     expect(fatalErrors).toEqual([])
+  })
+
+  it('selects DASH variants through the unified adaptive quality API', async () => {
+    const harness = dashHarness()
+    const engine = harness.adapter.createEngine()
+    const variantChanges: AudioEngineEvents['variantchange'][] = []
+    engine.on('variantchange', payload => variantChanges.push(payload))
+    const load = engine.load(new HttpAudioSource('/stream.mpd'))
+    await Promise.resolve()
+    const dashPlayer = harness.dashPlayers[0]
+    dashPlayer.representations = [
+      { id: 'audio-low', bandwidth: 64_000, codecs: 'mp4a.40.2' } as Representation,
+      { id: 'audio-high', bandwidth: 192_000, codecs: 'mp4a.40.2' } as Representation,
+    ]
+    dashPlayer.emit(dashEvents.STREAM_INITIALIZED, { error: null, streamInfo: { id: 'stream-1' } })
+    harness.audioElements.at(-1)?.dispatchEvent(new Event('loadedmetadata'))
+    await load
+
+    expect(engine.getAdaptiveVariants?.()).toEqual([
+      { id: 'audio-low', bitrate: 64_000, codecs: 'mp4a.40.2' },
+      { id: 'audio-high', bitrate: 192_000, codecs: 'mp4a.40.2' },
+    ])
+
+    await engine.setAdaptiveQuality?.('audio-high')
+
+    expect(dashPlayer.settingsUpdates.at(-1)).toMatchObject({
+      streaming: {
+        abr: {
+          autoSwitchBitrate: {
+            audio: false,
+          },
+        },
+      },
+    })
+    expect(dashPlayer.representationSelections).toEqual([
+      { type: 'audio', id: 'audio-high', shouldSwitch: true },
+    ])
+    expect(engine.getAdaptiveQualitySelection?.()).toBe('audio-high')
+    expect(variantChanges.at(-1)).toMatchObject({
+      variantId: 'audio-high',
+      bitrate: 192_000,
+      reason: 'manual',
+    })
+
+    await engine.setAdaptiveQuality?.('auto')
+
+    expect(engine.getAdaptiveQualitySelection?.()).toBe('auto')
+    expect(dashPlayer.settingsUpdates.at(-1)).toMatchObject({
+      streaming: {
+        abr: {
+          autoSwitchBitrate: {
+            audio: true,
+          },
+        },
+      },
+    })
   })
 
   it('publishes fatal manifest errors', async () => {

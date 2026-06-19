@@ -5,6 +5,7 @@ import { demoLocaleForLang, demoText } from './demo-i18n'
 import DemoCapabilities from './DemoCapabilities.vue'
 import DemoCatalog from './DemoCatalog.vue'
 import DemoControls from './DemoControls.vue'
+import DemoPlayerSurface from './DemoPlayerSurface.vue'
 import DemoStatus from './DemoStatus.vue'
 import DemoVisualization from './DemoVisualization.vue'
 import { useGaudioDemo } from './use-gaudio-demo'
@@ -20,6 +21,7 @@ const text = computed(() => demoText[demoLocaleForLang(lang.value)])
     <p class="gaudio-demo__intro">
       {{ text.intro }}
     </p>
+    <DemoPlayerSurface :demo="demo" :text="text" />
     <DemoCatalog :demo="demo" :text="text" />
     <div class="gaudio-demo__workspace">
       <DemoControls :demo="demo" :text="text" />

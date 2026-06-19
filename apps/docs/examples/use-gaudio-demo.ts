@@ -18,7 +18,7 @@ import {
 } from './demo-samples'
 
 const seekRangeMax = 1000
-const automaticQualitySelection = 'automatic'
+const automaticQualitySelection = 'auto'
 
 type ProtocolOverride = 'auto' | AudioProtocol
 type DemoSourceMode = 'url-string' | 'source-description' | 'http-source' | 'custom-source'
@@ -533,40 +533,19 @@ export function useGaudioDemo() {
     })
   }
 
-  function restoreAutomaticAdaptiveQuality(): void {
-    if (hlsAdapter.hlsInstance) {
-      hlsAdapter.hlsInstance.loadLevel = -1
-      adaptiveQualityControlLabel.value = 'HLS automatic ABR'
-      addEvent('quality: HLS automatic ABR')
-      return
-    }
-
-    if (dashAdapter.dashInstance) {
-      dashAdapter.updateSettings({
-        streaming: {
-          abr: {
-            autoSwitchBitrate: {
-              audio: true,
-            },
-          },
-        },
-      })
-      adaptiveQualityControlLabel.value = 'DASH automatic ABR'
-      updateAdapterDiagnostics()
-      addEvent('quality: DASH automatic ABR')
-      return
-    }
-
+  async function restoreAutomaticAdaptiveQuality(): Promise<void> {
+    await player.setAdaptiveQuality('auto')
     adaptiveQualityControlLabel.value = adaptiveImplementationLabel.value.includes('/ native')
       ? 'native HLS uses browser ABR'
-      : 'load HLS or DASH first'
+      : 'automatic ABR'
+    updateAdapterDiagnostics()
     addEvent(`quality: ${adaptiveQualityControlLabel.value}`)
   }
 
   async function applyAdaptiveQualitySelection(): Promise<void> {
     await withBusyControls(async () => {
       if (adaptiveQualitySelection.value === automaticQualitySelection) {
-        restoreAutomaticAdaptiveQuality()
+        await restoreAutomaticAdaptiveQuality()
         return
       }
 
@@ -578,42 +557,10 @@ export function useGaudioDemo() {
         return
       }
 
-      // AI modified: demonstrate vendor manual quality controls without adding a gaudio public API.
-      if (hlsAdapter.hlsInstance) {
-        const levelIndex = hlsAdapter.hlsInstance.levels.findIndex((level, index) => {
-          return String(level.id ?? index) === selectedVariant.id
-        })
-
-        if (levelIndex < 0) {
-          adaptiveQualityControlLabel.value = 'HLS level unavailable'
-          addEvent(`quality: ${adaptiveQualityControlLabel.value}`)
-          return
-        }
-
-        hlsAdapter.hlsInstance.nextLevel = levelIndex
-        adaptiveQualityControlLabel.value = `manual HLS ${variantChoiceLabel(selectedVariant)}`
-        addEvent(`quality: ${adaptiveQualityControlLabel.value}`)
-        return
-      }
-
-      if (dashAdapter.dashInstance) {
-        dashAdapter.updateSettings({
-          streaming: {
-            abr: {
-              autoSwitchBitrate: {
-                audio: false,
-              },
-            },
-          },
-        })
-        dashAdapter.dashInstance.setRepresentationForTypeById('audio', selectedVariant.id, true)
-        adaptiveQualityControlLabel.value = `manual DASH ${variantChoiceLabel(selectedVariant)}`
-        updateAdapterDiagnostics()
-        addEvent(`quality: ${adaptiveQualityControlLabel.value}`)
-        return
-      }
-
-      adaptiveQualityControlLabel.value = 'manual quality unavailable for this implementation'
+      // AI modified: manual quality now goes through the protocol-neutral AudioPlayer API.
+      await player.setAdaptiveQuality(selectedVariant.id)
+      adaptiveQualityControlLabel.value = `manual ${variantChoiceLabel(selectedVariant)}`
+      updateAdapterDiagnostics()
       addEvent(`quality: ${adaptiveQualityControlLabel.value}`)
     })
   }
