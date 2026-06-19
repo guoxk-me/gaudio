@@ -44,6 +44,9 @@ Playlist APIs:
 | `selectPlaylistTrack(index, options?)` | `Promise<void>` | Selects and loads a track by index. |
 | `next(options?)` | `Promise<boolean>` | Loads the next track and returns whether one existed. |
 | `previous(options?)` | `Promise<boolean>` | Loads the previous track and returns whether one existed. |
+| `getAudioTracks()` | `readonly AudioTrack[]` | Alternate audio tracks for the selected playlist track. |
+| `getSelectedAudioTrack()` | `AudioTrack \| undefined` | Current alternate audio track. |
+| `selectAudioTrack(audioTrackId, options?)` | `Promise<void>` | Switches language or alternate audio while preserving time by default. |
 
 ```ts
 player.setPlaylist([
@@ -59,6 +62,35 @@ await player.next({ autoplay: true })
 ```
 
 Playlist tracks automatically continue to the next track after `ended`. A track's `fallbackSources` are attempted in order before gaudio emits a load error.
+
+Use `audioTracks` for dubbed languages or companion audio that share the same program timeline:
+
+```ts
+player.setPlaylist([
+  {
+    source: 'https://example.com/episode.zh-CN.m4a',
+    defaultAudioTrackId: 'zh-CN',
+    audioTracks: [
+      {
+        id: 'zh-CN',
+        label: '简体中文',
+        language: 'zh-CN',
+        source: 'https://example.com/episode.zh-CN.m4a',
+      },
+      {
+        id: 'en',
+        label: 'English',
+        language: 'en',
+        source: 'https://example.com/episode.en.m4a',
+      },
+    ],
+  },
+])
+
+await player.selectAudioTrack('en')
+```
+
+`selectAudioTrack()` preserves current time and previous paused/playing state unless options override that behavior.
 
 Playback controls:
 
@@ -183,6 +215,8 @@ Playlist types:
 | `AudioPlaylistTrack` | `source`, `fallbackSources?` |
 | `AudioPlaylistOptions` | `startIndex?` |
 | `AudioPlaylistNavigationOptions` | `autoplay?` |
+| `AudioTrack` | `id`, `label?`, `language?`, `source`, `fallbackSources?` |
+| `AudioTrackSelectionOptions` | `preserveTime?`, `autoplay?` |
 
 ## Events And Errors
 

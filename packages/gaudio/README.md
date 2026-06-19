@@ -92,6 +92,35 @@ await player.previous()
 
 When a playlist track ends, gaudio automatically loads and plays the next track. If a track fails to load, its `fallbackSources` are attempted in order before an error is emitted.
 
+For video companion audio or dubbed language selection, put alternate audio tracks inside a playlist track:
+
+```ts
+player.setPlaylist([
+  {
+    source: 'https://example.com/episode.zh-CN.m4a',
+    defaultAudioTrackId: 'zh-CN',
+    audioTracks: [
+      {
+        id: 'zh-CN',
+        label: '简体中文',
+        language: 'zh-CN',
+        source: 'https://example.com/episode.zh-CN.m4a',
+      },
+      {
+        id: 'en',
+        label: 'English',
+        language: 'en',
+        source: 'https://example.com/episode.en.m4a',
+      },
+    ],
+  },
+])
+
+await player.selectAudioTrack('en')
+```
+
+`selectAudioTrack()` keeps the current time and previous paused/playing state by default, so language changes stay on the same program timeline.
+
 ## Source inputs
 
 ```ts

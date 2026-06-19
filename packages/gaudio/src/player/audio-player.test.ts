@@ -631,4 +631,79 @@ describe('audioPlayer', () => {
     expect(player.getPlaylistIndex()).toBe(0)
     expect(errors).toEqual([])
   })
+
+  it('selects the default audio track for a playlist track', async () => {
+    const engine = new FakeAudioEngine()
+    const player = new AudioPlayer({}, engine)
+
+    player.setPlaylist([
+      {
+        source: 'https://example.com/episode.zh-CN.m4a',
+        defaultAudioTrackId: 'en',
+        audioTracks: [
+          {
+            id: 'zh-CN',
+            label: '简体中文',
+            language: 'zh-CN',
+            source: 'https://example.com/episode.zh-CN.m4a',
+          },
+          {
+            id: 'en',
+            label: 'English',
+            language: 'en',
+            source: 'https://example.com/episode.en.m4a',
+          },
+        ],
+      },
+    ])
+
+    expect(player.getAudioTracks().map(audioTrack => audioTrack.id)).toEqual(['zh-CN', 'en'])
+    expect(player.getSelectedAudioTrack()).toMatchObject({ id: 'en', language: 'en' })
+    expect(player.getSource()).toMatchObject({ url: 'https://example.com/episode.en.m4a' })
+
+    await player.load()
+
+    expect(engine.loadedSources.map(source => source.url)).toEqual([
+      'https://example.com/episode.en.m4a',
+    ])
+  })
+
+  it('switches audio tracks while preserving time and playback state', async () => {
+    const engine = new FakeAudioEngine()
+    const player = new AudioPlayer({}, engine)
+
+    player.setPlaylist([
+      {
+        source: 'https://example.com/episode.zh-CN.m4a',
+        audioTracks: [
+          {
+            id: 'zh-CN',
+            label: '简体中文',
+            language: 'zh-CN',
+            source: 'https://example.com/episode.zh-CN.m4a',
+          },
+          {
+            id: 'ko',
+            label: '한국어',
+            language: 'ko',
+            source: 'https://example.com/episode.ko.m4a',
+          },
+        ],
+      },
+    ])
+
+    await player.load()
+    await player.play()
+    await player.seek(42)
+
+    await player.selectAudioTrack('ko')
+
+    expect(player.getSelectedAudioTrack()).toMatchObject({ id: 'ko' })
+    expect(engine.loadedSources.map(source => source.url)).toEqual([
+      'https://example.com/episode.zh-CN.m4a',
+      'https://example.com/episode.ko.m4a',
+    ])
+    expect(player.getCurrentTime()).toBe(42)
+    expect(engine.playCalls).toBe(2)
+  })
 })

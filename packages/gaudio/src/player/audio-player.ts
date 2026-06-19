@@ -5,7 +5,7 @@ import type { AudioFormatSupport, PreloadMode, TimeRange } from '../engine/audio
 import type { AudioSource, AudioSourceInput } from '../source/audio-source'
 import type { AudioPlayerEvents } from './audio-player-events'
 import type { AudioPlayerAnalyzerOptions, AudioPlayerOptions, PlaybackState } from './audio-player-options'
-import type { AudioPlaylistNavigationOptions, AudioPlaylistOptions, AudioPlaylistTrack } from './audio-playlist'
+import type { AudioPlaylistNavigationOptions, AudioPlaylistOptions, AudioPlaylistTrack, AudioTrack, AudioTrackSelectionOptions } from './audio-playlist'
 import { audioEngineEventNames } from '../engine/audio-engine'
 import { AudioEngineRouter } from '../engine/audio-engine-router'
 import { GAudioError } from '../errors/errors'
@@ -23,6 +23,7 @@ export class AudioPlayer {
   private source?: AudioSource
   private playlist: readonly AudioPlaylistTrack[] = []
   private playlistIndex = -1
+  private selectedAudioTrackId?: string
   private state: PlaybackState = 'idle'
   private loadRequestId = 0
   private hasLoadedSource = false
@@ -90,6 +91,21 @@ export class AudioPlayer {
   /** @returns The selected playlist index, or `-1` when no playlist is active. */
   getPlaylistIndex(): number {
     return this.playlistIndex
+  }
+
+  /** @returns Audio tracks available for the selected playlist track. */
+  getAudioTracks(): readonly AudioTrack[] {
+    return this.activePlaylistTrack()?.audioTracks ?? []
+  }
+
+  /** @returns The selected alternate audio track, or `undefined` when none is active. */
+  getSelectedAudioTrack(): AudioTrack | undefined {
+    const selectedAudioTrackId = this.selectedAudioTrackId
+    if (!selectedAudioTrackId) {
+      return undefined
+    }
+
+    return this.getAudioTracks().find(audioTrack => audioTrack.id === selectedAudioTrackId)
   }
 
   /** @returns The current playback position in seconds. */
@@ -297,6 +313,7 @@ export class AudioPlayer {
   setSource(source: AudioSourceInput): void {
     this.playlist = []
     this.playlistIndex = -1
+    this.selectedAudioTrackId = undefined
     this.selectSource(source)
   }
 
@@ -310,10 +327,19 @@ export class AudioPlayer {
     this.playlist = playlist.map(track => ({
       source: track.source,
       fallbackSources: track.fallbackSources ? [...track.fallbackSources] : undefined,
+      audioTracks: track.audioTracks?.map(audioTrack => ({
+        id: audioTrack.id,
+        label: audioTrack.label,
+        language: audioTrack.language,
+        source: audioTrack.source,
+        fallbackSources: audioTrack.fallbackSources ? [...audioTrack.fallbackSources] : undefined,
+      })),
+      defaultAudioTrackId: track.defaultAudioTrackId,
     }))
 
     if (this.playlist.length === 0) {
       this.playlistIndex = -1
+      this.selectedAudioTrackId = undefined
       this.loadRequestId += 1
       this.releaseAnalyzer()
       this.engine.unload()
@@ -326,8 +352,9 @@ export class AudioPlayer {
     const startIndex = options.startIndex ?? 0
     this.assertPlaylistIndex(startIndex)
     this.playlistIndex = startIndex
+    this.selectedAudioTrackId = this.defaultAudioTrackId(this.playlist[startIndex])
     // AI modified: playlist selection reuses the same source lifecycle as direct source changes.
-    this.selectSource(this.playlist[startIndex].source)
+    this.selectSource(this.activePlaylistSource())
   }
 
   /**
@@ -369,11 +396,45 @@ export class AudioPlayer {
   async selectPlaylistTrack(index: number, options: AudioPlaylistNavigationOptions = {}): Promise<void> {
     this.assertPlaylistIndex(index)
     this.playlistIndex = index
-    this.selectSource(this.playlist[index].source)
+    this.selectedAudioTrackId = this.defaultAudioTrackId(this.playlist[index])
+    this.selectSource(this.activePlaylistSource())
 
     await this.load()
 
     if (options.autoplay) {
+      await this.play()
+    }
+  }
+
+  /**
+   * Selects an alternate audio track for the active playlist item.
+   *
+   * @param audioTrackId Audio track identifier from {@link getAudioTracks}.
+   * @param options Continuity behavior while switching sources.
+   */
+  async selectAudioTrack(audioTrackId: string, options: AudioTrackSelectionOptions = {}): Promise<void> {
+    const audioTrack = this.getAudioTracks().find(track => track.id === audioTrackId)
+    if (!audioTrack) {
+      throw new RangeError('Audio track id must reference an available audio track')
+    }
+
+    const previousTime = this.getCurrentTime()
+    const wasPlaying = !this.isPaused()
+    const shouldPreserveTime = options.preserveTime ?? true
+    const shouldResumePlayback = options.autoplay === 'preserve' || options.autoplay === undefined
+      ? wasPlaying
+      : options.autoplay
+
+    this.selectedAudioTrackId = audioTrack.id
+    // AI modified: alternate audio tracks are same-program source switches, so keep playlist context intact.
+    this.selectSource(audioTrack.source)
+    await this.load()
+
+    if (shouldPreserveTime) {
+      await this.seek(previousTime)
+    }
+
+    if (shouldResumePlayback) {
       await this.play()
     }
   }
@@ -679,10 +740,14 @@ export class AudioPlayer {
       return this.source ? [this.source] : []
     }
 
+    const audioTrack = this.getSelectedAudioTrack()
+    const source = audioTrack?.source ?? playlistTrack.source
+    const fallbackSources = audioTrack?.fallbackSources ?? playlistTrack.fallbackSources ?? []
+
     return [
-      playlistTrack.source,
-      ...(playlistTrack.fallbackSources ?? []),
-    ].map(source => this.audioSourceForInput(source))
+      source,
+      ...fallbackSources,
+    ].map(sourceInput => this.audioSourceForInput(sourceInput))
   }
 
   private audioSourceForInput(source: AudioSourceInput): AudioSource {
@@ -695,6 +760,28 @@ export class AudioPlayer {
     if (!Number.isInteger(index) || index < 0 || index >= this.playlist.length) {
       throw new RangeError('Playlist index must reference an existing track')
     }
+  }
+
+  private activePlaylistTrack(): AudioPlaylistTrack | undefined {
+    return this.playlistIndex >= 0 ? this.playlist[this.playlistIndex] : undefined
+  }
+
+  private activePlaylistSource(): AudioSourceInput {
+    const playlistTrack = this.activePlaylistTrack()
+    if (!playlistTrack) {
+      throw new GAudioError('SOURCE_UNAVAILABLE', 'Playlist track is required before selecting a playlist source')
+    }
+
+    return this.getSelectedAudioTrack()?.source ?? playlistTrack.source
+  }
+
+  private defaultAudioTrackId(playlistTrack: AudioPlaylistTrack): string | undefined {
+    const audioTracks = playlistTrack.audioTracks ?? []
+    const preferredAudioTrack = playlistTrack.defaultAudioTrackId
+      ? audioTracks.find(audioTrack => audioTrack.id === playlistTrack.defaultAudioTrackId)
+      : undefined
+
+    return preferredAudioTrack?.id ?? audioTracks[0]?.id
   }
 
   private continuePlaylistAfterEnded(): void {

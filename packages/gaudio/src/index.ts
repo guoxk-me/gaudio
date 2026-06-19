@@ -45,6 +45,8 @@ export type {
   AudioPlaylistNavigationOptions,
   AudioPlaylistOptions,
   AudioPlaylistTrack,
+  AudioTrack,
+  AudioTrackSelectionOptions,
 } from './player/audio-playlist'
 export type { AudioSource, AudioSourceInput, AudioSourceKind, AudioStreamHandle } from './source/audio-source'
 export type {

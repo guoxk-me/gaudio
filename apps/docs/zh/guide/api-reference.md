@@ -44,6 +44,9 @@ Source API：
 | `selectPlaylistTrack(index, options?)` | `Promise<void>` | 按 index 选择并加载 track。 |
 | `next(options?)` | `Promise<boolean>` | 加载下一首，并返回是否存在下一首。 |
 | `previous(options?)` | `Promise<boolean>` | 加载上一首，并返回是否存在上一首。 |
+| `getAudioTracks()` | `readonly AudioTrack[]` | 当前 playlist track 可选的多语言或备用音轨。 |
+| `getSelectedAudioTrack()` | `AudioTrack \| undefined` | 当前选中的备用音轨。 |
+| `selectAudioTrack(audioTrackId, options?)` | `Promise<void>` | 切换语言或备用音轨，默认保留当前时间。 |
 
 ```ts
 player.setPlaylist([
@@ -59,6 +62,35 @@ await player.next({ autoplay: true })
 ```
 
 播放列表 track 在 `ended` 后会自动续播下一首。某个 track 加载失败时，gaudio 会按顺序尝试它的 `fallbackSources`，全部失败后才发出加载错误。
+
+视频辅助音频或多语言配音应该放在同一个 playlist track 的 `audioTracks` 中：
+
+```ts
+player.setPlaylist([
+  {
+    source: 'https://example.com/episode.zh-CN.m4a',
+    defaultAudioTrackId: 'zh-CN',
+    audioTracks: [
+      {
+        id: 'zh-CN',
+        label: '简体中文',
+        language: 'zh-CN',
+        source: 'https://example.com/episode.zh-CN.m4a',
+      },
+      {
+        id: 'en',
+        label: 'English',
+        language: 'en',
+        source: 'https://example.com/episode.en.m4a',
+      },
+    ],
+  },
+])
+
+await player.selectAudioTrack('en')
+```
+
+`selectAudioTrack()` 默认保留当前时间和切换前的暂停/播放状态；如果需要，也可以通过 options 覆盖。
 
 播放控制：
 
@@ -183,6 +215,8 @@ const analyzer = new AudioAnalyzer(audioContext, sourceNode, fftSize)
 | `AudioPlaylistTrack` | `source`, `fallbackSources?` |
 | `AudioPlaylistOptions` | `startIndex?` |
 | `AudioPlaylistNavigationOptions` | `autoplay?` |
+| `AudioTrack` | `id`, `label?`, `language?`, `source`, `fallbackSources?` |
+| `AudioTrackSelectionOptions` | `preserveTime?`, `autoplay?` |
 
 ## 事件与错误
 
