@@ -71,12 +71,14 @@ interface DashHarness {
 
 function dashHarness(options: {
   supported?: boolean
+  contentType?: 'vod' | 'long-form' | 'live'
   settings?: MediaPlayerSettingClass
   preset?: AdaptivePlaybackPreset
 } = {}): DashHarness {
   const audioElements: FakeAudioElement[] = []
   const dashPlayers: FakeDashPlayer[] = []
   const adapter = new DashAudioAdapterImpl({
+    contentType: options.contentType,
     settings: options.settings,
     preset: options.preset,
   }, {
@@ -256,6 +258,60 @@ describe('dashAudioAdapter', () => {
         },
         scheduling: {
           scheduleWhilePaused: true,
+        },
+      },
+    })
+  })
+
+  it('applies the DASH long-form audio profile for extended playback', () => {
+    const settings = dashHarness({ contentType: 'long-form' }).adapter.getSettings()
+
+    expect(settings).toMatchObject({
+      streaming: {
+        buffer: {
+          bufferTimeDefault: 45,
+          bufferTimeAtTopQuality: 90,
+          bufferTimeAtTopQualityLongForm: 180,
+          bufferToKeep: 180,
+          longFormContentDurationThreshold: 120,
+        },
+        fragmentRequestTimeout: 60_000,
+        fragmentRequestProgressTimeout: 30_000,
+        retryAttempts: {
+          MediaSegment: 8,
+          InitializationSegment: 8,
+        },
+      },
+    })
+  })
+
+  it('applies the DASH live profile for latency catch-up and reconnects', () => {
+    const settings = dashHarness({ contentType: 'live' }).adapter.getSettings()
+
+    expect(settings).toMatchObject({
+      streaming: {
+        delay: {
+          useSuggestedPresentationDelay: true,
+          liveDelayFragmentCount: 4,
+        },
+        liveCatchup: {
+          enabled: true,
+          maxDrift: 12,
+          playbackRate: {
+            min: -0.1,
+            max: 0.1,
+          },
+        },
+        buffer: {
+          bufferTimeDefault: 6,
+          bufferTimeAtTopQuality: 12,
+          bufferToKeep: 45,
+        },
+        manifestRequestTimeout: 8_000,
+        fragmentRequestTimeout: 20_000,
+        retryAttempts: {
+          MPD: 10,
+          MediaSegment: 10,
         },
       },
     })

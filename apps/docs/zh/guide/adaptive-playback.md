@@ -20,10 +20,12 @@ import { createHlsAdapter } from 'gaudio/hls'
 
 const hlsAdapter = createHlsAdapter({
   playbackStrategy: 'native-first',
+  contentType: 'vod',
   preset: AdaptivePlaybackPreset.Balanced,
 })
 
 const dashAdapter = createDashAdapter({
+  contentType: 'vod',
   preset: AdaptivePlaybackPreset.Balanced,
 })
 
@@ -65,6 +67,7 @@ player.setSource({
 ```ts
 const hlsAdapter = createHlsAdapter({
   preset: AdaptivePlaybackPreset.Stable,
+  contentType: 'long-form',
   playbackStrategy: 'hls-first',
   config: {
     maxBufferLength: 75,
@@ -79,9 +82,10 @@ const hlsAdapter = createHlsAdapter({
 
 | 参数 | 类型 | 默认值 | 描述 |
 | --- | --- | --- | --- |
-| `preset` | `AdaptivePlaybackPreset` | `Balanced` | 在显式 `config` 覆盖前应用音频 VOD 配置 profile。 |
+| `contentType` | `AdaptiveContentType` | `'vod'` | 按 `'vod'`、`'long-form'` 或 `'live'` 调整缓冲、直播延迟和重试策略。 |
+| `preset` | `AdaptivePlaybackPreset` | `Balanced` | 在 content type 调优和显式 `config` 覆盖前应用音频配置 profile。 |
 | `playbackStrategy` | `'native-first' \| 'hls-first' \| 'native-only' \| 'hls-only'` | `'native-first'` | 决定优先使用浏览器原生 HLS 还是 `hls.js`。 |
-| `config` | `HlsAdapterConfig` | `{}` | 深度 partial 的 `hls.js` 构造配置。显式字段会覆盖 preset。 |
+| `config` | `HlsAdapterConfig` | `{}` | 深度 partial 的 `hls.js` 构造配置。显式字段会覆盖 preset 和 content type。 |
 
 Strategy 行为是确定性的：
 
@@ -101,6 +105,7 @@ HLS request policy 覆盖会递归合并。只修改一个 retry 值，不会丢
 ```ts
 const dashAdapter = createDashAdapter({
   preset: AdaptivePlaybackPreset.FastStart,
+  contentType: 'live',
   settings: {
     streaming: {
       buffer: {
@@ -118,8 +123,9 @@ const dashAdapter = createDashAdapter({
 
 | 参数 | 类型 | 默认值 | 描述 |
 | --- | --- | --- | --- |
-| `preset` | `AdaptivePlaybackPreset` | `Balanced` | 在显式 `settings` 覆盖前应用音频 VOD dash.js settings profile。 |
-| `settings` | `MediaPlayerSettingClass` | `{}` | 深度 partial 的 dash.js settings，在创建 DASH engine 时应用。 |
+| `contentType` | `AdaptiveContentType` | `'vod'` | 按 `'vod'`、`'long-form'` 或 `'live'` 调整缓冲、直播延迟和重试策略。 |
+| `preset` | `AdaptivePlaybackPreset` | `Balanced` | 在 content type 调优和显式 `settings` 覆盖前应用音频 dash.js settings profile。 |
+| `settings` | `MediaPlayerSettingClass` | `{}` | 深度 partial 的 dash.js settings，在创建 DASH engine 时应用。显式字段会覆盖 preset 和 content type。 |
 
 DASH settings 会递归合并，active 状态下通过 dash.js `updateSettings()` 应用。
 
@@ -168,7 +174,19 @@ DASH 关键 profile 数值：
 
 Preset 会配置音频 VOD 的缓冲、内存限制、ABR 估计、请求超时、重试、小间隙恢复、播放卡顿恢复、暂停状态下载调度和长音频缓冲。
 
-它们不配置直播、低延迟直播、DRM、字幕、插播、遥测、服务端优化或只对视频有意义的调优项。
+## 内容类型
+
+`contentType` 会在 `preset` 之后、显式 vendor 覆盖之前应用。它适合在保留同一套速度/稳定性 preset 的同时切换 source 形态：
+
+| 内容类型 | 适用场景 | HLS 调优 | DASH 调优 |
+| --- | --- | --- | --- |
+| `'vod'` | 单曲、专辑、播客单集和常规点播文件 | 保持所选 preset 数值 | 保持所选 preset 数值 |
+| `'long-form'` | 有声书、长播客、归档节目和多小时媒体 | 更大的前向和后向缓冲、更高内存上限、更长 segment 超时、更多 segment 重试 | 更大的高质量和保留缓冲、更低长音频阈值、更长 segment 超时、更多 segment 重试 |
+| `'live'` | 直播电台、滚动 HLS/DASH 活动和类似 DVR 的流 | 启用低延迟模式、短前向缓冲、有界直播 back buffer、更强 playlist/segment 重试 | 启用 suggested live delay、live catch-up、短前向缓冲、保留 DVR 缓冲、更强 MPD/segment 重试 |
+
+对于 HLS，浏览器原生播放不会使用 `hls.js` 构造配置。需要强制应用直播或长音频 HLS 调优时，请使用 `playbackStrategy: 'hls-first'` 或 `'hls-only'`。
+
+浏览器 media element 能直接播放的 Icecast 和 Shoutcast 流目前应走普通 `media` 路径。专门的 Icecast/Shoutcast metadata 和重连 helper 属于后续独立 adapter 范围。
 
 ## 自动音质切换
 
@@ -299,4 +317,4 @@ dashAdapter.getSettings()
 
 ## 范围
 
-自适应播放当前面向音频 VOD。直播、低延迟直播、DRM、转码、离线媒体、播放列表管理，以及协议中立的手动音质 API 不在当前包范围内。
+自适应播放当前面向音频 VOD、长音频和 HLS/DASH 直播调优。DRM、转码、离线媒体、播放列表管理、Icecast/Shoutcast metadata 处理，以及只对视频有意义的调优项不在当前包范围内。

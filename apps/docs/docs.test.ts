@@ -67,4 +67,40 @@ describe('documentation application', () => {
     expect(homeShowcase).toContain('setAdaptiveQuality')
     expect(chineseHome).toContain('预发布')
   })
+
+  it('documents adaptive content types in both languages', async () => {
+    const [englishAdaptiveGuide, chineseAdaptiveGuide, apiReference] = await Promise.all([
+      readFile(resolve(docsRoot, 'guide/adaptive-playback.md'), 'utf8'),
+      readFile(resolve(docsRoot, 'zh/guide/adaptive-playback.md'), 'utf8'),
+      readFile(resolve(docsRoot, 'guide/api-reference.md'), 'utf8'),
+    ])
+
+    expect(englishAdaptiveGuide).toContain('contentType')
+    expect(englishAdaptiveGuide).toContain('long-form')
+    expect(englishAdaptiveGuide).toContain('live')
+    expect(chineseAdaptiveGuide).toContain('contentType')
+    expect(chineseAdaptiveGuide).toContain('长音频')
+    expect(chineseAdaptiveGuide).toContain('直播')
+    expect(apiReference).toContain('AdaptiveContentType')
+  })
+
+  it('documents advanced source cookbook boundaries in both languages', async () => {
+    const [englishGuide, chineseGuide, englishApiReference, readme] = await Promise.all([
+      readFile(resolve(docsRoot, 'guide/getting-started.md'), 'utf8'),
+      readFile(resolve(docsRoot, 'zh/guide/getting-started.md'), 'utf8'),
+      readFile(resolve(docsRoot, 'guide/api-reference.md'), 'utf8'),
+      readFile(resolve(docsRoot, '../../packages/gaudio/README.md'), 'utf8'),
+    ])
+
+    expect(englishGuide).toContain('Source cookbook')
+    expect(englishGuide).toContain('signed URL')
+    expect(englishGuide).toContain('credentials')
+    expect(englishGuide).toContain('silent analyzer samples')
+    expect(chineseGuide).toContain('Source cookbook')
+    expect(chineseGuide).toContain('签名 URL')
+    expect(chineseGuide).toContain('credentials')
+    expect(chineseGuide).toContain('静音的 analyzer 样本')
+    expect(englishApiReference).toContain('does not manage headers')
+    expect(readme).toContain('does not attach headers')
+  })
 })

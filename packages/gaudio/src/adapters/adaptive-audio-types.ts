@@ -6,8 +6,11 @@ export type AdaptiveAudioProtocol = Exclude<AudioProtocol, 'media'>
 /** Identifies the active native or vendor-backed adaptive playback implementation. */
 export type AdaptivePlaybackImplementation = 'native' | 'hls.js' | 'dash.js'
 
+/** Selects the content shape used to tune adaptive buffering, latency, and recovery. */
+export type AdaptiveContentType = 'vod' | 'long-form' | 'live'
+
 // AI modified: shared presets keep HLS and DASH playback profiles aligned.
-/** Selects a vendor-specific adaptive audio VOD configuration profile. */
+/** Selects a vendor-specific adaptive audio configuration profile. */
 export enum AdaptivePlaybackPreset {
   FastStart = 'fast-start',
   Balanced = 'balanced',

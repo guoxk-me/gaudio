@@ -208,6 +208,8 @@ const analyzer = new AudioAnalyzer(audioContext, sourceNode, fftSize)
 | `AudioProtocol` | `'media' \| 'hls' \| 'dash'`。 |
 | `AudioSourceKind` | `'url' \| 'blob'`。 |
 
+`HttpAudioSource` 不管理 headers、credentials、签名 URL 刷新或 token 过期。需要加载前刷新 URL 时使用自定义 `AudioSource`；manifest 或 segment 请求在播放开始后仍需要鉴权时，使用 HLS/DASH vendor 的请求 hook。
+
 播放列表类型：
 
 | 类型 | 字段 |
@@ -248,6 +250,7 @@ Payload 类型：
 | 类型或值 | 用途 |
 | --- | --- |
 | `AdaptivePlaybackPreset` | `FastStart`、`Balanced`、`Stable` 三种音频 VOD profile。 |
+| `AdaptiveContentType` | 自适应 adapter 的 `'vod'`、`'long-form'` 或 `'live'` 内容类型调优。 |
 | `AdaptiveAudioProtocol` | `'hls' \| 'dash'`。 |
 | `AdaptivePlaybackImplementation` | `'native' \| 'hls.js' \| 'dash.js'`。 |
 | `AdaptivePlaybackInfo` | 当前自适应协议和实现。 |
@@ -274,7 +277,7 @@ Adapter contract：
 | --- | --- |
 | `createHlsAdapter(options?)` | 创建用于 `AudioPlayerOptions.adapters` 的 HLS adapter。 |
 | `HlsAudioAdapter` | Adapter instance，包含 `hlsInstance`、`implementation`、`getConfig()`、`updateConfig()` 和 adapter 方法。 |
-| `HlsAdapterOptions` | `preset`、`playbackStrategy` 和初始 `config`。 |
+| `HlsAdapterOptions` | `contentType`、`preset`、`playbackStrategy` 和初始 `config`。 |
 | `HlsPlaybackStrategy` | `'native-first' \| 'hls-first' \| 'native-only' \| 'hls-only'`。 |
 | `HlsAdapterConfig` | 深度 partial `hls.js` 构造配置，带可合并 load policies。 |
 | `HlsConfigUpdateOptions` | `apply`、`restorePosition` 和 `resumePlayback`。 |
@@ -291,7 +294,7 @@ Adapter contract：
 | --- | --- |
 | `createDashAdapter(options?)` | 创建用于 `AudioPlayerOptions.adapters` 的 DASH adapter。 |
 | `DashAudioAdapter` | Adapter instance，包含 `dashInstance`、`getSettings()`、`updateSettings()` 和 adapter 方法。 |
-| `DashAdapterOptions` | `preset` 和初始 dash.js `settings`。 |
+| `DashAdapterOptions` | `contentType`、`preset` 和初始 dash.js `settings`。 |
 | `MediaPlayerClass` | 从 `dashjs` re-export。 |
 | `MediaPlayerSettingClass` | 从 `dashjs` re-export。 |
 

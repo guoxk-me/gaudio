@@ -208,6 +208,8 @@ const analyzer = new AudioAnalyzer(audioContext, sourceNode, fftSize)
 | `AudioProtocol` | `'media' \| 'hls' \| 'dash'`. |
 | `AudioSourceKind` | `'url' \| 'blob'`. |
 
+`HttpAudioSource` does not manage headers, credentials, signed URL refresh, or token expiry. Use a custom `AudioSource` for load-time URL refresh, and use HLS/DASH vendor request hooks when manifest or segment requests need authentication after playback starts.
+
 Playlist types:
 
 | Type | Fields |
@@ -248,6 +250,7 @@ Shared adaptive exports from `gaudio`:
 | Type or value | Purpose |
 | --- | --- |
 | `AdaptivePlaybackPreset` | `FastStart`, `Balanced`, and `Stable` audio VOD profiles. |
+| `AdaptiveContentType` | `'vod'`, `'long-form'`, or `'live'` content tuning for adaptive adapters. |
 | `AdaptiveAudioProtocol` | `'hls' \| 'dash'`. |
 | `AdaptivePlaybackImplementation` | `'native' \| 'hls.js' \| 'dash.js'`. |
 | `AdaptivePlaybackInfo` | Active adaptive protocol and implementation. |
@@ -274,7 +277,7 @@ Import from `gaudio/hls`.
 | --- | --- |
 | `createHlsAdapter(options?)` | Creates an HLS adapter for `AudioPlayerOptions.adapters`. |
 | `HlsAudioAdapter` | Adapter instance with `hlsInstance`, `implementation`, `getConfig()`, `updateConfig()`, and adapter methods. |
-| `HlsAdapterOptions` | `preset`, `playbackStrategy`, and initial `config`. |
+| `HlsAdapterOptions` | `contentType`, `preset`, `playbackStrategy`, and initial `config`. |
 | `HlsPlaybackStrategy` | `'native-first' \| 'hls-first' \| 'native-only' \| 'hls-only'`. |
 | `HlsAdapterConfig` | Deep partial `hls.js` constructor configuration with mergeable load policies. |
 | `HlsConfigUpdateOptions` | `apply`, `restorePosition`, and `resumePlayback`. |
@@ -291,7 +294,7 @@ Import from `gaudio/dash`.
 | --- | --- |
 | `createDashAdapter(options?)` | Creates a DASH adapter for `AudioPlayerOptions.adapters`. |
 | `DashAudioAdapter` | Adapter instance with `dashInstance`, `getSettings()`, `updateSettings()`, and adapter methods. |
-| `DashAdapterOptions` | `preset` and initial dash.js `settings`. |
+| `DashAdapterOptions` | `contentType`, `preset`, and initial dash.js `settings`. |
 | `MediaPlayerClass` | Re-export from `dashjs`. |
 | `MediaPlayerSettingClass` | Re-export from `dashjs`. |
 

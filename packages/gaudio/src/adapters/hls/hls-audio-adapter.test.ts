@@ -58,6 +58,7 @@ function adapterHarness(options: {
   nativeSupport?: CanPlayTypeResult
   hlsSupport?: boolean
   config?: HlsAdapterConfig
+  contentType?: 'vod' | 'long-form' | 'live'
   preset?: AdaptivePlaybackPreset
 } = {}): AdapterHarness {
   const audioElements: FakeAudioElement[] = []
@@ -65,6 +66,7 @@ function adapterHarness(options: {
   const adapter = new HlsAudioAdapterImpl({
     playbackStrategy: options.strategy,
     config: options.config,
+    contentType: options.contentType,
     preset: options.preset,
   }, {
     audioElementFactory: () => {
@@ -218,6 +220,48 @@ describe('hlsAudioAdapter', () => {
       maxMaxBufferLength: 90,
       backBufferLength: 30,
       lowLatencyMode: false,
+    })
+  })
+
+  it('applies the HLS long-form audio profile for extended playback', () => {
+    const config = adapterHarness({ contentType: 'long-form' }).adapter.getConfig()
+
+    expect(config).toMatchObject({
+      maxBufferLength: 120,
+      maxMaxBufferLength: 300,
+      backBufferLength: 120,
+      maxBufferSize: 64 * 1024 * 1024,
+      maxStarvationDelay: 10,
+      maxLoadingDelay: 10,
+      lowLatencyMode: false,
+    })
+    expect(config.fragLoadPolicy?.default).toMatchObject({
+      maxLoadTimeMs: 180_000,
+      errorRetry: { maxNumRetry: 8 },
+    })
+  })
+
+  it('applies the HLS live profile for low-latency recovery', () => {
+    const config = adapterHarness({ contentType: 'live' }).adapter.getConfig()
+
+    expect(config).toMatchObject({
+      maxBufferLength: 18,
+      maxMaxBufferLength: 45,
+      backBufferLength: 45,
+      liveBackBufferLength: 45,
+      lowLatencyMode: true,
+      liveSyncDurationCount: 3,
+      liveMaxLatencyDurationCount: 8,
+      maxStarvationDelay: 3,
+      maxLoadingDelay: 3,
+    })
+    expect(config.playlistLoadPolicy?.default).toMatchObject({
+      maxLoadTimeMs: 10_000,
+      errorRetry: { maxNumRetry: 10 },
+    })
+    expect(config.fragLoadPolicy?.default).toMatchObject({
+      maxLoadTimeMs: 30_000,
+      errorRetry: { maxNumRetry: 10 },
     })
   })
 

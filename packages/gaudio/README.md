@@ -21,7 +21,7 @@ pnpm add gaudio dashjs
 
 | Import | Contents |
 | --- | --- |
-| `gaudio` | `AudioPlayer`, `HttpAudioSource`, `BlobAudioSource`, `AudioAnalyzer`, `EventEmitter`, core types, adaptive event types, `AdaptivePlaybackPreset` |
+| `gaudio` | `AudioPlayer`, `HttpAudioSource`, `BlobAudioSource`, `AudioAnalyzer`, `EventEmitter`, core types, adaptive event types, `AdaptiveContentType`, `AdaptivePlaybackPreset` |
 | `gaudio/hls` | `createHlsAdapter`, HLS adapter types, `HlsConfig` |
 | `gaudio/dash` | `createDashAdapter`, DASH adapter types, dash.js type re-exports |
 
@@ -144,7 +144,7 @@ const fileSource = new BlobAudioSource(file)
 player.setSource(fileSource)
 ```
 
-Custom `AudioSource` objects can lazily open signed URLs, local object URLs, or app-owned resources through `open()` and `close()`.
+`HttpAudioSource` is only a URL wrapper; it does not attach headers, set credentials, or refresh expired tokens. Custom `AudioSource` objects can lazily open signed URLs, local object URLs, or app-owned resources through `open()` and `close()`. For HLS/DASH manifests and segments that need authentication after playback starts, use the selected vendor's request hooks through the adapter configuration.
 
 ## Adaptive playback
 
@@ -155,10 +155,12 @@ import { createHlsAdapter } from 'gaudio/hls'
 
 const hlsAdapter = createHlsAdapter({
   playbackStrategy: 'native-first',
+  contentType: 'vod',
   preset: AdaptivePlaybackPreset.Balanced,
 })
 
 const dashAdapter = createDashAdapter({
+  contentType: 'vod',
   preset: AdaptivePlaybackPreset.Balanced,
 })
 
@@ -167,7 +169,7 @@ const player = new AudioPlayer({
 })
 ```
 
-`Balanced` is used when `preset` is omitted. Choose `FastStart` for smaller startup buffers or `Stable` for weak and variable networks. Presets configure audio VOD loading, buffering, memory limits, ABR, request retries, timeouts, and stall recovery. Explicit vendor configuration overrides the selected preset.
+`Balanced` is used when `preset` is omitted. Choose `FastStart` for smaller startup buffers or `Stable` for weak and variable networks. Use `contentType: 'long-form'` for audiobooks and multi-hour programs, or `contentType: 'live'` for HLS/DASH live streams with latency and reconnect tuning. Explicit vendor configuration overrides the selected preset and content type.
 
 gaudio reports adaptive quality through `manifestloaded` and `variantchange`. Use the player-level API for protocol-neutral quality controls:
 

@@ -1,6 +1,7 @@
 export { AdaptivePlaybackPreset } from './adapters/adaptive-audio-types'
 export type {
   AdaptiveAudioProtocol,
+  AdaptiveContentType,
   AdaptiveManifestUpdate,
   AdaptivePlaybackImplementation,
   AdaptivePlaybackInfo,
