@@ -6,11 +6,13 @@ import type { AudioSource, AudioSourceInput } from '../source/audio-source'
 import type { AudioPlayerEvents } from './audio-player-events'
 import type { AudioPlayerAnalyzerOptions, AudioPlayerOptions, PlaybackState } from './audio-player-options'
 import type { AudioPlaylistNavigationOptions, AudioPlaylistOptions, AudioPlaylistTrack, AudioTrack, AudioTrackSelectionOptions } from './audio-playlist'
+import type { AudioMediaSessionMetadata, AudioMediaSessionOptions } from './browser-media-session'
 import { audioEngineEventNames } from '../engine/audio-engine'
 import { AudioEngineRouter } from '../engine/audio-engine-router'
 import { GAudioError } from '../errors/errors'
 import { EventEmitter } from '../events/event-emitter'
 import { HttpAudioSource } from '../source/http-audio-source'
+import { BrowserMediaSession } from './browser-media-session'
 
 const defaultAnalyzerFftSize = 2048
 
@@ -19,7 +21,9 @@ export class AudioPlayer {
   private readonly events = new EventEmitter<AudioPlayerEvents>()
   private readonly engine: AudioEngine
   private readonly analyzerOptions?: AudioPlayerAnalyzerOptions
+  private readonly mediaSession?: BrowserMediaSession
   private analyzer?: AudioAnalyzer
+  private mediaSessionMetadata?: AudioMediaSessionMetadata
   private source?: AudioSource
   private playlist: readonly AudioPlaylistTrack[] = []
   private playlistIndex = -1
@@ -45,6 +49,18 @@ export class AudioPlayer {
     // AI modified: the router owns protocol engines only when callers do not inject a custom engine.
     this.engine = engine ?? new AudioEngineRouter({ adapters: options.adapters })
     this.analyzerOptions = this.playerAnalyzerOptions(options.analyzer)
+    this.mediaSessionMetadata = typeof options.mediaSession === 'object' && options.mediaSession.metadata
+      ? {
+          title: options.mediaSession.metadata.title,
+          artist: options.mediaSession.metadata.artist,
+          album: options.mediaSession.metadata.album,
+          artwork: options.mediaSession.metadata.artwork?.map(artwork => ({
+            src: artwork.src,
+            sizes: artwork.sizes,
+            type: artwork.type,
+          })),
+        }
+      : undefined
     this.shouldAutoplay = options.autoplay ?? false
 
     try {
@@ -63,6 +79,11 @@ export class AudioPlayer {
 
       // AI modified: derive public state from engine lifecycle events instead of method calls.
       this.connectEngineEvents()
+      // AI modified: opt-in Media Session support lets system controls call the stable AudioPlayer API.
+      this.mediaSession = this.createMediaSession(options.mediaSession)
+      this.mediaSession?.setPlaybackState(this.state)
+      this.updateMediaSessionMetadata()
+      this.updateMediaSessionPosition()
     }
     catch (error) {
       // AI modified: failed construction must release adapters claimed by an internally owned router.
@@ -209,6 +230,7 @@ export class AudioPlayer {
       throw new RangeError('Playback rate must be a finite number greater than 0')
     }
     this.engine.setPlaybackRate(rate)
+    this.updateMediaSessionPosition()
   }
 
   /** @returns Whether pitch remains stable when playback speed changes. */
@@ -275,6 +297,32 @@ export class AudioPlayer {
     return this.analyzer
   }
 
+  /** @returns Default Media Session metadata used when the active playlist track does not provide metadata. */
+  getMediaSessionMetadata(): AudioMediaSessionMetadata | undefined {
+    return this.mediaSessionMetadata
+  }
+
+  /**
+   * Updates default Media Session metadata for direct sources and playlist tracks without their own metadata.
+   *
+   * @param metadata Metadata shown by browser and operating-system media controls.
+   */
+  setMediaSessionMetadata(metadata: AudioMediaSessionMetadata | undefined): void {
+    this.mediaSessionMetadata = metadata
+      ? {
+          title: metadata.title,
+          artist: metadata.artist,
+          album: metadata.album,
+          artwork: metadata.artwork?.map(artwork => ({
+            src: artwork.src,
+            sizes: artwork.sizes,
+            type: artwork.type,
+          })),
+        }
+      : undefined
+    this.updateMediaSessionMetadata()
+  }
+
   /** @returns Active adaptive playback implementation details, when an adaptive source is loaded. */
   getActiveAdaptivePlayback(): AdaptivePlaybackInfo | undefined {
     return this.engine.getActiveAdaptivePlayback?.()
@@ -327,6 +375,18 @@ export class AudioPlayer {
     this.playlist = playlist.map(track => ({
       source: track.source,
       fallbackSources: track.fallbackSources ? [...track.fallbackSources] : undefined,
+      metadata: track.metadata
+        ? {
+            title: track.metadata.title,
+            artist: track.metadata.artist,
+            album: track.metadata.album,
+            artwork: track.metadata.artwork?.map(artwork => ({
+              src: artwork.src,
+              sizes: artwork.sizes,
+              type: artwork.type,
+            })),
+          }
+        : undefined,
       audioTracks: track.audioTracks?.map(audioTrack => ({
         id: audioTrack.id,
         label: audioTrack.label,
@@ -346,6 +406,7 @@ export class AudioPlayer {
       this.source = undefined
       this.hasLoadedSource = false
       this.setState('idle')
+      this.updateMediaSessionMetadata()
       return
     }
 
@@ -446,6 +507,8 @@ export class AudioPlayer {
     this.source = this.audioSourceForInput(source)
     this.hasLoadedSource = false
     this.setState('idle')
+    this.updateMediaSessionMetadata()
+    this.updateMediaSessionPosition()
   }
 
   /**
@@ -544,6 +607,7 @@ export class AudioPlayer {
     this.engine.stop()
     // AI modified: ready means a source is loaded and can resume without another load.
     this.setState(this.hasLoadedSource ? 'ready' : 'idle')
+    this.updateMediaSessionPosition()
   }
 
   /**
@@ -557,6 +621,7 @@ export class AudioPlayer {
       throw new RangeError('Seek position must be a finite number greater than or equal to 0')
     }
     await this.engine.seek(seconds)
+    this.updateMediaSessionPosition()
   }
 
   /**
@@ -570,6 +635,7 @@ export class AudioPlayer {
       throw new RangeError('Fast seek position must be a finite number greater than or equal to 0')
     }
     await this.engine.fastSeek(seconds)
+    this.updateMediaSessionPosition()
   }
 
   /**
@@ -618,6 +684,7 @@ export class AudioPlayer {
   dispose(): void {
     this.loadRequestId += 1
     this.releaseAnalyzer()
+    this.mediaSession?.dispose()
     this.engine.dispose()
     this.events.clear()
     this.source = undefined
@@ -643,6 +710,35 @@ export class AudioPlayer {
         }
   }
 
+  private createMediaSession(
+    option: AudioPlayerOptions['mediaSession'],
+  ): BrowserMediaSession | undefined {
+    if (option === undefined || option === false) {
+      return undefined
+    }
+
+    const mediaSessionOptions: AudioMediaSessionOptions = option === true
+      ? {}
+      : option
+
+    if (mediaSessionOptions.enabled === false) {
+      return undefined
+    }
+
+    return new BrowserMediaSession(mediaSessionOptions, {
+      play: () => this.play(),
+      pause: () => this.pause(),
+      stop: () => this.stop(),
+      previous: () => this.previous({ autoplay: true }),
+      next: () => this.next({ autoplay: true }),
+      seek: seconds => this.seek(seconds),
+      fastSeek: seconds => this.fastSeek(seconds),
+      getCurrentTime: () => this.getCurrentTime(),
+      getDuration: () => this.getDuration(),
+      getPlaybackRate: () => this.getPlaybackRate(),
+    })
+  }
+
   private ensureAnalyzer(): void {
     if (!this.analyzerOptions || this.analyzer) {
       return
@@ -664,6 +760,16 @@ export class AudioPlayer {
   private connectEngineEvents(): void {
     for (const eventName of audioEngineEventNames) {
       switch (eventName) {
+        case 'loadedmetadata':
+        case 'seeked':
+        case 'timeupdate':
+        case 'durationchange':
+        case 'ratechange':
+          this.engine.on(eventName, (payload) => {
+            this.updateMediaSessionPosition()
+            this.events.emit(eventName, payload)
+          })
+          break
         case 'playing':
           this.engine.on(eventName, (payload) => {
             this.setState('playing')
@@ -766,6 +872,10 @@ export class AudioPlayer {
     return this.playlistIndex >= 0 ? this.playlist[this.playlistIndex] : undefined
   }
 
+  private activeMediaSessionMetadata(): AudioMediaSessionMetadata | undefined {
+    return this.activePlaylistTrack()?.metadata ?? this.mediaSessionMetadata
+  }
+
   private activePlaylistSource(): AudioSourceInput {
     const playlistTrack = this.activePlaylistTrack()
     if (!playlistTrack) {
@@ -796,6 +906,15 @@ export class AudioPlayer {
     }
 
     this.state = state
+    this.mediaSession?.setPlaybackState(state)
     this.events.emit('statechange', state)
+  }
+
+  private updateMediaSessionMetadata(): void {
+    this.mediaSession?.setMetadata(this.activeMediaSessionMetadata())
+  }
+
+  private updateMediaSessionPosition(): void {
+    this.mediaSession?.setPositionState()
   }
 }

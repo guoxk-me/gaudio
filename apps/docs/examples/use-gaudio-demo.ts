@@ -380,6 +380,11 @@ export function useGaudioDemo() {
     resetAdaptiveQualityControls()
 
     await withBusyControls(async () => {
+      player.setMediaSessionMetadata({
+        title: track.title,
+        artist: track.artist,
+        album: 'gaudio demo',
+      })
       player.setSource(sourceUrl.value)
       await player.load()
       updateMediaStatus()
@@ -615,6 +620,13 @@ export function useGaudioDemo() {
       volume: volume.value,
       playbackRate: playbackRate.value,
       preservesPitch: shouldPreservePitch.value,
+      mediaSession: {
+        metadata: {
+          title: activeTrack.value.title,
+          artist: activeTrack.value.artist,
+          album: 'gaudio demo',
+        },
+      },
       // AI modified: demo analyzer samples now come from the public AudioPlayer configuration path.
       analyzer: {
         fftSize: 1024,

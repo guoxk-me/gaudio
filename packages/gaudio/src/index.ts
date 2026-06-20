@@ -49,6 +49,11 @@ export type {
   AudioTrack,
   AudioTrackSelectionOptions,
 } from './player/audio-playlist'
+export type {
+  AudioMediaSessionArtwork,
+  AudioMediaSessionMetadata,
+  AudioMediaSessionOptions,
+} from './player/browser-media-session'
 export type { AudioSource, AudioSourceInput, AudioSourceKind, AudioStreamHandle } from './source/audio-source'
 export type {
   AudioProtocol,

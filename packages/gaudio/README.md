@@ -36,6 +36,16 @@ const player = new AudioPlayer({
   source: 'https://example.com/audio.mp3',
   preload: 'auto',
   volume: 0.8,
+  mediaSession: {
+    metadata: {
+      title: 'Episode 1',
+      artist: 'Example Studio',
+      album: 'Example Podcast',
+      artwork: [
+        { src: '/cover-512.png', sizes: '512x512', type: 'image/png' },
+      ],
+    },
+  },
   analyzer: true,
 })
 
@@ -81,8 +91,18 @@ player.setPlaylist([
   {
     source: 'https://example.com/episode-1.mp3',
     fallbackSources: ['https://cdn.example.com/episode-1.mp3'],
+    metadata: {
+      title: 'Episode 1',
+      artist: 'Example Studio',
+    },
   },
-  { source: 'https://example.com/episode-2.mp3' },
+  {
+    source: 'https://example.com/episode-2.mp3',
+    metadata: {
+      title: 'Episode 2',
+      artist: 'Example Studio',
+    },
+  },
 ])
 
 await player.load()
@@ -120,6 +140,25 @@ await player.selectAudioTrack('en')
 ```
 
 `selectAudioTrack()` keeps the current time and previous paused/playing state by default, so language changes stay on the same program timeline.
+
+## Browser Media Session
+
+Enable `mediaSession` to connect gaudio with browser and operating-system media controls. Supported browsers can show title, artist, album, and artwork in lock-screen or system media surfaces, and headset or keyboard media keys can trigger play, pause, stop, previous, next, seek forward, seek backward, and seek-to actions.
+
+```ts
+const player = new AudioPlayer({
+  source: 'https://example.com/audio.mp3',
+  mediaSession: true,
+})
+
+player.setMediaSessionMetadata({
+  title: 'Episode 1',
+  artist: 'Example Studio',
+  album: 'Example Podcast',
+})
+```
+
+Playlist track `metadata` takes priority while that track is active. `setMediaSessionMetadata()` updates the default metadata used by direct sources and playlist tracks that do not provide their own metadata.
 
 ## Source inputs
 

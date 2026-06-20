@@ -1,4 +1,5 @@
 import type { AudioSourceInput } from '../source/audio-source'
+import type { AudioMediaSessionMetadata } from './browser-media-session'
 
 /** A selectable audio variant for the current playlist track, such as a dubbed language. */
 export interface AudioTrack {
@@ -20,6 +21,8 @@ export interface AudioPlaylistTrack {
   readonly source: AudioSourceInput
   /** Backup sources attempted in order when the primary source cannot load. */
   readonly fallbackSources?: readonly AudioSourceInput[]
+  /** Metadata shown by browser and operating-system media controls. */
+  readonly metadata?: AudioMediaSessionMetadata
   /** Language or alternate audio sources available for this playlist track. */
   readonly audioTracks?: readonly AudioTrack[]
   /**

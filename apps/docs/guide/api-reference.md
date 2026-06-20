@@ -128,6 +128,8 @@ State and capability APIs:
 | `getPlayedRanges()` | `readonly TimeRange[]` | Played ranges in seconds. |
 | `canPlayType(mimeType)` | `AudioFormatSupport` | Native media support plus registered HLS/DASH adapter support: `''`, `'maybe'`, or `'probably'`. |
 | `getAnalyzer()` | `AudioAnalyzer \| undefined` | Analyzer created after `load()` when configured and supported. |
+| `getMediaSessionMetadata()` | `AudioMediaSessionMetadata \| undefined` | Default Media Session metadata for direct sources and playlist tracks without metadata. |
+| `setMediaSessionMetadata(metadata)` | `void` | Updates browser/system media metadata for direct sources or playlist fallback metadata. |
 | `getSource()` | `AudioSource \| undefined` | Current configured source. |
 
 Events:
@@ -160,6 +162,7 @@ await player.setAdaptiveQuality(variants[0].id)
 | `source` | `AudioSourceInput` | `undefined` |
 | `adapters` | `readonly AudioEngineAdapter[]` | `[]` |
 | `analyzer` | `boolean \| AudioPlayerAnalyzerOptions` | `undefined` |
+| `mediaSession` | `boolean \| AudioMediaSessionOptions` | `undefined` |
 | `preload` | `PreloadMode` | `'metadata'` |
 | `autoplay` | `boolean` | `false` |
 | `muted` | `boolean` | `false` |
@@ -178,6 +181,39 @@ Analyzer options:
 | `AudioAnalyzerOptions` | `fftSize?: number` |
 
 Use `analyzer: true` for the built-in player path, or `createAnalyzer` when a custom engine or app-owned Web Audio graph should provide the analyzer.
+
+Media Session options:
+
+| Type | Fields |
+| --- | --- |
+| `AudioMediaSessionOptions` | `enabled?: boolean`, `metadata?: AudioMediaSessionMetadata`, `seekOffset?: number` |
+| `AudioMediaSessionMetadata` | `title?`, `artist?`, `album?`, `artwork?` |
+| `AudioMediaSessionArtwork` | `src`, `sizes?`, `type?` |
+
+Enable `mediaSession` when the app should integrate with browser, keyboard, headset, and operating-system media controls:
+
+```ts
+const player = new AudioPlayer({
+  source: 'https://example.com/episode-1.mp3',
+  mediaSession: {
+    metadata: {
+      title: 'Episode 1',
+      artist: 'Example Studio',
+      album: 'Example Podcast',
+      artwork: [
+        { src: '/cover-512.png', sizes: '512x512', type: 'image/png' },
+      ],
+    },
+  },
+})
+
+player.setMediaSessionMetadata({
+  title: 'Episode 2',
+  artist: 'Example Studio',
+})
+```
+
+System actions are routed through the existing player APIs: play, pause, stop, previous, next, seek backward, seek forward, and seek to a specific time. Unsupported browsers ignore the integration without changing playback behavior.
 
 ## AudioAnalyzer
 
@@ -214,7 +250,7 @@ Playlist types:
 
 | Type | Fields |
 | --- | --- |
-| `AudioPlaylistTrack` | `source`, `fallbackSources?` |
+| `AudioPlaylistTrack` | `source`, `fallbackSources?`, `metadata?` |
 | `AudioPlaylistOptions` | `startIndex?` |
 | `AudioPlaylistNavigationOptions` | `autoplay?` |
 | `AudioTrack` | `id`, `label?`, `language?`, `source`, `fallbackSources?` |

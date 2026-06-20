@@ -128,6 +128,8 @@ await player.selectAudioTrack('en')
 | `getPlayedRanges()` | `readonly TimeRange[]` | 已播放区间，单位秒。 |
 | `canPlayType(mimeType)` | `AudioFormatSupport` | 原生媒体支持加已注册 HLS/DASH adapter 支持：`''`、`'maybe'` 或 `'probably'`。 |
 | `getAnalyzer()` | `AudioAnalyzer \| undefined` | 配置并支持 analyzer 时，在 `load()` 后返回 analyzer。 |
+| `getMediaSessionMetadata()` | `AudioMediaSessionMetadata \| undefined` | direct source 和没有 metadata 的 playlist track 使用的默认 Media Session metadata。 |
+| `setMediaSessionMetadata(metadata)` | `void` | 更新浏览器/系统媒体面板显示的 direct source 或 playlist fallback metadata。 |
 | `getSource()` | `AudioSource \| undefined` | 当前配置的 source。 |
 
 事件：
@@ -160,6 +162,7 @@ await player.setAdaptiveQuality(variants[0].id)
 | `source` | `AudioSourceInput` | `undefined` |
 | `adapters` | `readonly AudioEngineAdapter[]` | `[]` |
 | `analyzer` | `boolean \| AudioPlayerAnalyzerOptions` | `undefined` |
+| `mediaSession` | `boolean \| AudioMediaSessionOptions` | `undefined` |
 | `preload` | `PreloadMode` | `'metadata'` |
 | `autoplay` | `boolean` | `false` |
 | `muted` | `boolean` | `false` |
@@ -178,6 +181,39 @@ Analyzer 类型：
 | `AudioAnalyzerOptions` | `fftSize?: number` |
 
 使用 `analyzer: true` 可以走内置 player 分析路径；自定义 engine 或应用自持 Web Audio 图可使用 `createAnalyzer`。
+
+Media Session options：
+
+| 类型 | 字段 |
+| --- | --- |
+| `AudioMediaSessionOptions` | `enabled?: boolean`、`metadata?: AudioMediaSessionMetadata`、`seekOffset?: number` |
+| `AudioMediaSessionMetadata` | `title?`、`artist?`、`album?`、`artwork?` |
+| `AudioMediaSessionArtwork` | `src`、`sizes?`、`type?` |
+
+当应用需要接入浏览器、键盘、耳机和操作系统媒体控制时，启用 `mediaSession`：
+
+```ts
+const player = new AudioPlayer({
+  source: 'https://example.com/episode-1.mp3',
+  mediaSession: {
+    metadata: {
+      title: 'Episode 1',
+      artist: 'Example Studio',
+      album: 'Example Podcast',
+      artwork: [
+        { src: '/cover-512.png', sizes: '512x512', type: 'image/png' },
+      ],
+    },
+  },
+})
+
+player.setMediaSessionMetadata({
+  title: 'Episode 2',
+  artist: 'Example Studio',
+})
+```
+
+系统动作会复用现有 player API：play、pause、stop、previous、next、seek backward、seek forward 和 seek to。浏览器不支持时会自动忽略，不改变播放行为。
 
 ## AudioAnalyzer
 
@@ -214,7 +250,7 @@ const analyzer = new AudioAnalyzer(audioContext, sourceNode, fftSize)
 
 | 类型 | 字段 |
 | --- | --- |
-| `AudioPlaylistTrack` | `source`, `fallbackSources?` |
+| `AudioPlaylistTrack` | `source`, `fallbackSources?`, `metadata?` |
 | `AudioPlaylistOptions` | `startIndex?` |
 | `AudioPlaylistNavigationOptions` | `autoplay?` |
 | `AudioTrack` | `id`, `label?`, `language?`, `source`, `fallbackSources?` |
