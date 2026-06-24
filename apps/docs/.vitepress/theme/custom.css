@@ -53,6 +53,23 @@
   border-radius: 8px;
 }
 
+/* AI modified: examples need the page heading and demo console to share one content width. */
+.VPDoc.gaudio-example-page .container,
+.VPDoc.gaudio-example-page .content,
+.VPDoc.gaudio-example-page .content-container,
+.VPDoc.gaudio-example-page .vp-doc,
+.gaudio-example-page .VPDoc .container,
+.gaudio-example-page .VPDoc .content,
+.gaudio-example-page .VPDoc .content-container,
+.gaudio-example-page .VPDoc .vp-doc {
+  max-width: 1180px !important;
+}
+
+.VPDoc.gaudio-example-page .aside,
+.gaudio-example-page .VPDoc .aside {
+  display: none;
+}
+
 .gaudio-home-showcase {
   display: grid;
   grid-template-columns: minmax(0, 0.95fr) minmax(320px, 1.05fr);

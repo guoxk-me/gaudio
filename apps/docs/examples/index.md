@@ -1,3 +1,7 @@
+---
+pageClass: gaudio-example-page
+---
+
 # Interactive Demo
 
 The example runs against the same public package exports used by applications. It demonstrates core playback, source input shapes, browser capability checks, HLS and DASH adapters, adaptive events, automatic quality changes, unified manual quality selection, runtime adapter updates, `AudioAnalyzer`, a live canvas spectrum, `EventEmitter`, and typed error reporting.
