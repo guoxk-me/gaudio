@@ -12,7 +12,8 @@ export interface DemoFormatGroup {
 }
 
 export const demoTracks: DemoTrack[] = [
-  { id: 'pineapple-slice', title: 'Pineapple Slice Instrumental', artist: 'Unknown' },
+  // AI modified: use a clear demo-facing artist label instead of exposing missing source metadata.
+  { id: 'pineapple-slice', title: 'Pineapple Slice Instrumental', artist: 'gaudio sample' },
 ]
 
 export const demoFormatGroups: DemoFormatGroup[] = [
