@@ -87,10 +87,11 @@ const {
 
 <style scoped>
 .catalog {
-  border: 1px solid var(--vp-c-divider);
-  border-radius: 12px;
+  border: 1px solid var(--demo-border);
+  border-radius: 8px;
   padding: 18px;
-  background: var(--vp-c-bg-soft);
+  background: var(--demo-panel);
+  color: var(--demo-text);
 }
 
 .catalog__header {
@@ -109,7 +110,7 @@ const {
 
 .catalog__eyebrow,
 .catalog__label {
-  color: var(--vp-c-text-2);
+  color: var(--demo-muted);
   font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.08em;
@@ -117,7 +118,7 @@ const {
 }
 
 .catalog__meta {
-  color: var(--vp-c-text-2);
+  color: var(--demo-muted);
 }
 
 .catalog__navigation,
@@ -136,11 +137,12 @@ const {
 .catalog button {
   display: grid;
   gap: 2px;
-  border: 1px solid var(--vp-c-divider);
-  border-radius: 8px;
+  border: 1px solid var(--demo-line);
+  border-radius: 6px;
   padding: 8px 12px;
-  background: var(--vp-c-bg);
-  color: var(--vp-c-text-1);
+  background: var(--demo-panel-strong);
+  color: var(--demo-text);
+  font: inherit;
   cursor: pointer;
 }
 
@@ -150,13 +152,21 @@ const {
 }
 
 .catalog__choice--active {
-  border-color: var(--vp-c-brand-1) !important;
-  color: var(--vp-c-brand-1) !important;
+  border-color: rgba(217, 154, 66, 0.72) !important;
+  color: var(--demo-amber-strong) !important;
+  background: rgba(217, 154, 66, 0.12) !important;
 }
 
 .catalog__path {
   display: block;
   margin-top: 16px;
   overflow-wrap: anywhere;
+  color: var(--demo-muted);
+}
+
+@media (max-width: 700px) {
+  .catalog__header {
+    display: grid;
+  }
 }
 </style>

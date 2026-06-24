@@ -15,10 +15,15 @@ const {
   applyHlsConfigUpdate,
   browserSupportRows,
   eventEmitterStatus,
+  errorPreviewStatus,
   frequencyPreview,
   isBusy,
+  mediaSessionStatus,
+  playlistStatus,
   runAnalyzerPreview,
+  runErrorPreview,
   runEventEmitterPreview,
+  runPlaylistPreview,
   sourceLifecycleLabel,
   waveformPreview,
 } = props.demo
@@ -83,6 +88,10 @@ const capabilityRows = computed(() => props.text.capabilities.apiCoverage)
           <dl>
             <dt>{{ text.capabilities.sourceLifecycle }}</dt>
             <dd>{{ sourceLifecycleLabel }}</dd>
+            <dt>{{ text.capabilities.playlist }}</dt>
+            <dd>{{ playlistStatus }}</dd>
+            <dt>{{ text.capabilities.mediaSession }}</dt>
+            <dd>{{ mediaSessionStatus }}</dd>
             <dt>{{ text.capabilities.analyzer }}</dt>
             <dd>{{ analyzerStatus }}</dd>
             <dt>{{ text.capabilities.frequency }}</dt>
@@ -91,13 +100,21 @@ const capabilityRows = computed(() => props.text.capabilities.apiCoverage)
             <dd>{{ waveformPreview }}</dd>
             <dt>{{ text.capabilities.eventEmitter }}</dt>
             <dd>{{ eventEmitterStatus }}</dd>
+            <dt>{{ text.capabilities.error }}</dt>
+            <dd>{{ errorPreviewStatus }}</dd>
           </dl>
           <div class="capabilities__actions">
+            <button type="button" :disabled="isBusy" @click="runPlaylistPreview">
+              {{ text.capabilities.runPlaylist }}
+            </button>
             <button type="button" :disabled="isBusy" @click="runAnalyzerPreview">
               {{ text.capabilities.runAnalyzer }}
             </button>
             <button type="button" @click="runEventEmitterPreview">
               {{ text.capabilities.runEventEmitter }}
+            </button>
+            <button type="button" @click="runErrorPreview">
+              {{ text.capabilities.runError }}
             </button>
           </div>
         </article>
@@ -108,16 +125,24 @@ const capabilityRows = computed(() => props.text.capabilities.apiCoverage)
 
 <style scoped>
 .capabilities {
-  margin-top: 16px;
-  border: 1px solid var(--vp-c-divider);
+  margin-top: 8px;
+  border: 1px solid var(--demo-border);
   border-radius: 8px;
-  padding: 18px;
-  background: var(--vp-c-bg-soft);
+  padding: clamp(16px, 2vw, 22px);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.022), transparent 32%),
+    var(--demo-panel);
+  color: var(--demo-text);
 }
 
 .capabilities h2,
 .capabilities h3 {
   margin-top: 0;
+}
+
+.capabilities h2 {
+  font-size: clamp(20px, 2.4vw, 28px);
+  line-height: 1.15;
 }
 
 .capabilities__layout {
@@ -129,21 +154,38 @@ const capabilityRows = computed(() => props.text.capabilities.apiCoverage)
 
 .capabilities__table {
   width: 100%;
-  border-collapse: collapse;
-  font-size: 14px;
+  border-collapse: separate;
+  border-spacing: 0;
+  overflow: hidden;
+  border: 1px solid var(--demo-line);
+  border-radius: 8px;
+  font-size: 13px;
 }
 
 .capabilities__table th,
 .capabilities__table td {
-  border-bottom: 1px solid var(--vp-c-divider);
-  padding: 10px 8px;
+  border-bottom: 1px solid var(--demo-line);
+  padding: 12px 10px;
   text-align: left;
   vertical-align: top;
 }
 
+.capabilities__table td {
+  background: var(--demo-panel);
+  color: var(--demo-muted);
+}
+
+.capabilities__table th {
+  background: var(--demo-panel-strong);
+  color: var(--demo-muted);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
 .capabilities__table td:first-child {
   width: 180px;
-  color: var(--vp-c-brand-1);
+  color: var(--demo-amber-strong);
   font-family: var(--vp-font-family-mono);
   font-weight: 700;
 }
@@ -154,10 +196,10 @@ const capabilityRows = computed(() => props.text.capabilities.apiCoverage)
 }
 
 .capabilities__panel {
-  border: 1px solid var(--vp-c-divider);
+  border: 1px solid var(--demo-line);
   border-radius: 8px;
   padding: 14px;
-  background: var(--vp-c-bg);
+  background: var(--demo-panel-strong);
 }
 
 .capabilities__panel dl {
@@ -169,7 +211,7 @@ const capabilityRows = computed(() => props.text.capabilities.apiCoverage)
 }
 
 .capabilities__panel dt {
-  color: var(--vp-c-text-2);
+  color: var(--demo-muted);
   font-weight: 700;
 }
 
@@ -182,7 +224,7 @@ const capabilityRows = computed(() => props.text.capabilities.apiCoverage)
 }
 
 .capabilities__panel small {
-  color: var(--vp-c-text-2);
+  color: var(--demo-muted);
   font-family: var(--vp-font-family-mono);
 }
 
@@ -194,11 +236,13 @@ const capabilityRows = computed(() => props.text.capabilities.apiCoverage)
 }
 
 .capabilities__actions button {
-  border: 0;
-  border-radius: 8px;
+  border: 1px solid var(--demo-line);
+  border-radius: 6px;
   padding: 8px 10px;
-  background: var(--vp-c-brand-1);
-  color: white;
+  background: var(--demo-control);
+  color: var(--demo-text);
+  font: inherit;
+  font-size: 12px;
   font-weight: 700;
   cursor: pointer;
 }
@@ -211,6 +255,22 @@ const capabilityRows = computed(() => props.text.capabilities.apiCoverage)
 @media (max-width: 900px) {
   .capabilities__layout {
     grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 640px) {
+  .capabilities__table {
+    display: block;
+    overflow-x: auto;
+    white-space: nowrap;
+  }
+
+  .capabilities__panel dl {
+    grid-template-columns: 1fr;
+  }
+
+  .capabilities__panel dt {
+    margin-top: 4px;
   }
 }
 </style>
