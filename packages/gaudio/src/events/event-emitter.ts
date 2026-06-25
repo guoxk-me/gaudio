@@ -62,7 +62,8 @@ export class EventEmitter<Events extends object> {
       return
     }
 
-    for (const handler of existingHandlers) {
+    // AI modified: snapshot listeners so re-entrant subscription changes affect only future emits.
+    for (const handler of [...existingHandlers]) {
       handler(payload)
     }
   }

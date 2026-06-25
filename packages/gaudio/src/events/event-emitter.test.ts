@@ -45,6 +45,21 @@ describe('eventEmitter', () => {
     expect(states).toEqual(['playing'])
   })
 
+  it('uses a listener snapshot while emitting', () => {
+    const emitter = new EventEmitter<TestEvents>()
+    const states: string[] = []
+
+    emitter.on('statechange', (state) => {
+      states.push(`first:${state}`)
+      emitter.on('statechange', nextState => states.push(`second:${nextState}`))
+    })
+
+    emitter.emit('statechange', 'playing')
+    emitter.emit('statechange', 'idle')
+
+    expect(states).toEqual(['first:playing', 'first:idle', 'second:idle'])
+  })
+
   it('clears handlers for one event without removing other events', () => {
     const emitter = new EventEmitter<TestEvents>()
     const states: string[] = []

@@ -17,6 +17,7 @@ import { mediaTimeRanges } from './media-element-ranges'
 interface ActiveSourceSession {
   source: AudioSource
   isClosed: boolean
+  hasOpenCompleted: boolean
   abortController?: AbortController
   reject?: (error: GAudioError) => void
 }
@@ -62,12 +63,14 @@ export class MediaElementAudioEngine implements AudioEngine {
     const activeSourceSession: ActiveSourceSession = {
       source,
       isClosed: false,
+      hasOpenCompleted: false,
     }
     this.activeSourceSession = activeSourceSession
 
     let streamHandle
     try {
       streamHandle = await source.open()
+      activeSourceSession.hasOpenCompleted = true
     }
     catch (error) {
       if (this.activeSourceSession === activeSourceSession) {
@@ -79,6 +82,7 @@ export class MediaElementAudioEngine implements AudioEngine {
     }
 
     if (this.activeSourceSession !== activeSourceSession) {
+      this.closeSourceSession(activeSourceSession)
       throw this.loadAbortedError()
     }
 
@@ -416,7 +420,9 @@ export class MediaElementAudioEngine implements AudioEngine {
     activeSourceSession.reject?.(this.loadAbortedError())
     activeSourceSession.abortController = undefined
     activeSourceSession.reject = undefined
-    this.closeSourceSession(activeSourceSession)
+    if (activeSourceSession.hasOpenCompleted) {
+      this.closeSourceSession(activeSourceSession)
+    }
   }
 
   private closeSourceSession(activeSourceSession: ActiveSourceSession): void {
@@ -424,6 +430,7 @@ export class MediaElementAudioEngine implements AudioEngine {
       return
     }
 
+    // AI modified: cancelled pending opens are closed after open() completes so allocated resources are released once.
     activeSourceSession.isClosed = true
     void activeSourceSession.source.close()
   }
