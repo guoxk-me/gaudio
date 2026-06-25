@@ -8,19 +8,17 @@ import DemoPlayerSurface from './DemoPlayerSurface.vue'
 import DemoStatus from './DemoStatus.vue'
 import { useGaudioDemo } from './use-gaudio-demo'
 
-type DemoTheme = 'light' | 'dark'
-
-const { lang } = useData()
+const { isDark, lang } = useData()
 const demo = useGaudioDemo()
 // AI modified: keep demo UI bilingual while sharing the same playback implementation.
 const text = computed(() => demoText[demoLocaleForLang(lang.value)])
-const demoTheme = shallowRef<DemoTheme>('dark')
 const playerPanel = useTemplateRef<HTMLElement>('playerPanel')
 const playerPanelHeight = shallowRef<number>()
 const shouldSyncStatusHeight = shallowRef(false)
+// AI modified: derive the demo palette from VitePress appearance so the site switch is the only theme control.
 const demoClasses = computed(() => [
   'gaudio-demo',
-  `gaudio-demo--${demoTheme.value}`,
+  isDark.value ? 'gaudio-demo--dark' : 'gaudio-demo--light',
 ])
 const statusHeightStyle = computed(() => (
   !shouldSyncStatusHeight.value || playerPanelHeight.value === undefined
@@ -41,10 +39,6 @@ function keepStatusHeightWithPlayer(): void {
 function updateStatusRailLayout(): void {
   shouldSyncStatusHeight.value = consoleLayoutQuery?.matches ?? window.innerWidth > 980
   keepStatusHeightWithPlayer()
-}
-
-function selectDemoTheme(theme: DemoTheme): void {
-  demoTheme.value = theme
 }
 
 onMounted(() => {
@@ -74,24 +68,6 @@ onUnmounted(() => {
       <p class="gaudio-demo__intro">
         {{ text.intro }}
       </p>
-      <div class="gaudio-demo__theme-toggle" role="group" :aria-label="text.theme.ariaLabel">
-        <button
-          type="button"
-          :aria-pressed="demoTheme === 'light'"
-          :class="{ 'gaudio-demo__theme-button--active': demoTheme === 'light' }"
-          @click="selectDemoTheme('light')"
-        >
-          {{ text.theme.light }}
-        </button>
-        <button
-          type="button"
-          :aria-pressed="demoTheme === 'dark'"
-          :class="{ 'gaudio-demo__theme-button--active': demoTheme === 'dark' }"
-          @click="selectDemoTheme('dark')"
-        >
-          {{ text.theme.dark }}
-        </button>
-      </div>
     </div>
     <DemoControls :demo="demo" :text="text" />
     <div class="gaudio-demo__console">
@@ -180,49 +156,6 @@ onUnmounted(() => {
   font-size: 15px;
 }
 
-.gaudio-demo__theme-toggle {
-  display: inline-flex;
-  gap: 4px;
-  border: 1px solid var(--demo-border);
-  border-radius: 999px;
-  padding: 4px;
-  background: var(--demo-panel);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
-}
-
-.gaudio-demo__theme-button {
-  appearance: none;
-}
-
-.gaudio-demo__theme-toggle button {
-  min-height: 30px;
-  border: 0;
-  border-radius: 999px;
-  padding: 0 12px;
-  background: transparent;
-  color: var(--demo-muted);
-  font: inherit;
-  font-size: 12px;
-  font-weight: 760;
-  cursor: pointer;
-}
-
-.gaudio-demo__theme-toggle button:hover {
-  color: var(--demo-text);
-  background: rgba(224, 162, 74, 0.1);
-}
-
-.gaudio-demo__theme-toggle button:focus-visible {
-  outline: 2px solid var(--demo-focus);
-  outline-offset: 2px;
-}
-
-.gaudio-demo__theme-button--active {
-  background: linear-gradient(180deg, rgba(245, 189, 100, 0.28), rgba(224, 162, 74, 0.14)) !important;
-  color: var(--demo-amber-strong) !important;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1);
-}
-
 .gaudio-demo__console {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(340px, 0.38fr);
@@ -259,14 +192,6 @@ onUnmounted(() => {
   .gaudio-demo__intro {
     font-size: 14px;
     line-height: 1.6;
-  }
-
-  .gaudio-demo__theme-toggle {
-    width: 100%;
-  }
-
-  .gaudio-demo__theme-toggle button {
-    flex: 1;
   }
 }
 </style>

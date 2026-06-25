@@ -3,11 +3,6 @@ export type DemoLocale = 'en' | 'zh'
 export const demoText = {
   en: {
     intro: 'Load bundled samples, external URLs, explicit source objects, HLS, and DASH streams through the public gaudio API.',
-    theme: {
-      ariaLabel: 'Demo theme',
-      light: 'Light',
-      dark: 'Dark',
-    },
     catalog: {
       ariaLabel: 'Local sample catalog',
       bundledSample: 'Bundled sample',
@@ -120,11 +115,6 @@ export const demoText = {
   },
   zh: {
     intro: '通过 gaudio 公共 API 加载内置样例、外部 URL、显式 Source 对象、HLS 与 DASH 流。',
-    theme: {
-      ariaLabel: 'Demo 主题',
-      light: '浅色',
-      dark: '深色',
-    },
     catalog: {
       ariaLabel: '本地样例目录',
       bundledSample: '内置样例',
@@ -239,11 +229,6 @@ export const demoText = {
 
 export interface DemoText {
   intro: string
-  theme: {
-    ariaLabel: string
-    light: string
-    dark: string
-  }
   catalog: {
     ariaLabel: string
     bundledSample: string
