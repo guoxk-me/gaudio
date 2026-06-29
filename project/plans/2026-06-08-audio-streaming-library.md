@@ -1103,7 +1103,7 @@ git commit -m "feat: add web audio analyzer"
 - [ ] **Step 1: Create `README.md`**
 
 ```md
-# gaudio
+# GAudio
 
 A browser-first TypeScript audio streaming library.
 

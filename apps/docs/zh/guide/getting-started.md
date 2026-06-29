@@ -1,6 +1,6 @@
 # 快速开始
 
-gaudio 目前处于预发布阶段。公共 API 已有类型与文档，但首次正式发布前仍可能有主动调整。
+GAudio 目前处于预发布阶段。公共 API 已有类型与文档，但首次正式发布前仍可能有主动调整。
 
 ## 安装
 
@@ -232,7 +232,7 @@ const aacSupport = player.canPlayType('audio/mp4; codecs="mp4a.40.2"')
 
 ## 自动播放行为
 
-gaudio 在 player 层管理 autoplay，而不是直接依赖 media element 的 `autoplay` 属性。启用 `autoplay` 后，`load()` 会在 metadata ready 后尝试播放：
+GAudio 在 player 层管理 autoplay，而不是直接依赖 media element 的 `autoplay` 属性。启用 `autoplay` 后，`load()` 会在 metadata ready 后尝试播放：
 
 ```ts
 player.setAutoplay(true)

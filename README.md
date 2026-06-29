@@ -1,8 +1,8 @@
-# gaudio
+# GAudio
 
 A browser-first TypeScript audio streaming library with optional HLS and DASH adapters.
 
-gaudio provides a small player API for native media playback, playlists, fallback sources, browser Media Session integration, audio analysis, and adaptive playback through optional `hls.js` and `dashjs` adapters.
+GAudio provides a small player API for native media playback, playlists, fallback sources, browser Media Session integration, audio analysis, and adaptive playback through optional `hls.js` and `dashjs` adapters.
 
 The package is currently pre-release. Use the documented API directly, but expect intentional API adjustments before the first official release.
 

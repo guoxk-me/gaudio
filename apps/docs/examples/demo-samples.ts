@@ -13,7 +13,7 @@ export interface DemoFormatGroup {
 
 export const demoTracks: DemoTrack[] = [
   // AI modified: use a clear demo-facing artist label instead of exposing missing source metadata.
-  { id: 'pineapple-slice', title: 'Pineapple Slice Instrumental', artist: 'gaudio sample' },
+  { id: 'pineapple-slice', title: 'Pineapple Slice Instrumental', artist: 'GAudio sample' },
 ]
 
 export const demoFormatGroups: DemoFormatGroup[] = [

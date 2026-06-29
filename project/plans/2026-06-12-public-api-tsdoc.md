@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add concise English TSDoc to every public gaudio API so npm consumers receive useful IDE hover and parameter documentation.
+**Goal:** Add concise English TSDoc to every public GAudio API so npm consumers receive useful IDE hover and parameter documentation.
 
 **Architecture:** Documentation lives beside the exported TypeScript declarations so tsdown preserves it in generated declaration files. Runtime implementation and public signatures remain unchanged.
 

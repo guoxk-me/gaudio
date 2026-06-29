@@ -1,6 +1,6 @@
 # Adaptive Playback
 
-gaudio keeps adaptive streaming optional. Importing the root `gaudio` entry never loads `hls.js` or `dashjs`; those vendors are only needed when your application imports `gaudio/hls` or `gaudio/dash`.
+GAudio keeps adaptive streaming optional. Importing the root `gaudio` entry never loads `hls.js` or `dashjs`; those vendors are only needed when your application imports `gaudio/hls` or `gaudio/dash`.
 
 ## Install
 
@@ -41,7 +41,7 @@ The same player can switch between ordinary media, HLS, and DASH by calling `set
 
 ## Protocol selection
 
-gaudio selects an engine in this order:
+GAudio selects an engine in this order:
 
 | Priority | Source metadata | Result |
 | --- | --- | --- |
@@ -190,7 +190,7 @@ Icecast and Shoutcast streams that browser media elements can play should use th
 
 ## Automatic quality switching
 
-HLS and DASH vendor engines own ABR decisions. gaudio reports those decisions through protocol-neutral events:
+HLS and DASH vendor engines own ABR decisions. GAudio reports those decisions through protocol-neutral events:
 
 ```ts
 player.on('manifestloaded', ({ variants }) => {

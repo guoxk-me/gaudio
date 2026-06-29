@@ -2,7 +2,7 @@
 layout: home
 
 hero:
-  name: gaudio
+  name: GAudio
   text: Browser-first audio streaming
   tagline: Pre-release TypeScript media playback with optional HLS and DASH adapters.
   actions:

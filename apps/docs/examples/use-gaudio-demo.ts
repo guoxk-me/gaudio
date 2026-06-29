@@ -416,7 +416,7 @@ export function useGaudioDemo() {
       player.setMediaSessionMetadata({
         title: track.title,
         artist: track.artist,
-        album: 'gaudio demo',
+        album: 'GAudio demo',
       })
       player.setSource(sourceUrl.value)
       await player.load()
@@ -656,7 +656,7 @@ export function useGaudioDemo() {
           metadata: {
             title: track.title,
             artist: track.artist,
-            album: 'gaudio playlist demo',
+            album: 'GAudio playlist demo',
           },
           defaultAudioTrackId: 'main',
           audioTracks: [
@@ -709,7 +709,7 @@ export function useGaudioDemo() {
         metadata: {
           title: activeTrack.value.title,
           artist: activeTrack.value.artist,
-          album: 'gaudio demo',
+          album: 'GAudio demo',
         },
       },
       // AI modified: demo analyzer samples now come from the public AudioPlayer configuration path.

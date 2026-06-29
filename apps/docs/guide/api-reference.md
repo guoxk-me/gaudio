@@ -1,6 +1,6 @@
 # API Reference
 
-This page lists the public API users can import and the types they commonly need while integrating gaudio. The generated [TypeDoc reference](/api/) contains declaration-level details.
+This page lists the public API users can import and the types they commonly need while integrating GAudio. The generated [TypeDoc reference](/api/) contains declaration-level details.
 
 ## Entry points
 
@@ -61,7 +61,7 @@ await player.load()
 await player.next({ autoplay: true })
 ```
 
-Playlist tracks automatically continue to the next track after `ended`. A track's `fallbackSources` are attempted in order before gaudio emits a load error.
+Playlist tracks automatically continue to the next track after `ended`. A track's `fallbackSources` are attempted in order before GAudio emits a load error.
 
 Use `audioTracks` for dubbed languages or companion audio that share the same program timeline:
 

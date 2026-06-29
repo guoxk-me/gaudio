@@ -1,6 +1,6 @@
 # Getting Started
 
-gaudio is currently pre-release. The public API is typed and documented, but intentional API adjustments can still happen before the first official release.
+GAudio is currently pre-release. The public API is typed and documented, but intentional API adjustments can still happen before the first official release.
 
 ## Install
 
@@ -232,7 +232,7 @@ It returns `''`, `'maybe'`, or `'probably'` using browser media semantics. HLS a
 
 ## Autoplay behavior
 
-gaudio manages autoplay at the player level instead of relying on the media element `autoplay` attribute. When `autoplay` is enabled, `load()` attempts playback after metadata is ready:
+GAudio manages autoplay at the player level instead of relying on the media element `autoplay` attribute. When `autoplay` is enabled, `load()` attempts playback after metadata is ready:
 
 ```ts
 player.setAutoplay(true)

@@ -1,4 +1,4 @@
-/** Identifies a failure reported by gaudio. */
+/** Identifies a failure reported by GAudio. */
 export type GAudioErrorCode
   = | 'SOURCE_UNAVAILABLE'
     | 'ADAPTER_UNAVAILABLE'
@@ -22,7 +22,7 @@ export class GAudioError extends Error {
   override readonly name = 'GAudioError'
 
   /**
-   * Creates a gaudio error.
+   * Creates a GAudio error.
    *
    * @param code Stable machine-readable failure code.
    * @param message Human-readable description of the failure.

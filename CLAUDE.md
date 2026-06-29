@@ -30,7 +30,7 @@ pnpm run api            # typedoc (generates API reference markdown)
 
 ## Architecture
 
-gaudio is a browser-first TypeScript audio streaming library (`packages/gaudio`), with a VitePress documentation site (`apps/docs`). The monorepo uses pnpm workspaces + Turborepo.
+GAudio is a browser-first TypeScript audio streaming library (`packages/gaudio`), with a VitePress documentation site (`apps/docs`). The monorepo uses pnpm workspaces + Turborepo.
 
 ### Engine Layer (strategy pattern)
 

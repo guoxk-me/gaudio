@@ -2,7 +2,7 @@ export type DemoLocale = 'en' | 'zh'
 
 export const demoText = {
   en: {
-    intro: 'Load bundled samples, external URLs, explicit source objects, HLS, and DASH streams through the public gaudio API.',
+    intro: 'Load bundled samples, external URLs, explicit source objects, HLS, and DASH streams through the public GAudio API.',
     catalog: {
       ariaLabel: 'Local sample catalog',
       bundledSample: 'Bundled sample',
@@ -76,7 +76,7 @@ export const demoText = {
       unavailable: 'AudioContext unavailable',
     },
     capabilities: {
-      ariaLabel: 'gaudio API capabilities',
+      ariaLabel: 'GAudio API capabilities',
       title: 'API coverage',
       browserSupport: 'Browser support',
       adapterDiagnostics: 'Adaptive adapters',
@@ -108,13 +108,13 @@ export const demoText = {
         ['Adaptive playback types', 'Protocol, implementation, manifest, variant, bitrate, segment, quality selection, and stream error events are shown in live monitors.'],
         ['AudioAnalyzer', 'The utility preview reads player analyzer samples, while the visualization area paints bars, radial spectrum, and waveform canvases from live Web Audio samples.'],
         ['EventEmitter', 'The utility preview registers, emits, removes, and clears a typed listener.'],
-        ['GAudioError', 'The error preview constructs a typed gaudio error and player errors are captured in the live event log.'],
+        ['GAudioError', 'The error preview constructs a typed GAudio error and player errors are captured in the live event log.'],
         ['MediaElementAudioEngine', 'Native MP3, WAV, AAC, and OGG files route through the built-in media-element engine, with browser support shown per MIME type.'],
       ],
     },
   },
   zh: {
-    intro: '通过 gaudio 公共 API 加载内置样例、外部 URL、显式 Source 对象、HLS 与 DASH 流。',
+    intro: '通过 GAudio 公共 API 加载内置样例、外部 URL、显式 Source 对象、HLS 与 DASH 流。',
     catalog: {
       ariaLabel: '本地样例目录',
       bundledSample: '内置样例',
@@ -188,7 +188,7 @@ export const demoText = {
       unavailable: 'AudioContext 不可用',
     },
     capabilities: {
-      ariaLabel: 'gaudio API 能力',
+      ariaLabel: 'GAudio API 能力',
       title: 'API 覆盖',
       browserSupport: '浏览器支持',
       adapterDiagnostics: '自适应适配器',
@@ -220,7 +220,7 @@ export const demoText = {
         ['Adaptive playback types', '协议、实现、manifest、variant、码率、分段、音质选择和 stream error 事件会显示在实时监听面板。'],
         ['AudioAnalyzer', '工具预览读取播放器 analyzer 样本；频谱区则用 Web Audio 样本分别绘制柱状、径向和波形 canvas。'],
         ['EventEmitter', '工具预览会注册、触发、移除并清空一个类型化监听器。'],
-        ['GAudioError', '错误预览会构造类型化 gaudio 错误，播放器错误也会进入实时事件日志。'],
+        ['GAudioError', '错误预览会构造类型化 GAudio 错误，播放器错误也会进入实时事件日志。'],
         ['MediaElementAudioEngine', '原生 MP3、WAV、AAC 和 OGG 文件会路由到内置 media-element engine，并按 MIME type 展示浏览器支持。'],
       ],
     },

@@ -1,6 +1,6 @@
 # API 参考
 
-本页列出用户可以 import 的公共 API，以及集成 gaudio 时常用的类型。[TypeDoc 参考](/api/)提供声明级细节。
+本页列出用户可以 import 的公共 API，以及集成 GAudio 时常用的类型。[TypeDoc 参考](/api/)提供声明级细节。
 
 ## 导入入口
 
@@ -61,7 +61,7 @@ await player.load()
 await player.next({ autoplay: true })
 ```
 
-播放列表 track 在 `ended` 后会自动续播下一首。某个 track 加载失败时，gaudio 会按顺序尝试它的 `fallbackSources`，全部失败后才发出加载错误。
+播放列表 track 在 `ended` 后会自动续播下一首。某个 track 加载失败时，GAudio 会按顺序尝试它的 `fallbackSources`，全部失败后才发出加载错误。
 
 视频辅助音频或多语言配音应该放在同一个 playlist track 的 `audioTracks` 中：
 

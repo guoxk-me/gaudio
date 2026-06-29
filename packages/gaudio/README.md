@@ -1,8 +1,8 @@
-# gaudio
+# GAudio
 
 A browser-first TypeScript audio streaming library with optional HLS and DASH adapters.
 
-gaudio is currently pre-release. Use the documented API directly, but expect intentional API adjustments before the first official release.
+GAudio is currently pre-release. Use the documented API directly, but expect intentional API adjustments before the first official release.
 
 ## Install
 
@@ -110,7 +110,7 @@ await player.next()
 await player.previous()
 ```
 
-When a playlist track ends, gaudio automatically loads and plays the next track. If a track fails to load, its `fallbackSources` are attempted in order before an error is emitted.
+When a playlist track ends, GAudio automatically loads and plays the next track. If a track fails to load, its `fallbackSources` are attempted in order before an error is emitted.
 
 For video companion audio or dubbed language selection, put alternate audio tracks inside a playlist track:
 
@@ -143,7 +143,7 @@ await player.selectAudioTrack('en')
 
 ## Browser Media Session
 
-Enable `mediaSession` to connect gaudio with browser and operating-system media controls. Supported browsers can show title, artist, album, and artwork in lock-screen or system media surfaces, and headset or keyboard media keys can trigger play, pause, stop, previous, next, seek forward, seek backward, and seek-to actions.
+Enable `mediaSession` to connect GAudio with browser and operating-system media controls. Supported browsers can show title, artist, album, and artwork in lock-screen or system media surfaces, and headset or keyboard media keys can trigger play, pause, stop, previous, next, seek forward, seek backward, and seek-to actions.
 
 ```ts
 const player = new AudioPlayer({
@@ -210,7 +210,7 @@ const player = new AudioPlayer({
 
 `Balanced` is used when `preset` is omitted. Choose `FastStart` for smaller startup buffers or `Stable` for weak and variable networks. Use `contentType: 'long-form'` for audiobooks and multi-hour programs, or `contentType: 'live'` for HLS/DASH live streams with latency and reconnect tuning. Explicit vendor configuration overrides the selected preset and content type.
 
-gaudio reports adaptive quality through `manifestloaded` and `variantchange`. Use the player-level API for protocol-neutral quality controls:
+GAudio reports adaptive quality through `manifestloaded` and `variantchange`. Use the player-level API for protocol-neutral quality controls:
 
 ```ts
 const variants = player.getAdaptiveVariants()
@@ -270,4 +270,4 @@ oscillator.stop()
 await audioContext.close()
 ```
 
-See the [gaudio documentation](https://guoxk.github.io/gaudio/) for bilingual guides, API reference, and interactive examples with adaptive quality controls and a canvas spectrum visualizer.
+See the [GAudio documentation](https://guoxk.github.io/gaudio/) for bilingual guides, API reference, and interactive examples with adaptive quality controls and a canvas spectrum visualizer.

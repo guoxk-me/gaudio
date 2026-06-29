@@ -2,7 +2,7 @@
 layout: home
 
 hero:
-  name: gaudio
+  name: GAudio
   text: 浏览器优先的音频流播放
   tagline: 预发布阶段的 TypeScript 媒体播放库，可选接入 HLS 与 DASH 适配器。
   actions:
