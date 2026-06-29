@@ -26,33 +26,63 @@
   "sideEffects": false,
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js",
-      "require": "./dist/index.cjs"
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
     },
     "./hls": {
-      "types": "./dist/hls.d.ts",
-      "import": "./dist/hls.js",
-      "require": "./dist/hls.cjs"
+      "import": {
+        "types": "./dist/hls.d.ts",
+        "default": "./dist/hls.js"
+      },
+      "require": {
+        "types": "./dist/hls.d.cts",
+        "default": "./dist/hls.cjs"
+      }
     },
     "./dash": {
-      "types": "./dist/dash.d.ts",
-      "import": "./dist/dash.js",
-      "require": "./dist/dash.cjs"
+      "import": {
+        "types": "./dist/dash.d.ts",
+        "default": "./dist/dash.js"
+      },
+      "require": {
+        "types": "./dist/dash.d.cts",
+        "default": "./dist/dash.cjs"
+      }
     }
   },
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "typesVersions": {
+    "*": {
+      "hls": [
+        "./dist/hls.d.ts"
+      ],
+      "dash": [
+        "./dist/dash.d.ts"
+      ]
+    }
+  },
   "files": [
     "LICENSE",
     "README.md",
     "dist"
   ],
+  "engines": {
+    "node": ">=18"
+  },
   "scripts": {
     "build": "tsdown",
     "dev": "tsdown --watch",
     "lint": "eslint .",
+    "pack:dry-run": "npm pack --dry-run",
+    "prepublishOnly": "pnpm run typecheck && pnpm run test && pnpm run build && pnpm run pack:dry-run",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
@@ -69,11 +99,13 @@
     }
   },
   "devDependencies": {
-    "@types/node": "^25.9.3",
+    "@arethetypeswrong/core": "^0.18.4",
+    "@types/node": "^26.0.1",
     "dashjs": "^5.2.0",
     "hls.js": "^1.6.16",
-    "tsdown": "^0.22.2",
+    "publint": "^0.3.21",
+    "tsdown": "^0.22.3",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.8"
+    "vitest": "^4.1.9"
   }
 }

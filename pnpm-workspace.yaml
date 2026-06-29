@@ -1,6 +1,9 @@
 packages:
   - apps/*
   - packages/*
+overrides:
+  # AI modified: keep VitePress and docs on one Vue runtime to avoid cross-version type conflicts.
+  vue: 3.5.39
 allowBuilds:
   # AI modified: esbuild needs its install script to provide platform binaries.
   esbuild: true

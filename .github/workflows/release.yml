@@ -8,9 +8,31 @@ permissions:
   id-token: write
 
 jobs:
+  node-compatibility:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.28.0
+          run_install: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 18
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # AI modified: verify the package still works on the declared minimum Node runtime before publishing.
+      - run: pnpm --filter gaudio run typecheck
+      - run: pnpm --filter gaudio run test
+      - run: pnpm --filter gaudio run build
+      - run: pnpm --filter gaudio run pack:dry-run
+
   publish:
     runs-on: ubuntu-latest
     environment: npm
+    needs: node-compatibility
     steps:
       - uses: actions/checkout@v5
         with:
@@ -31,6 +53,8 @@ jobs:
       - run: pnpm run build
       - run: pnpm exec playwright install --with-deps chromium
       - run: pnpm run e2e
+      # AI modified: inspect the exact npm package contents before publishing.
+      - run: pnpm --filter gaudio run pack:dry-run
       - run: pnpm --filter gaudio publish --access public --provenance --no-git-checks
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
