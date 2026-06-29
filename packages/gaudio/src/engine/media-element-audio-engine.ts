@@ -160,7 +160,9 @@ export class MediaElementAudioEngine implements AudioEngine {
    * @param seconds Target position in seconds. Negative values are clamped to `0`.
    */
   async seek(seconds: number): Promise<void> {
-    this.audioElement.currentTime = Math.max(0, seconds)
+    await this.seekMediaElement(Math.max(0, seconds), (targetTime) => {
+      this.audioElement.currentTime = targetTime
+    })
   }
 
   /**
@@ -171,7 +173,7 @@ export class MediaElementAudioEngine implements AudioEngine {
   async fastSeek(seconds: number): Promise<void> {
     // AI modified: prefer optimized browser seeking while retaining a standard seek fallback.
     if (typeof this.audioElement.fastSeek === 'function') {
-      this.audioElement.fastSeek(seconds)
+      await this.seekMediaElement(Math.max(0, seconds), targetTime => this.audioElement.fastSeek?.(targetTime))
       return
     }
     await this.seek(seconds)
@@ -440,6 +442,42 @@ export class MediaElementAudioEngine implements AudioEngine {
       this.shouldSuppressPause = true
     }
     this.audioElement.pause()
+  }
+
+  private async seekMediaElement(targetTime: number, startSeek: (targetTime: number) => void): Promise<void> {
+    await new Promise<void>((resolve, reject) => {
+      const abortController = new AbortController()
+      const finish = (): void => {
+        abortController.abort()
+        resolve()
+      }
+      const fail = (): void => {
+        abortController.abort()
+        reject(mediaElementError(this.audioElement))
+      }
+
+      this.audioElement.addEventListener('seeked', finish, {
+        once: true,
+        signal: abortController.signal,
+      })
+      this.audioElement.addEventListener('error', fail, {
+        once: true,
+        signal: abortController.signal,
+      })
+
+      try {
+        // AI modified: seek promises now resolve after browser seek completion when one is reported.
+        startSeek(targetTime)
+      }
+      catch (error) {
+        abortController.abort()
+        reject(error)
+        return
+      }
+      if (!this.audioElement.seeking) {
+        finish()
+      }
+    })
   }
 
   private timeUpdate(): { currentTime: number, duration: number } {

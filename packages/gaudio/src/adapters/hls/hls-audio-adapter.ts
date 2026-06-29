@@ -208,6 +208,6 @@ export class HlsAudioAdapterImpl implements HlsAudioAdapter {
   private supportsNativeHls(): boolean {
     const audioElement = this.dependencies.audioElementFactory()
     return audioElement.canPlayType('application/vnd.apple.mpegurl') !== ''
-      || audioElement.canPlayType('application/x-mpegURL') !== ''
+      || audioElement.canPlayType('application/x-mpegurl') !== ''
   }
 }

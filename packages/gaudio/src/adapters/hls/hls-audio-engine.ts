@@ -72,6 +72,10 @@ export class HlsAudioEngine extends MediaElementAudioEngine {
 
     try {
       const metadataReady = this.waitForMetadata()
+      // AI modified: a reloaded hls.js instance starts a fresh manifest and variant lifecycle.
+      this.previousVariantId = undefined
+      this.adaptiveVariants = []
+      this.adaptiveQualitySelection = 'auto'
       this.destroyHlsInstance()
       this.createHlsInstance(this.activeUrl)
       await metadataReady

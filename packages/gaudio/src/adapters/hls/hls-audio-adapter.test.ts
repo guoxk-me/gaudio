@@ -436,6 +436,13 @@ describe('hlsAudioAdapter', () => {
       config: { maxBufferLength: 20 },
     })
     const engine = await loadEngine(harness)
+    const variantChanges: AudioEngineEvents['variantchange'][] = []
+    engine.on('variantchange', payload => variantChanges.push(payload))
+    harness.hlsInstances[0].levels = [
+      { id: 0, bitrate: 64_000, codecSet: 'mp4a.40.2' },
+      { id: 1, bitrate: 128_000, codecSet: 'mp4a.40.2' },
+    ]
+    harness.hlsInstances[0].emit(Events.LEVEL_SWITCHED, { level: 0 })
     const audioElement = harness.audioElements.at(-1)
     if (!audioElement) {
       throw new Error('Expected an active audio element')
@@ -449,6 +456,15 @@ describe('hlsAudioAdapter', () => {
 
     const reload = harness.adapter.updateConfig({ backBufferLength: 15 }, { apply: 'reload' })
     await Promise.resolve()
+    const reloadedHls = harness.hlsInstances.at(-1)
+    if (!reloadedHls) {
+      throw new Error('Expected a reloaded HLS instance')
+    }
+    reloadedHls.levels = [
+      { id: 0, bitrate: 64_000, codecSet: 'mp4a.40.2' },
+      { id: 1, bitrate: 128_000, codecSet: 'mp4a.40.2' },
+    ]
+    reloadedHls.emit(Events.LEVEL_SWITCHED, { level: 1 })
     audioElement.dispatchEvent(new Event('loadedmetadata'))
     await reload
 
@@ -457,6 +473,10 @@ describe('hlsAudioAdapter', () => {
     expect(audioElement.currentTime).toBe(42)
     expect(audioElement.playCalls).toBe(1)
     expect(harness.adapter.getConfig()).toMatchObject({ maxBufferLength: 30, backBufferLength: 15 })
+    expect(variantChanges).toMatchObject([
+      { variantId: '0', reason: 'initial' },
+      { previousVariantId: undefined, variantId: '1', reason: 'initial' },
+    ])
 
     engine.dispose()
   })

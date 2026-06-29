@@ -225,6 +225,27 @@ describe('mediaElementEngine', () => {
     expect(audioElement.currentTime).toBe(0)
   })
 
+  it('resolves seek after the browser reports completion', async () => {
+    const audioElement = new FakeAudioElement()
+    audioElement.seeking = true
+    const engine = new MediaElementAudioEngine(audioElement as unknown as HTMLAudioElement)
+    let hasSeekResolved = false
+
+    const seek = engine.seek(25).then(() => {
+      hasSeekResolved = true
+    })
+    await Promise.resolve()
+
+    expect(audioElement.currentTime).toBe(25)
+    expect(hasSeekResolved).toBe(false)
+
+    audioElement.seeking = false
+    audioElement.dispatchEvent(new Event('seeked'))
+    await seek
+
+    expect(hasSeekResolved).toBe(true)
+  })
+
   it('falls back to regular seek when native fast seek is unavailable', async () => {
     const audioElement = new FakeAudioElement()
     const engine = new MediaElementAudioEngine(audioElement as unknown as HTMLAudioElement)
