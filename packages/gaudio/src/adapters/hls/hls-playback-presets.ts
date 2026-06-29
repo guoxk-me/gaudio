@@ -1,7 +1,4 @@
-import type { HlsConfig } from 'hls.js'
 import { AdaptivePlaybackPreset } from '../adaptive-audio-types'
-import { settingsWithChanges } from '../settings-with-changes'
-import { hlsVodDefaults } from './hls-vod-defaults'
 
 const hlsPresetChanges: Record<AdaptivePlaybackPreset, object> = {
   [AdaptivePlaybackPreset.FastStart]: {
@@ -93,6 +90,6 @@ const hlsPresetChanges: Record<AdaptivePlaybackPreset, object> = {
   },
 }
 
-export function hlsConfigForPreset(preset: AdaptivePlaybackPreset): Partial<HlsConfig> {
-  return settingsWithChanges(hlsVodDefaults(), hlsPresetChanges[preset])
+export function hlsPresetConfig(preset: AdaptivePlaybackPreset): object {
+  return hlsPresetChanges[preset]
 }

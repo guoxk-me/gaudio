@@ -1,3 +1,4 @@
+import type { AdaptivePlaybackInfo, AdaptiveVariant } from '../adapters/adaptive-audio-types'
 import type { AudioEngine, AudioEngineEvents } from '../engine/audio-engine'
 import type { AudioFormatSupport, PreloadMode, TimeRange } from '../engine/audio-engine-types'
 import type { GAudioError } from '../errors/errors'
@@ -14,6 +15,7 @@ export class FakeAudioEngine implements AudioEngine {
   readonly seekableRanges: TimeRange[] = [{ start: 0, end: 120 }]
   readonly playedRanges: TimeRange[] = [{ start: 5, end: 25 }]
   readonly fastSeekCalls: number[] = []
+  readonly adaptiveVariants: AdaptiveVariant[] = []
 
   currentTime = 0
   duration = 120
@@ -32,6 +34,8 @@ export class FakeAudioEngine implements AudioEngine {
   playError?: GAudioError
   volume = 1
   playbackRate = 1
+  adaptiveQualitySelection = 'auto'
+  activeAdaptivePlayback?: AdaptivePlaybackInfo
 
   constructor(options: {
     mimeTypeSupport?: Readonly<Record<string, AudioFormatSupport>>
@@ -166,6 +170,22 @@ export class FakeAudioEngine implements AudioEngine {
 
   canPlayType(mimeType: string): AudioFormatSupport {
     return this.mimeTypeSupport[mimeType] ?? ''
+  }
+
+  getAdaptiveVariants(): readonly AdaptiveVariant[] {
+    return this.adaptiveVariants
+  }
+
+  getAdaptiveQualitySelection(): string {
+    return this.adaptiveQualitySelection
+  }
+
+  async setAdaptiveQuality(variantId: 'auto' | string): Promise<void> {
+    this.adaptiveQualitySelection = variantId
+  }
+
+  getActiveAdaptivePlayback(): AdaptivePlaybackInfo | undefined {
+    return this.activeAdaptivePlayback
   }
 
   on<EventName extends keyof AudioEngineEvents>(

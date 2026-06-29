@@ -178,4 +178,25 @@ describe('audioEngineRouter', () => {
     expect(mediaEngine.analyzerFftSizes).toEqual([1024])
     expect(hlsEngine.analyzerFftSizes).toEqual([2048])
   })
+
+  it('forwards adaptive quality controls to the active routed engine', async () => {
+    const hlsEngine = new FakeAudioEngine()
+    hlsEngine.activeAdaptivePlayback = { protocol: 'hls', implementation: 'hls.js' }
+    hlsEngine.adaptiveVariants.push({ id: '128k', bitrate: 128_000 })
+    const router = new AudioEngineRouter({
+      adapters: [new FakeAdapter('hls', hlsEngine)],
+      mediaEngineFactory: () => new FakeAudioEngine(),
+    })
+
+    expect(router.getAdaptiveVariants()).toEqual([])
+    expect(router.getAdaptiveQualitySelection()).toBe('auto')
+    expect(router.getActiveAdaptivePlayback()).toBeUndefined()
+
+    await router.load(new HttpAudioSource('/stream.m3u8'))
+    await router.setAdaptiveQuality('128k')
+
+    expect(router.getActiveAdaptivePlayback()).toEqual({ protocol: 'hls', implementation: 'hls.js' })
+    expect(router.getAdaptiveVariants()).toEqual([{ id: '128k', bitrate: 128_000 }])
+    expect(router.getAdaptiveQualitySelection()).toBe('128k')
+  })
 })

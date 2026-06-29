@@ -4,11 +4,12 @@ import type Hls from 'hls.js'
 import type { HlsConfig, LoaderConfig, RetryConfig } from 'hls.js'
 import type { AudioEngine } from '../../engine/audio-engine'
 import type { AudioEngineAdapter } from '../../engine/audio-engine-adapter'
+import type { AdaptiveContentType } from '../adaptive-audio-types'
 import { GAudioError } from '../../errors/errors'
 import { AdaptivePlaybackPreset } from '../adaptive-audio-types'
 import { settingsWithChanges } from '../settings-with-changes'
 import { HlsAudioEngine } from './hls-audio-engine'
-import { hlsConfigForPreset } from './hls-playback-presets'
+import { hlsConfigForPlayback } from './hls-playback-config'
 
 /** Determines whether HLS prefers native playback or `hls.js`. */
 export type HlsPlaybackStrategy = 'native-first' | 'hls-first' | 'native-only' | 'hls-only'
@@ -55,7 +56,13 @@ export interface HlsConfigUpdateOptions {
 /** Configures an adapter created by {@link createHlsAdapter}. */
 export interface HlsAdapterOptions {
   /**
-   * Audio VOD configuration profile applied before explicit `config` overrides.
+   * Content shape used to tune buffering, live latency, and retry behavior.
+   *
+   * @defaultValue `'vod'`
+   */
+  contentType?: AdaptiveContentType
+  /**
+   * Audio configuration profile applied before content type tuning and explicit `config` overrides.
    *
    * @defaultValue {@link AdaptivePlaybackPreset.Balanced}
    */
@@ -110,7 +117,10 @@ export class HlsAudioAdapterImpl implements HlsAudioAdapter {
     this.playbackStrategy = options.playbackStrategy ?? 'native-first'
     // AI modified: request policy overrides merge deeply without altering vendor callbacks or classes.
     this.config = settingsWithChanges(
-      hlsConfigForPreset(options.preset ?? AdaptivePlaybackPreset.Balanced),
+      hlsConfigForPlayback(
+        options.preset ?? AdaptivePlaybackPreset.Balanced,
+        options.contentType ?? 'vod',
+      ),
       options.config ?? {},
     )
     this.dependencies = dependencies
@@ -198,6 +208,6 @@ export class HlsAudioAdapterImpl implements HlsAudioAdapter {
   private supportsNativeHls(): boolean {
     const audioElement = this.dependencies.audioElementFactory()
     return audioElement.canPlayType('application/vnd.apple.mpegurl') !== ''
-      || audioElement.canPlayType('application/x-mpegURL') !== ''
+      || audioElement.canPlayType('application/x-mpegurl') !== ''
   }
 }

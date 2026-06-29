@@ -1,9 +1,11 @@
 export { AdaptivePlaybackPreset } from './adapters/adaptive-audio-types'
 export type {
   AdaptiveAudioProtocol,
+  AdaptiveContentType,
   AdaptiveManifestUpdate,
   AdaptivePlaybackImplementation,
   AdaptivePlaybackInfo,
+  AdaptiveQualitySelection,
   AdaptiveSegmentUpdate,
   AdaptiveStreamError,
   AdaptiveVariant,
@@ -40,9 +42,23 @@ export type {
   AudioPlayerOptions,
   PlaybackState,
 } from './player/audio-player-options'
+export type {
+  AudioPlaylistNavigationOptions,
+  AudioPlaylistOptions,
+  AudioPlaylistTrack,
+  AudioTrack,
+  AudioTrackSelectionOptions,
+} from './player/audio-playlist'
+export type {
+  AudioMediaSessionArtwork,
+  AudioMediaSessionMetadata,
+  AudioMediaSessionOptions,
+} from './player/browser-media-session'
 export type { AudioSource, AudioSourceInput, AudioSourceKind, AudioStreamHandle } from './source/audio-source'
 export type {
   AudioProtocol,
   AudioSourceDescription,
 } from './source/audio-source'
+export { BlobAudioSource } from './source/blob-audio-source'
+export type { BlobAudioSourceOptions } from './source/blob-audio-source'
 export { HttpAudioSource } from './source/http-audio-source'

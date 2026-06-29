@@ -3,6 +3,7 @@ import type { AudioEngine } from '../engine/audio-engine'
 import type { AudioEngineAdapter } from '../engine/audio-engine-adapter'
 import type { PreloadMode } from '../engine/audio-engine-types'
 import type { AudioSourceInput } from '../source/audio-source'
+import type { AudioMediaSessionOptions } from './browser-media-session'
 
 /** Describes the current lifecycle state of an {@link AudioPlayer}. */
 export type PlaybackState
@@ -60,6 +61,12 @@ export interface AudioPlayerOptions {
    * Use `true` for the default media-element analyzer, or pass options for FFT sizing and custom engine integration.
    */
   analyzer?: boolean | AudioPlayerAnalyzerOptions
+  /**
+   * Enables browser Media Session metadata and system media-key controls.
+   *
+   * Use `true` for default controls, or pass metadata and seek behavior.
+   */
+  mediaSession?: boolean | AudioMediaSessionOptions
   /**
    * Browser preload hint.
    *

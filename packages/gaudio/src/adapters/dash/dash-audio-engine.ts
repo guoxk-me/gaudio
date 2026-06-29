@@ -11,7 +11,12 @@ import type {
   StreamInitializedEvent,
 } from 'dashjs'
 import type { GAudioErrorCode } from '../../errors/errors'
-import type { AdaptiveStreamError } from '../adaptive-audio-types'
+import type {
+  AdaptivePlaybackInfo,
+  AdaptiveQualitySelection,
+  AdaptiveStreamError,
+  AdaptiveVariant,
+} from '../adaptive-audio-types'
 import { MediaElementAudioEngine } from '../../engine/media-element-audio-engine'
 import { GAudioError } from '../../errors/errors'
 
@@ -41,6 +46,8 @@ export class DashAudioEngine extends MediaElementAudioEngine {
   private readonly settings: MediaPlayerSettingClass
   private dashPlayer?: MediaPlayerClass
   private activeUrl?: string
+  private adaptiveVariants: AdaptiveVariant[] = []
+  private adaptiveQualitySelection: AdaptiveQualitySelection = 'auto'
 
   constructor(options: DashAudioEngineOptions) {
     super(options.audioElement)
@@ -55,6 +62,65 @@ export class DashAudioEngine extends MediaElementAudioEngine {
     this.dashPlayer?.updateSettings(settings)
   }
 
+  getActiveAdaptivePlayback(): AdaptivePlaybackInfo | undefined {
+    return this.activeUrl
+      ? { protocol: 'dash', implementation: 'dash.js' }
+      : undefined
+  }
+
+  getAdaptiveVariants(): readonly AdaptiveVariant[] {
+    return this.adaptiveVariants
+  }
+
+  getAdaptiveQualitySelection(): AdaptiveQualitySelection {
+    return this.adaptiveQualitySelection
+  }
+
+  async setAdaptiveQuality(variantId: AdaptiveQualitySelection): Promise<void> {
+    if (!this.dashPlayer) {
+      throw new GAudioError('PROTOCOL_UNSUPPORTED', 'Manual DASH quality selection requires active dash.js playback')
+    }
+
+    if (variantId === 'auto') {
+      this.dashPlayer.updateSettings({
+        streaming: {
+          abr: {
+            autoSwitchBitrate: {
+              audio: true,
+            },
+          },
+        },
+      })
+      this.adaptiveQualitySelection = 'auto'
+      return
+    }
+
+    const selectedVariant = this.adaptiveVariants.find(variant => variant.id === variantId)
+    if (!selectedVariant) {
+      throw new GAudioError('ADAPTIVE_STREAM_ERROR', `DASH variant ${variantId} is unavailable`)
+    }
+
+    // AI modified: manual DASH selection disables audio ABR before selecting the target representation.
+    this.dashPlayer.updateSettings({
+      streaming: {
+        abr: {
+          autoSwitchBitrate: {
+            audio: false,
+          },
+        },
+      },
+    })
+    this.dashPlayer.setRepresentationForTypeById('audio', variantId, true)
+    this.adaptiveQualitySelection = variantId
+    this.events.emit('variantchange', {
+      protocol: 'dash',
+      implementation: 'dash.js',
+      variantId,
+      bitrate: selectedVariant.bitrate,
+      reason: 'manual',
+    })
+  }
+
   override dispose(): void {
     super.dispose()
     this.onDispose()
@@ -66,6 +132,8 @@ export class DashAudioEngine extends MediaElementAudioEngine {
       ? url
       : new URL(url, globalThis.location.href).href
     this.activeUrl = playbackUrl
+    this.adaptiveVariants = []
+    this.adaptiveQualitySelection = 'auto'
     const dashPlayer = this.createDashPlayer()
     this.dashPlayer = dashPlayer
     this.onDashInstanceChange(dashPlayer)
@@ -84,6 +152,8 @@ export class DashAudioEngine extends MediaElementAudioEngine {
 
   protected override detachSourceUrl(): void {
     this.activeUrl = undefined
+    this.adaptiveVariants = []
+    this.adaptiveQualitySelection = 'auto'
     this.dashPlayer?.reset()
     this.dashPlayer = undefined
     this.onDashInstanceChange(undefined)
@@ -92,11 +162,12 @@ export class DashAudioEngine extends MediaElementAudioEngine {
 
   private readonly handleStreamInitialized = (_payload: StreamInitializedEvent): void => {
     const variants = this.dashPlayer?.getRepresentationsByType('audio') ?? []
+    this.adaptiveVariants = variants.map(representation => this.adaptiveVariant(representation))
     this.events.emit('manifestloaded', {
       protocol: 'dash',
       implementation: 'dash.js',
       url: this.activeUrl ?? '',
-      variants: variants.map(representation => this.adaptiveVariant(representation)),
+      variants: this.adaptiveVariants,
     })
   }
 

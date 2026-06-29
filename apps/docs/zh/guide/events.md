@@ -122,7 +122,7 @@ player.on('streamerror', update => console.log(update.category, update.isFatal, 
 | `bitrate` | `number` | Manifest 声明的码率，单位 bits per second。 |
 | `codecs` | `string \| undefined` | Manifest 暴露 codec 声明时提供。 |
 
-`AdaptiveVariantUpdate.reason` 在首次选择时为 `'initial'`，之后自动 ABR 切换时为 `'automatic'`。手动 vendor-level 音质切换仍可能产生 vendor 事件，但 gaudio 当前没有标准化 manual reason。
+`AdaptiveVariantUpdate.reason` 在首次选择时为 `'initial'`，之后自动 ABR 切换时为 `'automatic'`。手动 vendor-level 音质切换仍可能产生 vendor 事件，但 GAudio 当前没有标准化 manual reason。
 
 原生 HLS 通常只发出 `adaptivechange`；浏览器原生播放不会暴露与 `hls.js` 等价的 manifest、variant、segment 或可恢复错误细节。
 

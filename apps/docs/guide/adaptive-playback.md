@@ -1,6 +1,6 @@
 # Adaptive Playback
 
-gaudio keeps adaptive streaming optional. Importing the root `gaudio` entry never loads `hls.js` or `dashjs`; those vendors are only needed when your application imports `gaudio/hls` or `gaudio/dash`.
+GAudio keeps adaptive streaming optional. Importing the root `gaudio` entry never loads `hls.js` or `dashjs`; those vendors are only needed when your application imports `gaudio/hls` or `gaudio/dash`.
 
 ## Install
 
@@ -20,10 +20,12 @@ import { createHlsAdapter } from 'gaudio/hls'
 
 const hlsAdapter = createHlsAdapter({
   playbackStrategy: 'native-first',
+  contentType: 'vod',
   preset: AdaptivePlaybackPreset.Balanced,
 })
 
 const dashAdapter = createDashAdapter({
+  contentType: 'vod',
   preset: AdaptivePlaybackPreset.Balanced,
 })
 
@@ -39,7 +41,7 @@ The same player can switch between ordinary media, HLS, and DASH by calling `set
 
 ## Protocol selection
 
-gaudio selects an engine in this order:
+GAudio selects an engine in this order:
 
 | Priority | Source metadata | Result |
 | --- | --- | --- |
@@ -65,6 +67,7 @@ If a source selects `hls` or `dash` without a registered adapter, loading fails 
 ```ts
 const hlsAdapter = createHlsAdapter({
   preset: AdaptivePlaybackPreset.Stable,
+  contentType: 'long-form',
   playbackStrategy: 'hls-first',
   config: {
     maxBufferLength: 75,
@@ -79,9 +82,10 @@ const hlsAdapter = createHlsAdapter({
 
 | Option | Type | Default | Description |
 | --- | --- | --- | --- |
-| `preset` | `AdaptivePlaybackPreset` | `Balanced` | Applies an audio VOD configuration profile before explicit `config` overrides. |
+| `contentType` | `AdaptiveContentType` | `'vod'` | Tunes buffer, latency, and retry behavior for `'vod'`, `'long-form'`, or `'live'` sources. |
+| `preset` | `AdaptivePlaybackPreset` | `Balanced` | Applies an audio configuration profile before content-type tuning and explicit `config` overrides. |
 | `playbackStrategy` | `'native-first' \| 'hls-first' \| 'native-only' \| 'hls-only'` | `'native-first'` | Chooses whether browser-native HLS or `hls.js` is preferred. |
-| `config` | `HlsAdapterConfig` | `{}` | Deep partial `hls.js` constructor configuration. Explicit fields override the selected preset. |
+| `config` | `HlsAdapterConfig` | `{}` | Deep partial `hls.js` constructor configuration. Explicit fields override the selected preset and content type. |
 
 Strategies are deterministic:
 
@@ -101,6 +105,7 @@ HLS request policy overrides are recursively merged. Changing one retry value ke
 ```ts
 const dashAdapter = createDashAdapter({
   preset: AdaptivePlaybackPreset.FastStart,
+  contentType: 'live',
   settings: {
     streaming: {
       buffer: {
@@ -118,8 +123,9 @@ const dashAdapter = createDashAdapter({
 
 | Option | Type | Default | Description |
 | --- | --- | --- | --- |
-| `preset` | `AdaptivePlaybackPreset` | `Balanced` | Applies an audio VOD dash.js settings profile before explicit `settings` overrides. |
-| `settings` | `MediaPlayerSettingClass` | `{}` | Deep partial dash.js settings applied when a DASH engine is created. |
+| `contentType` | `AdaptiveContentType` | `'vod'` | Tunes buffer, latency, and retry behavior for `'vod'`, `'long-form'`, or `'live'` sources. |
+| `preset` | `AdaptivePlaybackPreset` | `Balanced` | Applies an audio dash.js settings profile before content-type tuning and explicit `settings` overrides. |
+| `settings` | `MediaPlayerSettingClass` | `{}` | Deep partial dash.js settings applied when a DASH engine is created. Explicit fields override the selected preset and content type. |
 
 DASH settings are merged recursively and passed through dash.js `updateSettings()` while active.
 
@@ -168,11 +174,23 @@ Key DASH profile values:
 
 Presets configure audio VOD buffering, memory limits, ABR estimation, request timeouts, retries, small-gap recovery, stalled-playback recovery, paused download scheduling, and long-form audio buffering.
 
-They do not configure live playback, low-latency live behavior, DRM, text tracks, interstitial playback, telemetry, server-directed optimization, or video-only tuning.
+## Content types
+
+`contentType` is applied after `preset` and before explicit vendor overrides. Use it to keep the same speed/stability preset while switching the source shape:
+
+| Content type | Intended use | HLS tuning | DASH tuning |
+| --- | --- | --- | --- |
+| `'vod'` | Tracks, albums, podcast episodes, and normal on-demand files | Keeps the selected preset values | Keeps the selected preset values |
+| `'long-form'` | Audiobooks, long podcasts, archival programs, and multi-hour media | Larger forward and back buffers, larger memory cap, longer segment timeout, more segment retries | Larger top-quality and retained buffers, lower long-form threshold, longer segment timeout, more segment retries |
+| `'live'` | Live radio, rolling HLS/DASH events, and DVR-like streams | Enables low-latency mode, short forward buffer, bounded live back buffer, stronger playlist/segment retry policy | Enables suggested live delay, live catch-up, short forward buffer, retained DVR buffer, stronger MPD/segment retries |
+
+For HLS, native browser playback ignores `hls.js` constructor settings. Use `playbackStrategy: 'hls-first'` or `'hls-only'` when you need the live or long-form HLS tuning to be enforced by `hls.js`.
+
+Icecast and Shoutcast streams that browser media elements can play should use the normal `media` path today. Dedicated Icecast/Shoutcast metadata and reconnect helpers are a separate future adapter concern.
 
 ## Automatic quality switching
 
-HLS and DASH vendor engines own ABR decisions. gaudio reports those decisions through protocol-neutral events:
+HLS and DASH vendor engines own ABR decisions. GAudio reports those decisions through protocol-neutral events:
 
 ```ts
 player.on('manifestloaded', ({ variants }) => {
@@ -184,62 +202,40 @@ player.on('manifestloaded', ({ variants }) => {
 })
 
 player.on('variantchange', ({ variantId, bitrate, reason }) => {
-  console.log(variantId, bitrate, reason) // reason is 'initial' or 'automatic'
+  console.log(variantId, bitrate, reason) // reason is 'initial', 'automatic', or 'manual'
 })
 ```
 
 Native HLS can emit `adaptivechange`, but it does not expose vendor-level manifest, variant, segment, or recoverable-error details.
 
-## Manual quality experiments
+## Manual quality selection
 
-gaudio currently does not provide a unified public `setQuality()` API. Manual quality is vendor-specific and should be treated as an advanced integration through the exposed vendor instances.
-
-For `hls.js`, use the active `hlsInstance`:
+Use the player-level API after an HLS or DASH manifest loads:
 
 ```ts
-player.on('manifestloaded', ({ variants }) => {
-  const firstVariant = variants[0]
-  const levelIndex = hlsAdapter.hlsInstance?.levels.findIndex((level, index) => {
-    return String(level.id ?? index) === firstVariant.id
-  })
-
-  if (hlsAdapter.hlsInstance && levelIndex !== undefined && levelIndex >= 0) {
-    hlsAdapter.hlsInstance.nextLevel = levelIndex
+player.on('manifestloaded', async ({ variants }) => {
+  const preferredVariant = variants.at(-1)
+  if (!preferredVariant) {
+    return
   }
+
+  await player.setAdaptiveQuality(preferredVariant.id)
 })
 
 // Return to automatic ABR.
-hlsAdapter.hlsInstance!.loadLevel = -1
+await player.setAdaptiveQuality('auto')
 ```
 
-For dash.js, disable audio ABR and select a representation:
+Manual quality selection emits `variantchange` with `reason: 'manual'` when the vendor accepts the selected variant. Native HLS does not expose equivalent level controls, so manual selection can reject with `PROTOCOL_UNSUPPORTED` when the active implementation is browser-native.
+
+Advanced integrations can still inspect the active vendor instances:
 
 ```ts
-dashAdapter.updateSettings({
-  streaming: {
-    abr: {
-      autoSwitchBitrate: {
-        audio: false,
-      },
-    },
-  },
-})
-
-dashAdapter.dashInstance?.setRepresentationForTypeById('audio', 'representation-id', true)
-
-// Return to automatic ABR.
-dashAdapter.updateSettings({
-  streaming: {
-    abr: {
-      autoSwitchBitrate: {
-        audio: true,
-      },
-    },
-  },
-})
+hlsAdapter.hlsInstance
+dashAdapter.dashInstance
 ```
 
-The interactive demo exposes this as a quality selector after an HLS or DASH manifest loads. Manual controls are unavailable for native HLS because the browser does not expose equivalent level controls.
+The interactive demo exposes this as a quality selector after an HLS or DASH manifest loads.
 
 ## Runtime configuration updates
 
@@ -299,4 +295,4 @@ One adapter instance should be owned by one active player router at a time.
 
 ## Scope
 
-Adaptive playback currently targets audio video-on-demand. Live playback, low-latency live behavior, DRM, transcoding, offline media, playlist management, and a protocol-neutral manual quality API are outside the current package scope.
+Adaptive playback targets audio VOD, long-form audio, and HLS/DASH live tuning. DRM, transcoding, offline media, playlist management, Icecast/Shoutcast metadata handling, and video-only tuning are outside the current package scope.

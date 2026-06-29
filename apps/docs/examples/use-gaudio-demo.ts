@@ -1,8 +1,8 @@
-import type { AdaptiveVariant, AudioProtocol, AudioSource, AudioSourceDescription, PreloadMode, TimeRange } from 'gaudio'
+import type { AdaptiveVariant, AudioAnalyzer, AudioProtocol, AudioSource, AudioSourceDescription, PreloadMode, TimeRange } from 'gaudio'
 import type { DashAudioAdapter } from 'gaudio/dash'
 import type { HlsAudioAdapter } from 'gaudio/hls'
 import type { DemoFormatGroup, DemoTrack } from './demo-samples'
-import { AdaptivePlaybackPreset, AudioPlayer, EventEmitter, HttpAudioSource } from 'gaudio'
+import { AdaptivePlaybackPreset, AudioPlayer, BlobAudioSource, EventEmitter, GAudioError, HttpAudioSource } from 'gaudio'
 import { createDashAdapter } from 'gaudio/dash'
 import { createHlsAdapter } from 'gaudio/hls'
 import { computed, onMounted, onUnmounted, shallowRef } from 'vue'
@@ -18,10 +18,10 @@ import {
 } from './demo-samples'
 
 const seekRangeMax = 1000
-const automaticQualitySelection = 'automatic'
+const automaticQualitySelection = 'auto'
 
 type ProtocolOverride = 'auto' | AudioProtocol
-type DemoSourceMode = 'url-string' | 'source-description' | 'http-source' | 'custom-source'
+type DemoSourceMode = 'url-string' | 'source-description' | 'http-source' | 'blob-source' | 'custom-source'
 
 interface BrowserSupportRow {
   label: string
@@ -132,6 +132,9 @@ export function useGaudioDemo() {
   const frequencyPreview = shallowRef('none')
   const waveformPreview = shallowRef('none')
   const eventEmitterStatus = shallowRef('not run')
+  const playlistStatus = shallowRef('not run')
+  const mediaSessionStatus = shallowRef('metadata pending')
+  const errorPreviewStatus = shallowRef('not run')
 
   const activeTrack = computed(() => findDemoTrack(activeTrackId.value))
   const activeFormatGroup = computed(() => findDemoFormatGroup(activeFormatFolder.value))
@@ -209,6 +212,25 @@ export function useGaudioDemo() {
     sourceLifecycleLabel.value = `open ${customSourceOpenCount.value} / close ${customSourceCloseCount.value}`
   }
 
+  function updatePlaylistStatus(): void {
+    const playlistLength = player.getPlaylist().length
+    const playlistIndex = player.getPlaylistIndex()
+    const selectedTrack = player.getSelectedAudioTrack()
+    const audioTrackCount = player.getAudioTracks().length
+
+    playlistStatus.value = playlistLength === 0
+      ? 'direct source'
+      : `${playlistLength} tracks / index ${playlistIndex} / audio tracks ${audioTrackCount} / selected ${selectedTrack?.id ?? 'default'}`
+  }
+
+  function updateMediaSessionStatus(): void {
+    const metadata = player.getMediaSessionMetadata()
+
+    mediaSessionStatus.value = metadata
+      ? `${metadata.title ?? 'untitled'} · ${metadata.artist ?? 'unknown artist'}`
+      : 'none'
+  }
+
   function resetAdaptiveQualityControls(controlLabel = 'automatic ABR'): void {
     adaptiveVariants.value = []
     adaptiveQualitySelection.value = automaticQualitySelection
@@ -216,7 +238,7 @@ export function useGaudioDemo() {
   }
 
   // AI modified: expose every public source input shape through one demo selector.
-  function audioSourceForLoad(): string | AudioSourceDescription | AudioSource {
+  async function audioSourceForLoad(): Promise<string | AudioSourceDescription | AudioSource> {
     const protocol = sourceProtocol(protocolOverride.value)
     const sourceDescription: AudioSourceDescription = {
       url: sourceUrl.value,
@@ -229,6 +251,15 @@ export function useGaudioDemo() {
         return sourceDescription
       case 'http-source':
         return new HttpAudioSource(sourceDescription)
+      case 'blob-source': {
+        const response = await fetch(sourceUrl.value)
+        const sourceBlob = await response.blob()
+
+        return new BlobAudioSource(sourceBlob, {
+          protocol,
+          mimeType: sourceBlob.type || activeFormatGroup.value.mimeType,
+        })
+      }
       case 'custom-source':
         return {
           kind: 'url',
@@ -275,6 +306,8 @@ export function useGaudioDemo() {
     activePlayer.on('loadedmetadata', ({ duration }) => {
       durationLabel.value = secondsForDisplay(duration)
       seekableLabel.value = rangesForDisplay(activePlayer.getSeekableRanges())
+      updatePlaylistStatus()
+      updateMediaSessionStatus()
       addEvent(`loadedmetadata: ${duration.toFixed(1)}s`)
     })
     activePlayer.on('canplay', () => addEvent('canplay'))
@@ -380,11 +413,18 @@ export function useGaudioDemo() {
     resetAdaptiveQualityControls()
 
     await withBusyControls(async () => {
+      player.setMediaSessionMetadata({
+        title: track.title,
+        artist: track.artist,
+        album: 'GAudio demo',
+      })
       player.setSource(sourceUrl.value)
       await player.load()
       updateMediaStatus()
       updateBrowserSupport()
       updateAdapterDiagnostics()
+      updatePlaylistStatus()
+      updateMediaSessionStatus()
       addEvent(`loaded: ${formatGroup.label} / ${track.title}`)
     })
   }
@@ -423,11 +463,13 @@ export function useGaudioDemo() {
 
   async function loadSource(): Promise<void> {
     await withBusyControls(async () => {
-      player.setSource(audioSourceForLoad())
+      player.setSource(await audioSourceForLoad())
       await player.load()
       updateMediaStatus()
       updateBrowserSupport()
       updateAdapterDiagnostics()
+      updatePlaylistStatus()
+      updateMediaSessionStatus()
       addEvent(`loaded source via ${sourceMode.value}`)
     })
   }
@@ -510,6 +552,10 @@ export function useGaudioDemo() {
     player.setPlaybackRate(playbackRate.value)
   }
 
+  function playerAnalyzer(): AudioAnalyzer | undefined {
+    return player?.getAnalyzer()
+  }
+
   // AI modified: expose utility APIs and runtime adapter controls without changing library internals.
   async function applyHlsConfigUpdate(): Promise<void> {
     await withBusyControls(async () => {
@@ -533,40 +579,19 @@ export function useGaudioDemo() {
     })
   }
 
-  function restoreAutomaticAdaptiveQuality(): void {
-    if (hlsAdapter.hlsInstance) {
-      hlsAdapter.hlsInstance.loadLevel = -1
-      adaptiveQualityControlLabel.value = 'HLS automatic ABR'
-      addEvent('quality: HLS automatic ABR')
-      return
-    }
-
-    if (dashAdapter.dashInstance) {
-      dashAdapter.updateSettings({
-        streaming: {
-          abr: {
-            autoSwitchBitrate: {
-              audio: true,
-            },
-          },
-        },
-      })
-      adaptiveQualityControlLabel.value = 'DASH automatic ABR'
-      updateAdapterDiagnostics()
-      addEvent('quality: DASH automatic ABR')
-      return
-    }
-
+  async function restoreAutomaticAdaptiveQuality(): Promise<void> {
+    await player.setAdaptiveQuality('auto')
     adaptiveQualityControlLabel.value = adaptiveImplementationLabel.value.includes('/ native')
       ? 'native HLS uses browser ABR'
-      : 'load HLS or DASH first'
+      : 'automatic ABR'
+    updateAdapterDiagnostics()
     addEvent(`quality: ${adaptiveQualityControlLabel.value}`)
   }
 
   async function applyAdaptiveQualitySelection(): Promise<void> {
     await withBusyControls(async () => {
       if (adaptiveQualitySelection.value === automaticQualitySelection) {
-        restoreAutomaticAdaptiveQuality()
+        await restoreAutomaticAdaptiveQuality()
         return
       }
 
@@ -578,49 +603,17 @@ export function useGaudioDemo() {
         return
       }
 
-      // AI modified: demonstrate vendor manual quality controls without adding a gaudio public API.
-      if (hlsAdapter.hlsInstance) {
-        const levelIndex = hlsAdapter.hlsInstance.levels.findIndex((level, index) => {
-          return String(level.id ?? index) === selectedVariant.id
-        })
-
-        if (levelIndex < 0) {
-          adaptiveQualityControlLabel.value = 'HLS level unavailable'
-          addEvent(`quality: ${adaptiveQualityControlLabel.value}`)
-          return
-        }
-
-        hlsAdapter.hlsInstance.nextLevel = levelIndex
-        adaptiveQualityControlLabel.value = `manual HLS ${variantChoiceLabel(selectedVariant)}`
-        addEvent(`quality: ${adaptiveQualityControlLabel.value}`)
-        return
-      }
-
-      if (dashAdapter.dashInstance) {
-        dashAdapter.updateSettings({
-          streaming: {
-            abr: {
-              autoSwitchBitrate: {
-                audio: false,
-              },
-            },
-          },
-        })
-        dashAdapter.dashInstance.setRepresentationForTypeById('audio', selectedVariant.id, true)
-        adaptiveQualityControlLabel.value = `manual DASH ${variantChoiceLabel(selectedVariant)}`
-        updateAdapterDiagnostics()
-        addEvent(`quality: ${adaptiveQualityControlLabel.value}`)
-        return
-      }
-
-      adaptiveQualityControlLabel.value = 'manual quality unavailable for this implementation'
+      // AI modified: manual quality now goes through the protocol-neutral AudioPlayer API.
+      await player.setAdaptiveQuality(selectedVariant.id)
+      adaptiveQualityControlLabel.value = `manual ${variantChoiceLabel(selectedVariant)}`
+      updateAdapterDiagnostics()
       addEvent(`quality: ${adaptiveQualityControlLabel.value}`)
     })
   }
 
   async function runAnalyzerPreview(): Promise<void> {
     await withBusyControls(async () => {
-      const analyzer = player.getAnalyzer()
+      const analyzer = playerAnalyzer()
 
       if (!analyzer) {
         analyzerStatus.value = 'player analyzer unavailable'
@@ -648,6 +641,50 @@ export function useGaudioDemo() {
     addEvent(`EventEmitter preview: ${eventEmitterStatus.value}`)
   }
 
+  async function runPlaylistPreview(): Promise<void> {
+    const formatGroup = activeFormatGroup.value
+    const track = activeTrack.value
+    const primarySource = demoSampleUrl(formatGroup.folder, track.id, formatGroup.extension)
+    const fallbackSource = demoSampleUrl('mp3', track.id, '.mp3')
+
+    await withBusyControls(async () => {
+      // AI modified: exercise playlist, fallback, alternate audio track, and media session APIs in one visible preview.
+      player.setPlaylist([
+        {
+          source: primarySource,
+          fallbackSources: [fallbackSource],
+          metadata: {
+            title: track.title,
+            artist: track.artist,
+            album: 'GAudio playlist demo',
+          },
+          defaultAudioTrackId: 'main',
+          audioTracks: [
+            {
+              id: 'main',
+              label: `${formatGroup.label} main`,
+              language: 'und',
+              source: primarySource,
+              fallbackSources: [fallbackSource],
+            },
+          ],
+        },
+      ])
+      await player.load()
+      updateMediaStatus()
+      updatePlaylistStatus()
+      updateMediaSessionStatus()
+      addEvent('playlist preview loaded with fallback source')
+    })
+  }
+
+  function runErrorPreview(): void {
+    const previewError = new GAudioError('SOURCE_UNAVAILABLE', 'Preview error for API coverage')
+
+    errorPreviewStatus.value = `${previewError.name}: ${previewError.code}`
+    addEvent(`GAudioError preview: ${previewError.code}`)
+  }
+
   onMounted(async () => {
     hlsAdapter = createHlsAdapter({
       playbackStrategy: 'native-first',
@@ -668,6 +705,13 @@ export function useGaudioDemo() {
       volume: volume.value,
       playbackRate: playbackRate.value,
       preservesPitch: shouldPreservePitch.value,
+      mediaSession: {
+        metadata: {
+          title: activeTrack.value.title,
+          artist: activeTrack.value.artist,
+          album: 'GAudio demo',
+        },
+      },
       // AI modified: demo analyzer samples now come from the public AudioPlayer configuration path.
       analyzer: {
         fftSize: 1024,
@@ -676,6 +720,8 @@ export function useGaudioDemo() {
     observePlayer(player)
     updateSourceLifecycle()
     updateAdapterDiagnostics()
+    updatePlaylistStatus()
+    updateMediaSessionStatus()
     await applyActiveSample()
   })
 
@@ -730,6 +776,9 @@ export function useGaudioDemo() {
     frequencyPreview,
     waveformPreview,
     eventEmitterStatus,
+    playlistStatus,
+    mediaSessionStatus,
+    errorPreviewStatus,
     selectTrack,
     selectFormat,
     nextTrack,
@@ -752,8 +801,11 @@ export function useGaudioDemo() {
     applyHlsConfigUpdate,
     applyDashSettingsUpdate,
     applyAdaptiveQualitySelection,
+    playerAnalyzer,
     runAnalyzerPreview,
     runEventEmitterPreview,
+    runPlaylistPreview,
+    runErrorPreview,
   }
 }
 

@@ -11,7 +11,12 @@ import type {
   ManifestLoadedData,
 } from 'hls.js'
 import type { GAudioErrorCode } from '../../errors/errors'
-import type { AdaptiveStreamError } from '../adaptive-audio-types'
+import type {
+  AdaptivePlaybackInfo,
+  AdaptiveQualitySelection,
+  AdaptiveStreamError,
+  AdaptiveVariant,
+} from '../adaptive-audio-types'
 import { ErrorTypes, Events } from 'hls.js'
 import { MediaElementAudioEngine } from '../../engine/media-element-audio-engine'
 import { GAudioError } from '../../errors/errors'
@@ -41,6 +46,8 @@ export class HlsAudioEngine extends MediaElementAudioEngine {
   private hls?: Hls
   private activeUrl?: string
   private previousVariantId?: string
+  private adaptiveVariants: AdaptiveVariant[] = []
+  private adaptiveQualitySelection: AdaptiveQualitySelection = 'auto'
   private rejectMetadataWait?: (error: GAudioError) => void
   private publishedReloadError?: GAudioError
 
@@ -65,6 +72,10 @@ export class HlsAudioEngine extends MediaElementAudioEngine {
 
     try {
       const metadataReady = this.waitForMetadata()
+      // AI modified: a reloaded hls.js instance starts a fresh manifest and variant lifecycle.
+      this.previousVariantId = undefined
+      this.adaptiveVariants = []
+      this.adaptiveQualitySelection = 'auto'
       this.destroyHlsInstance()
       this.createHlsInstance(this.activeUrl)
       await metadataReady
@@ -93,9 +104,56 @@ export class HlsAudioEngine extends MediaElementAudioEngine {
     this.onDispose()
   }
 
+  getActiveAdaptivePlayback(): AdaptivePlaybackInfo | undefined {
+    return this.activeUrl
+      ? { protocol: 'hls', implementation: this.implementation }
+      : undefined
+  }
+
+  getAdaptiveVariants(): readonly AdaptiveVariant[] {
+    return this.adaptiveVariants
+  }
+
+  getAdaptiveQualitySelection(): AdaptiveQualitySelection {
+    return this.adaptiveQualitySelection
+  }
+
+  async setAdaptiveQuality(variantId: AdaptiveQualitySelection): Promise<void> {
+    if (this.implementation !== 'hls.js' || !this.hls) {
+      throw new GAudioError('PROTOCOL_UNSUPPORTED', 'Manual HLS quality selection requires hls.js playback')
+    }
+
+    if (variantId === 'auto') {
+      this.hls.loadLevel = -1
+      this.adaptiveQualitySelection = 'auto'
+      return
+    }
+
+    const levelIndex = this.adaptiveVariants.findIndex(variant => variant.id === variantId)
+    if (levelIndex < 0) {
+      throw new GAudioError('ADAPTIVE_STREAM_ERROR', `HLS variant ${variantId} is unavailable`)
+    }
+
+    const selectedVariant = this.adaptiveVariants[levelIndex]
+    // AI modified: use the next segment switch path so manual selection does not interrupt current audio.
+    this.hls.nextLevel = levelIndex
+    this.adaptiveQualitySelection = variantId
+    this.events.emit('variantchange', {
+      protocol: 'hls',
+      implementation: 'hls.js',
+      previousVariantId: this.previousVariantId,
+      variantId,
+      bitrate: selectedVariant.bitrate,
+      reason: 'manual',
+    })
+    this.previousVariantId = variantId
+  }
+
   protected override attachSourceUrl(url: string): void {
     this.activeUrl = url
     this.previousVariantId = undefined
+    this.adaptiveVariants = []
+    this.adaptiveQualitySelection = 'auto'
 
     if (this.implementation === 'native') {
       super.attachSourceUrl(url)
@@ -114,6 +172,8 @@ export class HlsAudioEngine extends MediaElementAudioEngine {
     this.rejectMetadataWait?.(new GAudioError('LOAD_ABORTED', 'HLS reload was interrupted by source removal'))
     this.activeUrl = undefined
     this.previousVariantId = undefined
+    this.adaptiveVariants = []
+    this.adaptiveQualitySelection = 'auto'
     this.destroyHlsInstance()
     super.detachSourceUrl()
   }
@@ -167,15 +227,17 @@ export class HlsAudioEngine extends MediaElementAudioEngine {
   }
 
   private readonly handleManifestLoaded = (_event: Events.MANIFEST_LOADED, payload: ManifestLoadedData): void => {
+    this.adaptiveVariants = payload.levels.map((level, index) => ({
+      id: String(level.id ?? index),
+      bitrate: level.bitrate,
+      codecs: level.audioCodec ?? level.videoCodec,
+    }))
+
     this.events.emit('manifestloaded', {
       protocol: 'hls',
       implementation: 'hls.js',
       url: payload.url,
-      variants: payload.levels.map((level, index) => ({
-        id: String(level.id ?? index),
-        bitrate: level.bitrate,
-        codecs: level.audioCodec ?? level.videoCodec,
-      })),
+      variants: this.adaptiveVariants,
     })
   }
 

@@ -1,6 +1,6 @@
 // @env browser
 
-import type { AdaptiveAudioProtocol } from '../adapters/adaptive-audio-types'
+import type { AdaptiveAudioProtocol, AdaptivePlaybackInfo, AdaptiveQualitySelection, AdaptiveVariant } from '../adapters/adaptive-audio-types'
 import type { AudioAnalyzer, AudioAnalyzerOptions } from '../analysis/audio-analyzer'
 import type { AudioProtocol, AudioSource } from '../source/audio-source'
 import type { AudioEngine, AudioEngineEvents } from './audio-engine'
@@ -8,7 +8,7 @@ import type { AudioEngineAdapter } from './audio-engine-adapter'
 import type { AudioFormatSupport, PreloadMode, TimeRange } from './audio-engine-types'
 import { GAudioError } from '../errors/errors'
 import { EventEmitter } from '../events/event-emitter'
-import { resolveAudioProtocol } from '../source/audio-protocol'
+import { audioProtocolForMimeType, resolveAudioProtocol } from '../source/audio-protocol'
 import { audioEngineEventNames } from './audio-engine'
 import { MediaElementAudioEngine } from './media-element-audio-engine'
 
@@ -71,7 +71,7 @@ export class AudioEngineRouter implements AudioEngine {
 
   async load(source: AudioSource): Promise<void> {
     const protocol = resolveAudioProtocol(source)
-    const engine = this.engineForProtocol(protocol)
+    const engine = await this.engineForProtocol(protocol)
     await engine.load(source)
   }
 
@@ -195,11 +195,43 @@ export class AudioEngineRouter implements AudioEngine {
   }
 
   canPlayType(mimeType: string): AudioFormatSupport {
-    return this.activeEngine?.canPlayType(mimeType) ?? ''
+    const activeSupport = this.activeEngine?.canPlayType(mimeType) ?? ''
+    if (activeSupport) {
+      return activeSupport
+    }
+
+    const protocol = audioProtocolForMimeType(mimeType)
+    if (!protocol || protocol === 'media') {
+      return ''
+    }
+
+    // AI modified: adapter-capable manifest MIME types should report support before the first source is loaded.
+    const adapter = this.adapters.get(protocol)
+    return adapter?.isSupported() ? 'probably' : ''
   }
 
   createAnalyzer(options: AudioAnalyzerOptions = {}): AudioAnalyzer | undefined {
     return this.activeEngine?.createAnalyzer?.(options)
+  }
+
+  getActiveAdaptivePlayback(): AdaptivePlaybackInfo | undefined {
+    return this.activeEngine?.getActiveAdaptivePlayback?.()
+  }
+
+  getAdaptiveVariants(): readonly AdaptiveVariant[] {
+    return this.activeEngine?.getAdaptiveVariants?.() ?? []
+  }
+
+  getAdaptiveQualitySelection(): AdaptiveQualitySelection {
+    return this.activeEngine?.getAdaptiveQualitySelection?.() ?? 'auto'
+  }
+
+  async setAdaptiveQuality(variantId: AdaptiveQualitySelection): Promise<void> {
+    if (!this.activeEngine?.setAdaptiveQuality) {
+      throw new GAudioError('PROTOCOL_UNSUPPORTED', 'Adaptive quality selection is unavailable for the active source')
+    }
+
+    await this.activeEngine.setAdaptiveQuality(variantId)
   }
 
   on<EventName extends keyof AudioEngineEvents>(
@@ -221,7 +253,7 @@ export class AudioEngineRouter implements AudioEngine {
     this.events.clear()
   }
 
-  private engineForProtocol(protocol: AudioProtocol): AudioEngine {
+  private async engineForProtocol(protocol: AudioProtocol): Promise<AudioEngine> {
     if (this.activeEngine && this.activeProtocol === protocol) {
       return this.activeEngine
     }
@@ -238,7 +270,8 @@ export class AudioEngineRouter implements AudioEngine {
       if (!adapter.isSupported()) {
         throw new GAudioError('PROTOCOL_UNSUPPORTED', `${protocol.toUpperCase()} playback is not supported in this browser`)
       }
-      engine = adapter.createEngine()
+      // AI modified: DASH loads dash.js lazily so importing gaudio/dash is SSR-safe.
+      engine = await adapter.createEngine()
     }
 
     this.replaceActiveEngine(engine, protocol)

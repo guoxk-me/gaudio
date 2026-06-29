@@ -3,16 +3,23 @@
 import type { MediaPlayerClass, MediaPlayerEvents, MediaPlayerSettingClass } from 'dashjs'
 import type { AudioEngine } from '../../engine/audio-engine'
 import type { AudioEngineAdapter } from '../../engine/audio-engine-adapter'
+import type { AdaptiveContentType } from '../adaptive-audio-types'
 import { GAudioError } from '../../errors/errors'
 import { AdaptivePlaybackPreset } from '../adaptive-audio-types'
 import { settingsWithChanges } from '../settings-with-changes'
 import { DashAudioEngine } from './dash-audio-engine'
-import { dashSettingsForPreset } from './dash-playback-presets'
+import { dashSettingsForPlayback } from './dash-playback-settings'
 
 /** Configures an adapter created by {@link createDashAdapter}. */
 export interface DashAdapterOptions {
   /**
-   * Audio VOD configuration profile applied before explicit `settings` overrides.
+   * Content shape used to tune buffering, live latency, and retry behavior.
+   *
+   * @defaultValue `'vod'`
+   */
+  contentType?: AdaptiveContentType
+  /**
+   * Audio configuration profile applied before content type tuning and explicit `settings` overrides.
    *
    * @defaultValue {@link AdaptivePlaybackPreset.Balanced}
    */
@@ -37,9 +44,13 @@ export interface DashAudioAdapter extends AudioEngineAdapter {
 
 interface DashAdapterDependencies {
   audioElementFactory: () => HTMLAudioElement
+  loadDashRuntime: () => DashRuntime | Promise<DashRuntime>
+  isDashSupported: () => boolean
+}
+
+interface DashRuntime {
   createDashPlayer: () => MediaPlayerClass
   events: MediaPlayerEvents
-  isDashSupported: () => boolean
 }
 
 export class DashAudioAdapterImpl implements DashAudioAdapter {
@@ -53,7 +64,10 @@ export class DashAudioAdapterImpl implements DashAudioAdapter {
   constructor(options: DashAdapterOptions = {}, dependencies: DashAdapterDependencies) {
     // AI modified: clone settings because dash.js mutates nested configuration objects internally.
     this.settings = structuredClone(settingsWithChanges(
-      dashSettingsForPreset(options.preset ?? AdaptivePlaybackPreset.Balanced),
+      dashSettingsForPlayback(
+        options.preset ?? AdaptivePlaybackPreset.Balanced,
+        options.contentType ?? 'vod',
+      ),
       options.settings ?? {},
     ))
     this.dependencies = dependencies
@@ -63,17 +77,19 @@ export class DashAudioAdapterImpl implements DashAudioAdapter {
     return this.dependencies.isDashSupported()
   }
 
-  createEngine(): AudioEngine {
+  async createEngine(): Promise<AudioEngine> {
     if (!this.isSupported()) {
       throw new GAudioError('PROTOCOL_UNSUPPORTED', 'DASH playback is not supported in this browser')
     }
 
+    // AI modified: defer dash.js loading until playback uses the DASH adapter.
+    const dashRuntime = await this.dependencies.loadDashRuntime()
     const audioElement = this.dependencies.audioElementFactory()
     const engine = new DashAudioEngine({
       settings: structuredClone(this.settings),
       audioElement,
-      createDashPlayer: this.dependencies.createDashPlayer,
-      events: this.dependencies.events,
+      createDashPlayer: dashRuntime.createDashPlayer,
+      events: dashRuntime.events,
       onDashInstanceChange: (instance) => {
         if (this.activeEngine === engine) {
           this.dashInstance = instance

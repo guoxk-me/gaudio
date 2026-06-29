@@ -1,4 +1,4 @@
-# gaudio Extensibility Plan
+# GAudio Extensibility Plan
 
 > Date: 2026-06-18  
 > Scope: Future-facing product, API, architecture, documentation, testing, and release plan for an open-source browser audio library.

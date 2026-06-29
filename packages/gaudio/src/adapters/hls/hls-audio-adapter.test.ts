@@ -15,6 +15,8 @@ class FakeHls {
   readonly listeners = new Map<Events, HlsListener[]>()
   readonly loadedSources: string[] = []
   levels: Array<{ id: number, bitrate: number, codecSet: string }> = []
+  loadLevel = -1
+  nextLevel = -1
   attachedMedia?: HTMLMediaElement
   destroyCalls = 0
 
@@ -56,6 +58,7 @@ function adapterHarness(options: {
   nativeSupport?: CanPlayTypeResult
   hlsSupport?: boolean
   config?: HlsAdapterConfig
+  contentType?: 'vod' | 'long-form' | 'live'
   preset?: AdaptivePlaybackPreset
 } = {}): AdapterHarness {
   const audioElements: FakeAudioElement[] = []
@@ -63,6 +66,7 @@ function adapterHarness(options: {
   const adapter = new HlsAudioAdapterImpl({
     playbackStrategy: options.strategy,
     config: options.config,
+    contentType: options.contentType,
     preset: options.preset,
   }, {
     audioElementFactory: () => {
@@ -219,6 +223,48 @@ describe('hlsAudioAdapter', () => {
     })
   })
 
+  it('applies the HLS long-form audio profile for extended playback', () => {
+    const config = adapterHarness({ contentType: 'long-form' }).adapter.getConfig()
+
+    expect(config).toMatchObject({
+      maxBufferLength: 120,
+      maxMaxBufferLength: 300,
+      backBufferLength: 120,
+      maxBufferSize: 64 * 1024 * 1024,
+      maxStarvationDelay: 10,
+      maxLoadingDelay: 10,
+      lowLatencyMode: false,
+    })
+    expect(config.fragLoadPolicy?.default).toMatchObject({
+      maxLoadTimeMs: 180_000,
+      errorRetry: { maxNumRetry: 8 },
+    })
+  })
+
+  it('applies the HLS live profile for low-latency recovery', () => {
+    const config = adapterHarness({ contentType: 'live' }).adapter.getConfig()
+
+    expect(config).toMatchObject({
+      maxBufferLength: 18,
+      maxMaxBufferLength: 45,
+      backBufferLength: 45,
+      liveBackBufferLength: 45,
+      lowLatencyMode: true,
+      liveSyncDurationCount: 3,
+      liveMaxLatencyDurationCount: 8,
+      maxStarvationDelay: 3,
+      maxLoadingDelay: 3,
+    })
+    expect(config.playlistLoadPolicy?.default).toMatchObject({
+      maxLoadTimeMs: 10_000,
+      errorRetry: { maxNumRetry: 10 },
+    })
+    expect(config.fragLoadPolicy?.default).toMatchObject({
+      maxLoadTimeMs: 30_000,
+      errorRetry: { maxNumRetry: 10 },
+    })
+  })
+
   it('isolates HLS preset configuration between adapters', () => {
     const firstHarness = adapterHarness()
     const firstConfig = firstHarness.adapter.getConfig() as {
@@ -321,6 +367,45 @@ describe('hlsAudioAdapter', () => {
     expect(fatalErrors).toEqual([])
   })
 
+  it('selects HLS variants through the unified adaptive quality API', async () => {
+    const harness = adapterHarness({ strategy: 'hls-only' })
+    const engine = await loadEngine(harness)
+    const variantChanges: AudioEngineEvents['variantchange'][] = []
+    engine.on('variantchange', payload => variantChanges.push(payload))
+    const hls = harness.hlsInstances[0]
+    hls.levels = [
+      { id: 10, bitrate: 64_000, codecSet: 'mp4a.40.2' },
+      { id: 20, bitrate: 128_000, codecSet: 'mp4a.40.2' },
+    ]
+    hls.emit(Events.MANIFEST_LOADED, {
+      url: '/stream.m3u8',
+      levels: [
+        { id: 10, bitrate: 64_000, audioCodec: 'mp4a.40.2' },
+        { id: 20, bitrate: 128_000, audioCodec: 'mp4a.40.2' },
+      ],
+    })
+
+    expect(engine.getAdaptiveVariants?.()).toEqual([
+      { id: '10', bitrate: 64_000, codecs: 'mp4a.40.2' },
+      { id: '20', bitrate: 128_000, codecs: 'mp4a.40.2' },
+    ])
+
+    await engine.setAdaptiveQuality?.('20')
+
+    expect(hls.nextLevel).toBe(1)
+    expect(engine.getAdaptiveQualitySelection?.()).toBe('20')
+    expect(variantChanges.at(-1)).toMatchObject({
+      variantId: '20',
+      bitrate: 128_000,
+      reason: 'manual',
+    })
+
+    await engine.setAdaptiveQuality?.('auto')
+
+    expect(hls.loadLevel).toBe(-1)
+    expect(engine.getAdaptiveQualitySelection?.()).toBe('auto')
+  })
+
   it.each([
     [ErrorDetails.MANIFEST_LOAD_ERROR, 'MANIFEST_ERROR'],
     [ErrorDetails.FRAG_LOAD_ERROR, 'SEGMENT_ERROR'],
@@ -351,6 +436,13 @@ describe('hlsAudioAdapter', () => {
       config: { maxBufferLength: 20 },
     })
     const engine = await loadEngine(harness)
+    const variantChanges: AudioEngineEvents['variantchange'][] = []
+    engine.on('variantchange', payload => variantChanges.push(payload))
+    harness.hlsInstances[0].levels = [
+      { id: 0, bitrate: 64_000, codecSet: 'mp4a.40.2' },
+      { id: 1, bitrate: 128_000, codecSet: 'mp4a.40.2' },
+    ]
+    harness.hlsInstances[0].emit(Events.LEVEL_SWITCHED, { level: 0 })
     const audioElement = harness.audioElements.at(-1)
     if (!audioElement) {
       throw new Error('Expected an active audio element')
@@ -364,6 +456,15 @@ describe('hlsAudioAdapter', () => {
 
     const reload = harness.adapter.updateConfig({ backBufferLength: 15 }, { apply: 'reload' })
     await Promise.resolve()
+    const reloadedHls = harness.hlsInstances.at(-1)
+    if (!reloadedHls) {
+      throw new Error('Expected a reloaded HLS instance')
+    }
+    reloadedHls.levels = [
+      { id: 0, bitrate: 64_000, codecSet: 'mp4a.40.2' },
+      { id: 1, bitrate: 128_000, codecSet: 'mp4a.40.2' },
+    ]
+    reloadedHls.emit(Events.LEVEL_SWITCHED, { level: 1 })
     audioElement.dispatchEvent(new Event('loadedmetadata'))
     await reload
 
@@ -372,6 +473,10 @@ describe('hlsAudioAdapter', () => {
     expect(audioElement.currentTime).toBe(42)
     expect(audioElement.playCalls).toBe(1)
     expect(harness.adapter.getConfig()).toMatchObject({ maxBufferLength: 30, backBufferLength: 15 })
+    expect(variantChanges).toMatchObject([
+      { variantId: '0', reason: 'initial' },
+      { previousVariantId: undefined, variantId: '1', reason: 'initial' },
+    ])
 
     engine.dispose()
   })

@@ -6,8 +6,11 @@ export type AdaptiveAudioProtocol = Exclude<AudioProtocol, 'media'>
 /** Identifies the active native or vendor-backed adaptive playback implementation. */
 export type AdaptivePlaybackImplementation = 'native' | 'hls.js' | 'dash.js'
 
+/** Selects the content shape used to tune adaptive buffering, latency, and recovery. */
+export type AdaptiveContentType = 'vod' | 'long-form' | 'live'
+
 // AI modified: shared presets keep HLS and DASH playback profiles aligned.
-/** Selects a vendor-specific adaptive audio VOD configuration profile. */
+/** Selects a vendor-specific adaptive audio configuration profile. */
 export enum AdaptivePlaybackPreset {
   FastStart = 'fast-start',
   Balanced = 'balanced',
@@ -40,7 +43,7 @@ export interface AdaptiveManifestUpdate extends AdaptivePlaybackInfo {
   variants: readonly AdaptiveVariant[]
 }
 
-/** Reports an initial or automatic adaptive quality selection. */
+/** Reports an initial, automatic, or manual adaptive quality selection. */
 export interface AdaptiveVariantUpdate extends AdaptivePlaybackInfo {
   /** Previously selected variant identifier, when known. */
   previousVariantId?: string
@@ -49,8 +52,11 @@ export interface AdaptiveVariantUpdate extends AdaptivePlaybackInfo {
   /** Newly selected bitrate in bits per second, when known. */
   bitrate?: number
   /** Reason the implementation selected the variant. */
-  reason: 'initial' | 'automatic'
+  reason: 'initial' | 'automatic' | 'manual'
 }
+
+/** Identifies automatic adaptive selection or a manually selected variant. */
+export type AdaptiveQualitySelection = 'auto' | string
 
 /** Reports the start or completion of an adaptive media segment request. */
 export interface AdaptiveSegmentUpdate extends AdaptivePlaybackInfo {

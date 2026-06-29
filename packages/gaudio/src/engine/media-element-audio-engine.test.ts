@@ -24,6 +24,38 @@ class FakeAudioSource implements AudioSource {
   }
 }
 
+class DelayedResourceAudioSource implements AudioSource {
+  readonly kind = 'url'
+  closeCalls = 0
+  releaseCalls = 0
+  hasAllocatedResource = false
+
+  private finishOpen: (() => void) | undefined
+  private readonly openGate = new Promise<void>((resolve) => {
+    this.finishOpen = resolve
+  })
+
+  constructor(readonly url: string) {}
+
+  async open(): Promise<AudioStreamHandle> {
+    await this.openGate
+    this.hasAllocatedResource = true
+    return { url: this.url }
+  }
+
+  async close(): Promise<void> {
+    this.closeCalls += 1
+    if (this.hasAllocatedResource) {
+      this.releaseCalls += 1
+      this.hasAllocatedResource = false
+    }
+  }
+
+  continueOpening(): void {
+    this.finishOpen?.()
+  }
+}
+
 function mediaError(code: number): MediaError {
   return { code, message: 'media failed' } as MediaError
 }
@@ -193,6 +225,27 @@ describe('mediaElementEngine', () => {
     expect(audioElement.currentTime).toBe(0)
   })
 
+  it('resolves seek after the browser reports completion', async () => {
+    const audioElement = new FakeAudioElement()
+    audioElement.seeking = true
+    const engine = new MediaElementAudioEngine(audioElement as unknown as HTMLAudioElement)
+    let hasSeekResolved = false
+
+    const seek = engine.seek(25).then(() => {
+      hasSeekResolved = true
+    })
+    await Promise.resolve()
+
+    expect(audioElement.currentTime).toBe(25)
+    expect(hasSeekResolved).toBe(false)
+
+    audioElement.seeking = false
+    audioElement.dispatchEvent(new Event('seeked'))
+    await seek
+
+    expect(hasSeekResolved).toBe(true)
+  })
+
   it('falls back to regular seek when native fast seek is unavailable', async () => {
     const audioElement = new FakeAudioElement()
     const engine = new MediaElementAudioEngine(audioElement as unknown as HTMLAudioElement)
@@ -270,6 +323,27 @@ describe('mediaElementEngine', () => {
     await expect(secondLoad).resolves.toBeUndefined()
     expect(firstSource.closeCalls).toBe(1)
     expect(audioElement.src).toBe('https://example.com/second.mp3')
+  })
+
+  it('releases resources when a cancelled source finishes opening later', async () => {
+    const audioElement = new FakeAudioElement()
+    const engine = new MediaElementAudioEngine(audioElement as unknown as HTMLAudioElement)
+    const firstSource = new DelayedResourceAudioSource('https://example.com/first.mp3')
+    const secondSource = new FakeAudioSource('https://example.com/second.mp3')
+
+    const firstLoad = engine.load(firstSource)
+    const firstLoadExpectation = expect(firstLoad).rejects.toMatchObject({ code: 'LOAD_ABORTED' })
+    const secondLoad = engine.load(secondSource)
+    await Promise.resolve()
+    audioElement.dispatchEvent(new Event('loadedmetadata'))
+    await secondLoad
+
+    firstSource.continueOpening()
+    await firstLoadExpectation
+
+    expect(firstSource.closeCalls).toBe(1)
+    expect(firstSource.releaseCalls).toBe(1)
+    expect(firstSource.hasAllocatedResource).toBe(false)
   })
 
   it('closes the source immediately when opening fails', async () => {

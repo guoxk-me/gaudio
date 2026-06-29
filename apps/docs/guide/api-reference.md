@@ -1,6 +1,6 @@
 # API Reference
 
-This page lists the public API users can import and the types they commonly need while integrating gaudio. The generated [TypeDoc reference](/api/) contains declaration-level details.
+This page lists the public API users can import and the types they commonly need while integrating GAudio. The generated [TypeDoc reference](/api/) contains declaration-level details.
 
 ## Entry points
 
@@ -33,6 +33,64 @@ Source APIs:
 | `load()` | `Promise<void>` | Opens the current source and resolves after metadata is available. |
 | `play()` | `Promise<void>` | Starts or resumes playback; loads first when state is `idle`. |
 | `dispose()` | `void` | Releases source lifecycle, engine, analyzer, vendor instances, and listeners. |
+
+Playlist APIs:
+
+| API | Returns | Notes |
+| --- | --- | --- |
+| `setPlaylist(playlist, options?)` | `void` | Selects a playlist track without loading it. Empty playlists clear the active source. |
+| `getPlaylist()` | `readonly AudioPlaylistTrack[]` | Current playlist tracks. |
+| `getPlaylistIndex()` | `number` | Selected track index, or `-1` when no playlist is active. |
+| `selectPlaylistTrack(index, options?)` | `Promise<void>` | Selects and loads a track by index. |
+| `next(options?)` | `Promise<boolean>` | Loads the next track and returns whether one existed. |
+| `previous(options?)` | `Promise<boolean>` | Loads the previous track and returns whether one existed. |
+| `getAudioTracks()` | `readonly AudioTrack[]` | Alternate audio tracks for the selected playlist track. |
+| `getSelectedAudioTrack()` | `AudioTrack \| undefined` | Current alternate audio track. |
+| `selectAudioTrack(audioTrackId, options?)` | `Promise<void>` | Switches language or alternate audio while preserving time by default. |
+
+```ts
+player.setPlaylist([
+  {
+    source: 'https://example.com/episode-1.mp3',
+    fallbackSources: ['https://cdn.example.com/episode-1.mp3'],
+  },
+  { source: 'https://example.com/episode-2.mp3' },
+])
+
+await player.load()
+await player.next({ autoplay: true })
+```
+
+Playlist tracks automatically continue to the next track after `ended`. A track's `fallbackSources` are attempted in order before GAudio emits a load error.
+
+Use `audioTracks` for dubbed languages or companion audio that share the same program timeline:
+
+```ts
+player.setPlaylist([
+  {
+    source: 'https://example.com/episode.zh-CN.m4a',
+    defaultAudioTrackId: 'zh-CN',
+    audioTracks: [
+      {
+        id: 'zh-CN',
+        label: '简体中文',
+        language: 'zh-CN',
+        source: 'https://example.com/episode.zh-CN.m4a',
+      },
+      {
+        id: 'en',
+        label: 'English',
+        language: 'en',
+        source: 'https://example.com/episode.en.m4a',
+      },
+    ],
+  },
+])
+
+await player.selectAudioTrack('en')
+```
+
+`selectAudioTrack()` preserves current time and previous paused/playing state unless options override that behavior.
 
 Playback controls:
 
@@ -68,14 +126,34 @@ State and capability APIs:
 | `getBufferedRanges()` | `readonly TimeRange[]` | Buffered ranges in seconds. |
 | `getSeekableRanges()` | `readonly TimeRange[]` | Seekable ranges in seconds. |
 | `getPlayedRanges()` | `readonly TimeRange[]` | Played ranges in seconds. |
-| `canPlayType(mimeType)` | `AudioFormatSupport` | Browser media support: `''`, `'maybe'`, or `'probably'`. |
+| `canPlayType(mimeType)` | `AudioFormatSupport` | Native media support plus registered HLS/DASH adapter support: `''`, `'maybe'`, or `'probably'`. |
 | `getAnalyzer()` | `AudioAnalyzer \| undefined` | Analyzer created after `load()` when configured and supported. |
+| `getMediaSessionMetadata()` | `AudioMediaSessionMetadata \| undefined` | Default Media Session metadata for direct sources and playlist tracks without metadata. |
+| `setMediaSessionMetadata(metadata)` | `void` | Updates browser/system media metadata for direct sources or playlist fallback metadata. |
+| `getSource()` | `AudioSource \| undefined` | Current configured source. |
 
 Events:
 
 | API | Returns | Notes |
 | --- | --- | --- |
 | `on(eventName, handler)` | `() => void` | Registers a typed `AudioPlayerEvents` listener and returns an unsubscribe function. |
+| `once(eventName, handler)` | `() => void` | Registers a typed listener for the next matching event. |
+| `removeAllListeners(eventName?)` | `void` | Removes listeners for one event or all player listeners. |
+
+Adaptive quality:
+
+| API | Returns | Notes |
+| --- | --- | --- |
+| `getActiveAdaptivePlayback()` | `AdaptivePlaybackInfo \| undefined` | Active HLS/DASH implementation. |
+| `getAdaptiveVariants()` | `readonly AdaptiveVariant[]` | Variants discovered from the current manifest. |
+| `getAdaptiveQualitySelection()` | `AdaptiveQualitySelection` | `'auto'` or the selected variant id. |
+| `setAdaptiveQuality(variantId)` | `Promise<void>` | Selects `'auto'` ABR or a variant id. Native HLS may reject manual selection. |
+
+```ts
+const variants = player.getAdaptiveVariants()
+await player.setAdaptiveQuality('auto')
+await player.setAdaptiveQuality(variants[0].id)
+```
 
 ## AudioPlayerOptions
 
@@ -84,6 +162,7 @@ Events:
 | `source` | `AudioSourceInput` | `undefined` |
 | `adapters` | `readonly AudioEngineAdapter[]` | `[]` |
 | `analyzer` | `boolean \| AudioPlayerAnalyzerOptions` | `undefined` |
+| `mediaSession` | `boolean \| AudioMediaSessionOptions` | `undefined` |
 | `preload` | `PreloadMode` | `'metadata'` |
 | `autoplay` | `boolean` | `false` |
 | `muted` | `boolean` | `false` |
@@ -103,6 +182,39 @@ Analyzer options:
 
 Use `analyzer: true` for the built-in player path, or `createAnalyzer` when a custom engine or app-owned Web Audio graph should provide the analyzer.
 
+Media Session options:
+
+| Type | Fields |
+| --- | --- |
+| `AudioMediaSessionOptions` | `enabled?: boolean`, `metadata?: AudioMediaSessionMetadata`, `seekOffset?: number` |
+| `AudioMediaSessionMetadata` | `title?`, `artist?`, `album?`, `artwork?` |
+| `AudioMediaSessionArtwork` | `src`, `sizes?`, `type?` |
+
+Enable `mediaSession` when the app should integrate with browser, keyboard, headset, and operating-system media controls:
+
+```ts
+const player = new AudioPlayer({
+  source: 'https://example.com/episode-1.mp3',
+  mediaSession: {
+    metadata: {
+      title: 'Episode 1',
+      artist: 'Example Studio',
+      album: 'Example Podcast',
+      artwork: [
+        { src: '/cover-512.png', sizes: '512x512', type: 'image/png' },
+      ],
+    },
+  },
+})
+
+player.setMediaSessionMetadata({
+  title: 'Episode 2',
+  artist: 'Example Studio',
+})
+```
+
+System actions are routed through the existing player APIs: play, pause, stop, previous, next, seek backward, seek forward, and seek to a specific time. Unsupported browsers ignore the integration without changing playback behavior.
+
 ## AudioAnalyzer
 
 ```ts
@@ -121,6 +233,7 @@ const analyzer = new AudioAnalyzer(audioContext, sourceNode, fftSize)
 | API or type | Purpose |
 | --- | --- |
 | `HttpAudioSource` | URL-backed source class used internally for strings and source descriptions. |
+| `BlobAudioSource` | Blob/File-backed source that owns and revokes its object URL. |
 | `new HttpAudioSource(source)` | Accepts `string \| AudioSourceDescription`. |
 | `HttpAudioSource.open()` | Resolves `{ url }` without making a network request. |
 | `HttpAudioSource.close()` | No-op cleanup for plain URLs. |
@@ -129,7 +242,19 @@ const analyzer = new AudioAnalyzer(audioContext, sourceNode, fftSize)
 | `AudioSource` | Custom lazy source contract with `kind`, optional metadata, `open()`, and `close()`. |
 | `AudioStreamHandle` | `{ readonly url: string }`. |
 | `AudioProtocol` | `'media' \| 'hls' \| 'dash'`. |
-| `AudioSourceKind` | `'url'`. |
+| `AudioSourceKind` | `'url' \| 'blob'`. |
+
+`HttpAudioSource` does not manage headers, credentials, signed URL refresh, or token expiry. Use a custom `AudioSource` for load-time URL refresh, and use HLS/DASH vendor request hooks when manifest or segment requests need authentication after playback starts.
+
+Playlist types:
+
+| Type | Fields |
+| --- | --- |
+| `AudioPlaylistTrack` | `source`, `fallbackSources?`, `metadata?` |
+| `AudioPlaylistOptions` | `startIndex?` |
+| `AudioPlaylistNavigationOptions` | `autoplay?` |
+| `AudioTrack` | `id`, `label?`, `language?`, `source`, `fallbackSources?` |
+| `AudioTrackSelectionOptions` | `preserveTime?`, `autoplay?` |
 
 ## Events And Errors
 
@@ -161,12 +286,14 @@ Shared adaptive exports from `gaudio`:
 | Type or value | Purpose |
 | --- | --- |
 | `AdaptivePlaybackPreset` | `FastStart`, `Balanced`, and `Stable` audio VOD profiles. |
+| `AdaptiveContentType` | `'vod'`, `'long-form'`, or `'live'` content tuning for adaptive adapters. |
 | `AdaptiveAudioProtocol` | `'hls' \| 'dash'`. |
 | `AdaptivePlaybackImplementation` | `'native' \| 'hls.js' \| 'dash.js'`. |
 | `AdaptivePlaybackInfo` | Active adaptive protocol and implementation. |
 | `AdaptiveManifestUpdate` | Manifest URL and discovered variants. |
 | `AdaptiveVariant` | Variant id, bitrate, and optional codecs. |
 | `AdaptiveVariantUpdate` | Initial or automatic adaptive variant selection. |
+| `AdaptiveQualitySelection` | `'auto'` or a manual variant id. |
 | `AdaptiveSegmentUpdate` | Segment request URL, variant, and duration when available. |
 | `AdaptiveStreamError` | Recoverable or fatal adaptive failure information. |
 
@@ -186,7 +313,7 @@ Import from `gaudio/hls`.
 | --- | --- |
 | `createHlsAdapter(options?)` | Creates an HLS adapter for `AudioPlayerOptions.adapters`. |
 | `HlsAudioAdapter` | Adapter instance with `hlsInstance`, `implementation`, `getConfig()`, `updateConfig()`, and adapter methods. |
-| `HlsAdapterOptions` | `preset`, `playbackStrategy`, and initial `config`. |
+| `HlsAdapterOptions` | `contentType`, `preset`, `playbackStrategy`, and initial `config`. |
 | `HlsPlaybackStrategy` | `'native-first' \| 'hls-first' \| 'native-only' \| 'hls-only'`. |
 | `HlsAdapterConfig` | Deep partial `hls.js` constructor configuration with mergeable load policies. |
 | `HlsConfigUpdateOptions` | `apply`, `restorePosition`, and `resumePlayback`. |
@@ -203,7 +330,7 @@ Import from `gaudio/dash`.
 | --- | --- |
 | `createDashAdapter(options?)` | Creates a DASH adapter for `AudioPlayerOptions.adapters`. |
 | `DashAudioAdapter` | Adapter instance with `dashInstance`, `getSettings()`, `updateSettings()`, and adapter methods. |
-| `DashAdapterOptions` | `preset` and initial dash.js `settings`. |
+| `DashAdapterOptions` | `contentType`, `preset`, and initial dash.js `settings`. |
 | `MediaPlayerClass` | Re-export from `dashjs`. |
 | `MediaPlayerSettingClass` | Re-export from `dashjs`. |
 
@@ -214,6 +341,7 @@ Import from `gaudio/dash`.
 | API | Returns |
 | --- | --- |
 | `on(eventName, handler)` | `() => void` |
+| `once(eventName, handler)` | `() => void` |
 | `off(eventName, handler)` | `void` |
 | `emit(eventName, payload)` | `void` |
-| `clear()` | `void` |
+| `clear(eventName?)` | `void` |

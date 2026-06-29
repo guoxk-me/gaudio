@@ -1,6 +1,6 @@
 # API 参考
 
-本页列出用户可以 import 的公共 API，以及集成 gaudio 时常用的类型。[TypeDoc 参考](/api/)提供声明级细节。
+本页列出用户可以 import 的公共 API，以及集成 GAudio 时常用的类型。[TypeDoc 参考](/api/)提供声明级细节。
 
 ## 导入入口
 
@@ -33,6 +33,64 @@ Source API：
 | `load()` | `Promise<void>` | 打开当前 source，并在 metadata 可用后 resolve。 |
 | `play()` | `Promise<void>` | 开始或恢复播放；`idle` 时会先加载。 |
 | `dispose()` | `void` | 释放 source 生命周期、engine、analyzer、vendor instance 和监听器。 |
+
+播放列表 API：
+
+| API | 返回 | 说明 |
+| --- | --- | --- |
+| `setPlaylist(playlist, options?)` | `void` | 选择一个播放列表 track，但不立即加载。空列表会清除当前 source。 |
+| `getPlaylist()` | `readonly AudioPlaylistTrack[]` | 当前播放列表 tracks。 |
+| `getPlaylistIndex()` | `number` | 当前选中的 track index；没有播放列表时为 `-1`。 |
+| `selectPlaylistTrack(index, options?)` | `Promise<void>` | 按 index 选择并加载 track。 |
+| `next(options?)` | `Promise<boolean>` | 加载下一首，并返回是否存在下一首。 |
+| `previous(options?)` | `Promise<boolean>` | 加载上一首，并返回是否存在上一首。 |
+| `getAudioTracks()` | `readonly AudioTrack[]` | 当前 playlist track 可选的多语言或备用音轨。 |
+| `getSelectedAudioTrack()` | `AudioTrack \| undefined` | 当前选中的备用音轨。 |
+| `selectAudioTrack(audioTrackId, options?)` | `Promise<void>` | 切换语言或备用音轨，默认保留当前时间。 |
+
+```ts
+player.setPlaylist([
+  {
+    source: 'https://example.com/episode-1.mp3',
+    fallbackSources: ['https://cdn.example.com/episode-1.mp3'],
+  },
+  { source: 'https://example.com/episode-2.mp3' },
+])
+
+await player.load()
+await player.next({ autoplay: true })
+```
+
+播放列表 track 在 `ended` 后会自动续播下一首。某个 track 加载失败时，GAudio 会按顺序尝试它的 `fallbackSources`，全部失败后才发出加载错误。
+
+视频辅助音频或多语言配音应该放在同一个 playlist track 的 `audioTracks` 中：
+
+```ts
+player.setPlaylist([
+  {
+    source: 'https://example.com/episode.zh-CN.m4a',
+    defaultAudioTrackId: 'zh-CN',
+    audioTracks: [
+      {
+        id: 'zh-CN',
+        label: '简体中文',
+        language: 'zh-CN',
+        source: 'https://example.com/episode.zh-CN.m4a',
+      },
+      {
+        id: 'en',
+        label: 'English',
+        language: 'en',
+        source: 'https://example.com/episode.en.m4a',
+      },
+    ],
+  },
+])
+
+await player.selectAudioTrack('en')
+```
+
+`selectAudioTrack()` 默认保留当前时间和切换前的暂停/播放状态；如果需要，也可以通过 options 覆盖。
 
 播放控制：
 
@@ -68,14 +126,34 @@ Source API：
 | `getBufferedRanges()` | `readonly TimeRange[]` | 已缓冲区间，单位秒。 |
 | `getSeekableRanges()` | `readonly TimeRange[]` | 可跳转区间，单位秒。 |
 | `getPlayedRanges()` | `readonly TimeRange[]` | 已播放区间，单位秒。 |
-| `canPlayType(mimeType)` | `AudioFormatSupport` | 浏览器媒体支持：`''`、`'maybe'` 或 `'probably'`。 |
+| `canPlayType(mimeType)` | `AudioFormatSupport` | 原生媒体支持加已注册 HLS/DASH adapter 支持：`''`、`'maybe'` 或 `'probably'`。 |
 | `getAnalyzer()` | `AudioAnalyzer \| undefined` | 配置并支持 analyzer 时，在 `load()` 后返回 analyzer。 |
+| `getMediaSessionMetadata()` | `AudioMediaSessionMetadata \| undefined` | direct source 和没有 metadata 的 playlist track 使用的默认 Media Session metadata。 |
+| `setMediaSessionMetadata(metadata)` | `void` | 更新浏览器/系统媒体面板显示的 direct source 或 playlist fallback metadata。 |
+| `getSource()` | `AudioSource \| undefined` | 当前配置的 source。 |
 
 事件：
 
 | API | 返回 | 说明 |
 | --- | --- | --- |
 | `on(eventName, handler)` | `() => void` | 注册类型化 `AudioPlayerEvents` 监听器，并返回取消函数。 |
+| `once(eventName, handler)` | `() => void` | 只监听下一次匹配事件。 |
+| `removeAllListeners(eventName?)` | `void` | 移除某个事件或全部 player 监听器。 |
+
+自适应音质：
+
+| API | 返回 | 说明 |
+| --- | --- | --- |
+| `getActiveAdaptivePlayback()` | `AdaptivePlaybackInfo \| undefined` | 当前 HLS/DASH 实现。 |
+| `getAdaptiveVariants()` | `readonly AdaptiveVariant[]` | 当前 manifest 发现的 variants。 |
+| `getAdaptiveQualitySelection()` | `AdaptiveQualitySelection` | `'auto'` 或已选择的 variant id。 |
+| `setAdaptiveQuality(variantId)` | `Promise<void>` | 选择 `'auto'` ABR 或指定 variant id。原生 HLS 可能拒绝手动选择。 |
+
+```ts
+const variants = player.getAdaptiveVariants()
+await player.setAdaptiveQuality('auto')
+await player.setAdaptiveQuality(variants[0].id)
+```
 
 ## AudioPlayerOptions
 
@@ -84,6 +162,7 @@ Source API：
 | `source` | `AudioSourceInput` | `undefined` |
 | `adapters` | `readonly AudioEngineAdapter[]` | `[]` |
 | `analyzer` | `boolean \| AudioPlayerAnalyzerOptions` | `undefined` |
+| `mediaSession` | `boolean \| AudioMediaSessionOptions` | `undefined` |
 | `preload` | `PreloadMode` | `'metadata'` |
 | `autoplay` | `boolean` | `false` |
 | `muted` | `boolean` | `false` |
@@ -103,6 +182,39 @@ Analyzer 类型：
 
 使用 `analyzer: true` 可以走内置 player 分析路径；自定义 engine 或应用自持 Web Audio 图可使用 `createAnalyzer`。
 
+Media Session options：
+
+| 类型 | 字段 |
+| --- | --- |
+| `AudioMediaSessionOptions` | `enabled?: boolean`、`metadata?: AudioMediaSessionMetadata`、`seekOffset?: number` |
+| `AudioMediaSessionMetadata` | `title?`、`artist?`、`album?`、`artwork?` |
+| `AudioMediaSessionArtwork` | `src`、`sizes?`、`type?` |
+
+当应用需要接入浏览器、键盘、耳机和操作系统媒体控制时，启用 `mediaSession`：
+
+```ts
+const player = new AudioPlayer({
+  source: 'https://example.com/episode-1.mp3',
+  mediaSession: {
+    metadata: {
+      title: 'Episode 1',
+      artist: 'Example Studio',
+      album: 'Example Podcast',
+      artwork: [
+        { src: '/cover-512.png', sizes: '512x512', type: 'image/png' },
+      ],
+    },
+  },
+})
+
+player.setMediaSessionMetadata({
+  title: 'Episode 2',
+  artist: 'Example Studio',
+})
+```
+
+系统动作会复用现有 player API：play、pause、stop、previous、next、seek backward、seek forward 和 seek to。浏览器不支持时会自动忽略，不改变播放行为。
+
 ## AudioAnalyzer
 
 ```ts
@@ -121,6 +233,7 @@ const analyzer = new AudioAnalyzer(audioContext, sourceNode, fftSize)
 | API 或类型 | 用途 |
 | --- | --- |
 | `HttpAudioSource` | URL-backed source class，字符串和 source description 会走这个包装。 |
+| `BlobAudioSource` | Blob/File-backed source，会持有并释放自己的 object URL。 |
 | `new HttpAudioSource(source)` | 接收 `string \| AudioSourceDescription`。 |
 | `HttpAudioSource.open()` | 不发起网络请求，resolve `{ url }`。 |
 | `HttpAudioSource.close()` | 普通 URL 的 no-op cleanup。 |
@@ -129,7 +242,19 @@ const analyzer = new AudioAnalyzer(audioContext, sourceNode, fftSize)
 | `AudioSource` | 自定义懒加载 source contract，包含 `kind`、可选 metadata、`open()` 和 `close()`。 |
 | `AudioStreamHandle` | `{ readonly url: string }`。 |
 | `AudioProtocol` | `'media' \| 'hls' \| 'dash'`。 |
-| `AudioSourceKind` | `'url'`。 |
+| `AudioSourceKind` | `'url' \| 'blob'`。 |
+
+`HttpAudioSource` 不管理 headers、credentials、签名 URL 刷新或 token 过期。需要加载前刷新 URL 时使用自定义 `AudioSource`；manifest 或 segment 请求在播放开始后仍需要鉴权时，使用 HLS/DASH vendor 的请求 hook。
+
+播放列表类型：
+
+| 类型 | 字段 |
+| --- | --- |
+| `AudioPlaylistTrack` | `source`, `fallbackSources?`, `metadata?` |
+| `AudioPlaylistOptions` | `startIndex?` |
+| `AudioPlaylistNavigationOptions` | `autoplay?` |
+| `AudioTrack` | `id`, `label?`, `language?`, `source`, `fallbackSources?` |
+| `AudioTrackSelectionOptions` | `preserveTime?`, `autoplay?` |
 
 ## 事件与错误
 
@@ -161,12 +286,14 @@ Payload 类型：
 | 类型或值 | 用途 |
 | --- | --- |
 | `AdaptivePlaybackPreset` | `FastStart`、`Balanced`、`Stable` 三种音频 VOD profile。 |
+| `AdaptiveContentType` | 自适应 adapter 的 `'vod'`、`'long-form'` 或 `'live'` 内容类型调优。 |
 | `AdaptiveAudioProtocol` | `'hls' \| 'dash'`。 |
 | `AdaptivePlaybackImplementation` | `'native' \| 'hls.js' \| 'dash.js'`。 |
 | `AdaptivePlaybackInfo` | 当前自适应协议和实现。 |
 | `AdaptiveManifestUpdate` | Manifest URL 和发现的 variants。 |
 | `AdaptiveVariant` | Variant id、bitrate 和可选 codecs。 |
 | `AdaptiveVariantUpdate` | 初始或自动自适应 variant 选择。 |
+| `AdaptiveQualitySelection` | `'auto'` 或手动 variant id。 |
 | `AdaptiveSegmentUpdate` | 可用时包含 segment request URL、variant 和 duration。 |
 | `AdaptiveStreamError` | 可恢复或 fatal 自适应失败信息。 |
 
@@ -186,7 +313,7 @@ Adapter contract：
 | --- | --- |
 | `createHlsAdapter(options?)` | 创建用于 `AudioPlayerOptions.adapters` 的 HLS adapter。 |
 | `HlsAudioAdapter` | Adapter instance，包含 `hlsInstance`、`implementation`、`getConfig()`、`updateConfig()` 和 adapter 方法。 |
-| `HlsAdapterOptions` | `preset`、`playbackStrategy` 和初始 `config`。 |
+| `HlsAdapterOptions` | `contentType`、`preset`、`playbackStrategy` 和初始 `config`。 |
 | `HlsPlaybackStrategy` | `'native-first' \| 'hls-first' \| 'native-only' \| 'hls-only'`。 |
 | `HlsAdapterConfig` | 深度 partial `hls.js` 构造配置，带可合并 load policies。 |
 | `HlsConfigUpdateOptions` | `apply`、`restorePosition` 和 `resumePlayback`。 |
@@ -203,7 +330,7 @@ Adapter contract：
 | --- | --- |
 | `createDashAdapter(options?)` | 创建用于 `AudioPlayerOptions.adapters` 的 DASH adapter。 |
 | `DashAudioAdapter` | Adapter instance，包含 `dashInstance`、`getSettings()`、`updateSettings()` 和 adapter 方法。 |
-| `DashAdapterOptions` | `preset` 和初始 dash.js `settings`。 |
+| `DashAdapterOptions` | `contentType`、`preset` 和初始 dash.js `settings`。 |
 | `MediaPlayerClass` | 从 `dashjs` re-export。 |
 | `MediaPlayerSettingClass` | 从 `dashjs` re-export。 |
 
@@ -214,6 +341,7 @@ Adapter contract：
 | API | 返回 |
 | --- | --- |
 | `on(eventName, handler)` | `() => void` |
+| `once(eventName, handler)` | `() => void` |
 | `off(eventName, handler)` | `void` |
 | `emit(eventName, payload)` | `void` |
-| `clear()` | `void` |
+| `clear(eventName?)` | `void` |

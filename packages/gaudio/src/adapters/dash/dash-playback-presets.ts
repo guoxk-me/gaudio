@@ -1,7 +1,4 @@
-import type { MediaPlayerSettingClass } from 'dashjs'
 import { AdaptivePlaybackPreset } from '../adaptive-audio-types'
-import { settingsWithChanges } from '../settings-with-changes'
-import { dashVodDefaults } from './dash-vod-defaults'
 
 const dashPresetChanges: Record<AdaptivePlaybackPreset, object> = {
   [AdaptivePlaybackPreset.FastStart]: {
@@ -104,6 +101,6 @@ const dashPresetChanges: Record<AdaptivePlaybackPreset, object> = {
   },
 }
 
-export function dashSettingsForPreset(preset: AdaptivePlaybackPreset): MediaPlayerSettingClass {
-  return settingsWithChanges(dashVodDefaults(), dashPresetChanges[preset])
+export function dashPresetSettings(preset: AdaptivePlaybackPreset): object {
+  return dashPresetChanges[preset]
 }

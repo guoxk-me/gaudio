@@ -26,6 +26,7 @@ class FakeDashPlayer {
   readonly listeners = new Map<string, DashListener[]>()
   readonly initializeCalls: Array<{ media: HTMLMediaElement, url: string, autoplay: boolean }> = []
   readonly settingsUpdates: MediaPlayerSettingClass[] = []
+  readonly representationSelections: Array<{ type: string, id: string, shouldSwitch: boolean }> = []
   representations: Representation[] = []
   resetCalls = 0
 
@@ -47,6 +48,10 @@ class FakeDashPlayer {
     return this.representations
   }
 
+  setRepresentationForTypeById(type: string, id: string, shouldSwitch: boolean): void {
+    this.representationSelections.push({ type, id, shouldSwitch })
+  }
+
   reset(): void {
     this.resetCalls += 1
   }
@@ -66,12 +71,14 @@ interface DashHarness {
 
 function dashHarness(options: {
   supported?: boolean
+  contentType?: 'vod' | 'long-form' | 'live'
   settings?: MediaPlayerSettingClass
   preset?: AdaptivePlaybackPreset
 } = {}): DashHarness {
   const audioElements: FakeAudioElement[] = []
   const dashPlayers: FakeDashPlayer[] = []
   const adapter = new DashAudioAdapterImpl({
+    contentType: options.contentType,
     settings: options.settings,
     preset: options.preset,
   }, {
@@ -80,12 +87,14 @@ function dashHarness(options: {
       audioElements.push(audioElement)
       return audioElement as unknown as HTMLAudioElement
     },
-    createDashPlayer: () => {
-      const dashPlayer = new FakeDashPlayer()
-      dashPlayers.push(dashPlayer)
-      return dashPlayer as unknown as MediaPlayerClass
-    },
-    events: dashEvents,
+    loadDashRuntime: () => ({
+      createDashPlayer: () => {
+        const dashPlayer = new FakeDashPlayer()
+        dashPlayers.push(dashPlayer)
+        return dashPlayer as unknown as MediaPlayerClass
+      },
+      events: dashEvents,
+    }),
     isDashSupported: () => options.supported ?? true,
   })
 
@@ -93,7 +102,7 @@ function dashHarness(options: {
 }
 
 async function loadDashEngine(harness: DashHarness) {
-  const engine = harness.adapter.createEngine()
+  const engine = await harness.adapter.createEngine()
   const load = engine.load(new HttpAudioSource('/stream.mpd'))
   await Promise.resolve()
   harness.audioElements[0].dispatchEvent(new Event('loadedmetadata'))
@@ -256,6 +265,60 @@ describe('dashAudioAdapter', () => {
     })
   })
 
+  it('applies the DASH long-form audio profile for extended playback', () => {
+    const settings = dashHarness({ contentType: 'long-form' }).adapter.getSettings()
+
+    expect(settings).toMatchObject({
+      streaming: {
+        buffer: {
+          bufferTimeDefault: 45,
+          bufferTimeAtTopQuality: 90,
+          bufferTimeAtTopQualityLongForm: 180,
+          bufferToKeep: 180,
+          longFormContentDurationThreshold: 120,
+        },
+        fragmentRequestTimeout: 60_000,
+        fragmentRequestProgressTimeout: 30_000,
+        retryAttempts: {
+          MediaSegment: 8,
+          InitializationSegment: 8,
+        },
+      },
+    })
+  })
+
+  it('applies the DASH live profile for latency catch-up and reconnects', () => {
+    const settings = dashHarness({ contentType: 'live' }).adapter.getSettings()
+
+    expect(settings).toMatchObject({
+      streaming: {
+        delay: {
+          useSuggestedPresentationDelay: true,
+          liveDelayFragmentCount: 4,
+        },
+        liveCatchup: {
+          enabled: true,
+          maxDrift: 12,
+          playbackRate: {
+            min: -0.1,
+            max: 0.1,
+          },
+        },
+        buffer: {
+          bufferTimeDefault: 6,
+          bufferTimeAtTopQuality: 12,
+          bufferToKeep: 45,
+        },
+        manifestRequestTimeout: 8_000,
+        fragmentRequestTimeout: 20_000,
+        retryAttempts: {
+          MPD: 10,
+          MediaSegment: 10,
+        },
+      },
+    })
+  })
+
   it('isolates DASH preset settings between adapters', () => {
     const firstSettings = dashHarness().adapter.getSettings() as {
       streaming?: { buffer?: { bufferTimeDefault?: number } }
@@ -285,13 +348,13 @@ describe('dashAudioAdapter', () => {
     expect(harness.adapter.dashInstance).toBeUndefined()
   })
 
-  it('rejects unsupported browsers', () => {
+  it('rejects unsupported browsers', async () => {
     const harness = dashHarness({ supported: false })
 
     expect(harness.adapter.isSupported()).toBe(false)
-    expect(() => harness.adapter.createEngine()).toThrowError(expect.objectContaining({
+    await expect(harness.adapter.createEngine()).rejects.toMatchObject({
       code: 'PROTOCOL_UNSUPPORTED',
-    }))
+    })
   })
 
   it('stores deeply merged settings and updates the active player', async () => {
@@ -353,7 +416,7 @@ describe('dashAudioAdapter', () => {
 
   it('translates manifest, quality, segment, and recoverable errors', async () => {
     const harness = dashHarness()
-    const engine = harness.adapter.createEngine()
+    const engine = await harness.adapter.createEngine()
     const manifests: AudioEngineEvents['manifestloaded'][] = []
     const variants: AudioEngineEvents['variantchange'][] = []
     const segmentStarts: AudioEngineEvents['segmentloadstart'][] = []
@@ -416,9 +479,65 @@ describe('dashAudioAdapter', () => {
     expect(fatalErrors).toEqual([])
   })
 
+  it('selects DASH variants through the unified adaptive quality API', async () => {
+    const harness = dashHarness()
+    const engine = await harness.adapter.createEngine()
+    const variantChanges: AudioEngineEvents['variantchange'][] = []
+    engine.on('variantchange', payload => variantChanges.push(payload))
+    const load = engine.load(new HttpAudioSource('/stream.mpd'))
+    await Promise.resolve()
+    const dashPlayer = harness.dashPlayers[0]
+    dashPlayer.representations = [
+      { id: 'audio-low', bandwidth: 64_000, codecs: 'mp4a.40.2' } as Representation,
+      { id: 'audio-high', bandwidth: 192_000, codecs: 'mp4a.40.2' } as Representation,
+    ]
+    dashPlayer.emit(dashEvents.STREAM_INITIALIZED, { error: null, streamInfo: { id: 'stream-1' } })
+    harness.audioElements.at(-1)?.dispatchEvent(new Event('loadedmetadata'))
+    await load
+
+    expect(engine.getAdaptiveVariants?.()).toEqual([
+      { id: 'audio-low', bitrate: 64_000, codecs: 'mp4a.40.2' },
+      { id: 'audio-high', bitrate: 192_000, codecs: 'mp4a.40.2' },
+    ])
+
+    await engine.setAdaptiveQuality?.('audio-high')
+
+    expect(dashPlayer.settingsUpdates.at(-1)).toMatchObject({
+      streaming: {
+        abr: {
+          autoSwitchBitrate: {
+            audio: false,
+          },
+        },
+      },
+    })
+    expect(dashPlayer.representationSelections).toEqual([
+      { type: 'audio', id: 'audio-high', shouldSwitch: true },
+    ])
+    expect(engine.getAdaptiveQualitySelection?.()).toBe('audio-high')
+    expect(variantChanges.at(-1)).toMatchObject({
+      variantId: 'audio-high',
+      bitrate: 192_000,
+      reason: 'manual',
+    })
+
+    await engine.setAdaptiveQuality?.('auto')
+
+    expect(engine.getAdaptiveQualitySelection?.()).toBe('auto')
+    expect(dashPlayer.settingsUpdates.at(-1)).toMatchObject({
+      streaming: {
+        abr: {
+          autoSwitchBitrate: {
+            audio: true,
+          },
+        },
+      },
+    })
+  })
+
   it('publishes fatal manifest errors', async () => {
     const harness = dashHarness()
-    const engine = harness.adapter.createEngine()
+    const engine = await harness.adapter.createEngine()
     const errorCodes: string[] = []
     engine.on('error', error => errorCodes.push(error.code))
     const load = engine.load(new HttpAudioSource('/stream.mpd'))
@@ -436,7 +555,7 @@ describe('dashAudioAdapter', () => {
 
   it('rejects manifest download failures as fatal errors', async () => {
     const harness = dashHarness()
-    const engine = harness.adapter.createEngine()
+    const engine = await harness.adapter.createEngine()
     const load = engine.load(new HttpAudioSource('/stream.mpd'))
     const loadExpectation = expect(load).rejects.toMatchObject({ code: 'MANIFEST_ERROR' })
     await Promise.resolve()

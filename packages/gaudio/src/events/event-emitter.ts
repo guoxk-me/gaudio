@@ -22,6 +22,23 @@ export class EventEmitter<Events extends object> {
   }
 
   /**
+   * Registers a listener that is removed after the next matching event.
+   *
+   * @param eventName Event to observe once.
+   * @param handler Listener invoked with the next event payload.
+   * @returns A function that removes this listener before it runs.
+   */
+  once<EventName extends keyof Events>(eventName: EventName, handler: EventHandler<Events[EventName]>): () => void {
+    const removeListener = this.on(eventName, (payload) => {
+      // AI modified: remove before invoking so re-entrant emits cannot call once listeners twice.
+      removeListener()
+      handler(payload)
+    })
+
+    return removeListener
+  }
+
+  /**
    * Removes a previously registered event listener.
    *
    * @param eventName Event associated with the listener.
@@ -45,13 +62,23 @@ export class EventEmitter<Events extends object> {
       return
     }
 
-    for (const handler of existingHandlers) {
+    // AI modified: snapshot listeners so re-entrant subscription changes affect only future emits.
+    for (const handler of [...existingHandlers]) {
       handler(payload)
     }
   }
 
-  /** Removes every registered listener. */
-  clear(): void {
+  /**
+   * Removes registered listeners.
+   *
+   * @param eventName Optional event name. When omitted, every listener is removed.
+   */
+  clear<EventName extends keyof Events>(eventName?: EventName): void {
+    if (eventName) {
+      this.handlers.delete(eventName)
+      return
+    }
+
     this.handlers.clear()
   }
 }

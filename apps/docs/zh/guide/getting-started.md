@@ -1,6 +1,6 @@
 # 快速开始
 
-gaudio 目前处于预发布阶段。公共 API 已有类型与文档，但首次正式发布前仍可能有主动调整。
+GAudio 目前处于预发布阶段。公共 API 已有类型与文档，但首次正式发布前仍可能有主动调整。
 
 ## 安装
 
@@ -175,6 +175,50 @@ player.setSource(signedSource)
 await player.load()
 ```
 
+## Source cookbook
+
+`HttpAudioSource` 有意保持为 URL 包装。它不会自行 fetch 媒体、附加自定义请求头、设置 `credentials`、刷新签名 URL，或重试过期 token。`open()` 返回 `{ url }` 后，真正的媒体请求由浏览器或自适应播放 engine 负责。
+
+当应用需要每次加载前刷新 URL 时，使用自定义 `AudioSource`：
+
+```ts
+interface SignedAudioUrl {
+  url: string
+  expiresAt: number
+}
+
+const signedProgramSource = {
+  kind: 'url' as const,
+  protocol: 'hls' as const,
+  mimeType: 'application/vnd.apple.mpegurl',
+  async open() {
+    const signedAudioUrl = await fetch('/api/audio-url', {
+      credentials: 'include',
+    }).then(async (response) => {
+      if (!response.ok) {
+        throw new Error('Failed to refresh audio URL')
+      }
+
+      return await response.json() as SignedAudioUrl
+    })
+
+    return { url: signedAudioUrl.url }
+  },
+  async close() {
+    // 在这里释放应用持有的租约或 object URL。
+  },
+}
+
+player.setSource(signedProgramSource)
+await player.load()
+```
+
+如果需要 bearer token 或自定义 headers，优先让应用后端返回短期签名 URL。普通 MP3/AAC/WAV/OGG 播放走原生 media element，浏览器不提供逐请求 header hook。如果 token 可能在 HLS 或 DASH 播放过程中失效，应在 `load()` 前刷新，或通过 `createHlsAdapter({ config })` / `createDashAdapter({ settings })` 使用所选 vendor 的请求 hook，因为 manifest 和 segment 请求发生在 source URL attach 之后。
+
+Cookie 鉴权需要把媒体放在浏览器可携带 credentials 的 origin 上，并正确配置 CORS。媒体响应必须允许应用所在 origin；带 credentials 的跨域请求不能使用通配符 `Access-Control-Allow-Origin`。
+
+Analyzer 还有额外的浏览器限制。跨域媒体可能能正常播放，但如果没有为 Web Audio 开启 CORS，浏览器仍可能返回静音的 analyzer 样本。需要 `analyzer: true` 时，请让媒体响应包含允许页面 origin 的 CORS headers，并在目标浏览器中验证 analyzer 路径。
+
 ## 浏览器能力
 
 使用 `canPlayType()` 检查原生媒体支持：
@@ -188,7 +232,7 @@ const aacSupport = player.canPlayType('audio/mp4; codecs="mp4a.40.2"')
 
 ## 自动播放行为
 
-gaudio 在 player 层管理 autoplay，而不是直接依赖 media element 的 `autoplay` 属性。启用 `autoplay` 后，`load()` 会在 metadata ready 后尝试播放：
+GAudio 在 player 层管理 autoplay，而不是直接依赖 media element 的 `autoplay` 属性。启用 `autoplay` 后，`load()` 会在 metadata ready 后尝试播放：
 
 ```ts
 player.setAutoplay(true)

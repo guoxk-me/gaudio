@@ -2,7 +2,7 @@ import process from 'node:process'
 import { defineConfig } from 'vitepress'
 
 export default defineConfig({
-  title: 'gaudio',
+  title: 'GAudio',
   description: 'A browser-first TypeScript audio streaming library.',
   lang: 'en-US',
   base: process.env.DOCS_BASE ?? '/gaudio/',
@@ -32,7 +32,7 @@ export default defineConfig({
     root: {
       label: 'English',
       lang: 'en-US',
-      title: 'gaudio',
+      title: 'GAudio',
       description: 'A browser-first TypeScript audio streaming library.',
       themeConfig: {
         nav: [
@@ -59,7 +59,7 @@ export default defineConfig({
       label: '简体中文',
       lang: 'zh-CN',
       link: '/zh/',
-      title: 'gaudio',
+      title: 'GAudio',
       description: '面向浏览器优先场景的 TypeScript 音频流库。',
       themeConfig: {
         nav: [

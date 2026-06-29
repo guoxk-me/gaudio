@@ -2,7 +2,7 @@
 layout: home
 
 hero:
-  name: gaudio
+  name: GAudio
   text: Browser-first audio streaming
   tagline: Pre-release TypeScript media playback with optional HLS and DASH adapters.
   actions:
@@ -23,3 +23,5 @@ features:
   - title: Player-owned analysis
     details: Enable frequency and waveform sampling through AudioPlayer configuration, or connect custom Web Audio graphs when your engine owns the signal.
 ---
+
+<HomeShowcase />

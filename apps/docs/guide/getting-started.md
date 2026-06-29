@@ -1,6 +1,6 @@
 # Getting Started
 
-gaudio is currently pre-release. The public API is typed and documented, but intentional API adjustments can still happen before the first official release.
+GAudio is currently pre-release. The public API is typed and documented, but intentional API adjustments can still happen before the first official release.
 
 ## Install
 
@@ -175,6 +175,50 @@ player.setSource(signedSource)
 await player.load()
 ```
 
+## Source cookbook
+
+`HttpAudioSource` is intentionally a URL wrapper. It does not fetch media itself, attach custom request headers, set `credentials`, refresh signed URLs, or retry expired tokens. The selected browser or adaptive engine owns the actual media requests after `open()` returns `{ url }`.
+
+Use a custom `AudioSource` when your app needs a fresh URL for every load:
+
+```ts
+interface SignedAudioUrl {
+  url: string
+  expiresAt: number
+}
+
+const signedProgramSource = {
+  kind: 'url' as const,
+  protocol: 'hls' as const,
+  mimeType: 'application/vnd.apple.mpegurl',
+  async open() {
+    const signedAudioUrl = await fetch('/api/audio-url', {
+      credentials: 'include',
+    }).then(async (response) => {
+      if (!response.ok) {
+        throw new Error('Failed to refresh audio URL')
+      }
+
+      return await response.json() as SignedAudioUrl
+    })
+
+    return { url: signedAudioUrl.url }
+  },
+  async close() {
+    // Release app-owned leases or object URLs here.
+  },
+}
+
+player.setSource(signedProgramSource)
+await player.load()
+```
+
+For bearer tokens or custom headers, prefer returning a short-lived signed URL from your application backend. Native media elements do not expose per-request header hooks for ordinary MP3/AAC/WAV/OGG playback. If a token can expire during active HLS or DASH playback, refresh it before calling `load()` or use the selected vendor's request hooks through `createHlsAdapter({ config })` or `createDashAdapter({ settings })`, because manifest and segment requests happen after the source URL is attached.
+
+For cookie-based auth, keep media on an origin that can receive the browser's credentials and configure CORS accordingly. The media response must allow the application origin, and credentialed cross-origin requests cannot use a wildcard `Access-Control-Allow-Origin`.
+
+Analyzer data has an extra browser restriction. Cross-origin media can play successfully but still produce silent analyzer samples unless the media is CORS-enabled for Web Audio use. When you need `analyzer: true`, serve media with CORS headers that allow the page origin and test the analyzer path in the target browsers.
+
 ## Browser capabilities
 
 Use `canPlayType()` for native media support:
@@ -188,7 +232,7 @@ It returns `''`, `'maybe'`, or `'probably'` using browser media semantics. HLS a
 
 ## Autoplay behavior
 
-gaudio manages autoplay at the player level instead of relying on the media element `autoplay` attribute. When `autoplay` is enabled, `load()` attempts playback after metadata is ready:
+GAudio manages autoplay at the player level instead of relying on the media element `autoplay` attribute. When `autoplay` is enabled, `load()` attempts playback after metadata is ready:
 
 ```ts
 player.setAutoplay(true)
