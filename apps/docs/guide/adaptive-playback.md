@@ -202,62 +202,40 @@ player.on('manifestloaded', ({ variants }) => {
 })
 
 player.on('variantchange', ({ variantId, bitrate, reason }) => {
-  console.log(variantId, bitrate, reason) // reason is 'initial' or 'automatic'
+  console.log(variantId, bitrate, reason) // reason is 'initial', 'automatic', or 'manual'
 })
 ```
 
 Native HLS can emit `adaptivechange`, but it does not expose vendor-level manifest, variant, segment, or recoverable-error details.
 
-## Manual quality experiments
+## Manual quality selection
 
-gaudio currently does not provide a unified public `setQuality()` API. Manual quality is vendor-specific and should be treated as an advanced integration through the exposed vendor instances.
-
-For `hls.js`, use the active `hlsInstance`:
+Use the player-level API after an HLS or DASH manifest loads:
 
 ```ts
-player.on('manifestloaded', ({ variants }) => {
-  const firstVariant = variants[0]
-  const levelIndex = hlsAdapter.hlsInstance?.levels.findIndex((level, index) => {
-    return String(level.id ?? index) === firstVariant.id
-  })
-
-  if (hlsAdapter.hlsInstance && levelIndex !== undefined && levelIndex >= 0) {
-    hlsAdapter.hlsInstance.nextLevel = levelIndex
+player.on('manifestloaded', async ({ variants }) => {
+  const preferredVariant = variants.at(-1)
+  if (!preferredVariant) {
+    return
   }
+
+  await player.setAdaptiveQuality(preferredVariant.id)
 })
 
 // Return to automatic ABR.
-hlsAdapter.hlsInstance!.loadLevel = -1
+await player.setAdaptiveQuality('auto')
 ```
 
-For dash.js, disable audio ABR and select a representation:
+Manual quality selection emits `variantchange` with `reason: 'manual'` when the vendor accepts the selected variant. Native HLS does not expose equivalent level controls, so manual selection can reject with `PROTOCOL_UNSUPPORTED` when the active implementation is browser-native.
+
+Advanced integrations can still inspect the active vendor instances:
 
 ```ts
-dashAdapter.updateSettings({
-  streaming: {
-    abr: {
-      autoSwitchBitrate: {
-        audio: false,
-      },
-    },
-  },
-})
-
-dashAdapter.dashInstance?.setRepresentationForTypeById('audio', 'representation-id', true)
-
-// Return to automatic ABR.
-dashAdapter.updateSettings({
-  streaming: {
-    abr: {
-      autoSwitchBitrate: {
-        audio: true,
-      },
-    },
-  },
-})
+hlsAdapter.hlsInstance
+dashAdapter.dashInstance
 ```
 
-The interactive demo exposes this as a quality selector after an HLS or DASH manifest loads. Manual controls are unavailable for native HLS because the browser does not expose equivalent level controls.
+The interactive demo exposes this as a quality selector after an HLS or DASH manifest loads.
 
 ## Runtime configuration updates
 

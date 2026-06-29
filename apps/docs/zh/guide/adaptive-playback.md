@@ -202,62 +202,40 @@ player.on('manifestloaded', ({ variants }) => {
 })
 
 player.on('variantchange', ({ variantId, bitrate, reason }) => {
-  console.log(variantId, bitrate, reason) // reason 是 'initial' 或 'automatic'
+  console.log(variantId, bitrate, reason) // reason 是 'initial'、'automatic' 或 'manual'
 })
 ```
 
 原生 HLS 可以发出 `adaptivechange`，但通常不暴露 vendor 级 manifest、variant、segment 或可恢复错误细节。
 
-## 手动音质实验
+## 手动音质选择
 
-gaudio 当前没有提供统一的公共 `setQuality()` API。手动音质是 vendor-specific 高级集成，应通过暴露的 vendor instance 使用。
-
-`hls.js` 可以使用 active `hlsInstance`：
+HLS 或 DASH manifest 加载后，可以使用 player 级 API：
 
 ```ts
-player.on('manifestloaded', ({ variants }) => {
-  const firstVariant = variants[0]
-  const levelIndex = hlsAdapter.hlsInstance?.levels.findIndex((level, index) => {
-    return String(level.id ?? index) === firstVariant.id
-  })
-
-  if (hlsAdapter.hlsInstance && levelIndex !== undefined && levelIndex >= 0) {
-    hlsAdapter.hlsInstance.nextLevel = levelIndex
+player.on('manifestloaded', async ({ variants }) => {
+  const preferredVariant = variants.at(-1)
+  if (!preferredVariant) {
+    return
   }
+
+  await player.setAdaptiveQuality(preferredVariant.id)
 })
 
 // 回到自动 ABR。
-hlsAdapter.hlsInstance!.loadLevel = -1
+await player.setAdaptiveQuality('auto')
 ```
 
-dash.js 可以关闭 audio ABR 后选择 representation：
+Vendor 接受指定 variant 后，手动音质选择会发出 `reason: 'manual'` 的 `variantchange`。原生 HLS 不暴露等价 level 控制，因此 active implementation 是浏览器原生 HLS 时，手动选择可能以 `PROTOCOL_UNSUPPORTED` 拒绝。
+
+高级集成仍然可以查看 active vendor instance：
 
 ```ts
-dashAdapter.updateSettings({
-  streaming: {
-    abr: {
-      autoSwitchBitrate: {
-        audio: false,
-      },
-    },
-  },
-})
-
-dashAdapter.dashInstance?.setRepresentationForTypeById('audio', 'representation-id', true)
-
-// 回到自动 ABR。
-dashAdapter.updateSettings({
-  streaming: {
-    abr: {
-      autoSwitchBitrate: {
-        audio: true,
-      },
-    },
-  },
-})
+hlsAdapter.hlsInstance
+dashAdapter.dashInstance
 ```
 
-交互 demo 在 HLS 或 DASH manifest 加载后会显示质量选择器。原生 HLS 无法手动控制，因为浏览器没有暴露等价 level 控制。
+交互 demo 在 HLS 或 DASH manifest 加载后会显示质量选择器。
 
 ## 运行时配置更新
 

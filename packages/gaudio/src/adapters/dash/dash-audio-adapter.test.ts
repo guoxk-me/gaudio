@@ -87,12 +87,14 @@ function dashHarness(options: {
       audioElements.push(audioElement)
       return audioElement as unknown as HTMLAudioElement
     },
-    createDashPlayer: () => {
-      const dashPlayer = new FakeDashPlayer()
-      dashPlayers.push(dashPlayer)
-      return dashPlayer as unknown as MediaPlayerClass
-    },
-    events: dashEvents,
+    loadDashRuntime: () => ({
+      createDashPlayer: () => {
+        const dashPlayer = new FakeDashPlayer()
+        dashPlayers.push(dashPlayer)
+        return dashPlayer as unknown as MediaPlayerClass
+      },
+      events: dashEvents,
+    }),
     isDashSupported: () => options.supported ?? true,
   })
 
@@ -100,7 +102,7 @@ function dashHarness(options: {
 }
 
 async function loadDashEngine(harness: DashHarness) {
-  const engine = harness.adapter.createEngine()
+  const engine = await harness.adapter.createEngine()
   const load = engine.load(new HttpAudioSource('/stream.mpd'))
   await Promise.resolve()
   harness.audioElements[0].dispatchEvent(new Event('loadedmetadata'))
@@ -346,13 +348,13 @@ describe('dashAudioAdapter', () => {
     expect(harness.adapter.dashInstance).toBeUndefined()
   })
 
-  it('rejects unsupported browsers', () => {
+  it('rejects unsupported browsers', async () => {
     const harness = dashHarness({ supported: false })
 
     expect(harness.adapter.isSupported()).toBe(false)
-    expect(() => harness.adapter.createEngine()).toThrowError(expect.objectContaining({
+    await expect(harness.adapter.createEngine()).rejects.toMatchObject({
       code: 'PROTOCOL_UNSUPPORTED',
-    }))
+    })
   })
 
   it('stores deeply merged settings and updates the active player', async () => {
@@ -414,7 +416,7 @@ describe('dashAudioAdapter', () => {
 
   it('translates manifest, quality, segment, and recoverable errors', async () => {
     const harness = dashHarness()
-    const engine = harness.adapter.createEngine()
+    const engine = await harness.adapter.createEngine()
     const manifests: AudioEngineEvents['manifestloaded'][] = []
     const variants: AudioEngineEvents['variantchange'][] = []
     const segmentStarts: AudioEngineEvents['segmentloadstart'][] = []
@@ -479,7 +481,7 @@ describe('dashAudioAdapter', () => {
 
   it('selects DASH variants through the unified adaptive quality API', async () => {
     const harness = dashHarness()
-    const engine = harness.adapter.createEngine()
+    const engine = await harness.adapter.createEngine()
     const variantChanges: AudioEngineEvents['variantchange'][] = []
     engine.on('variantchange', payload => variantChanges.push(payload))
     const load = engine.load(new HttpAudioSource('/stream.mpd'))
@@ -535,7 +537,7 @@ describe('dashAudioAdapter', () => {
 
   it('publishes fatal manifest errors', async () => {
     const harness = dashHarness()
-    const engine = harness.adapter.createEngine()
+    const engine = await harness.adapter.createEngine()
     const errorCodes: string[] = []
     engine.on('error', error => errorCodes.push(error.code))
     const load = engine.load(new HttpAudioSource('/stream.mpd'))
@@ -553,7 +555,7 @@ describe('dashAudioAdapter', () => {
 
   it('rejects manifest download failures as fatal errors', async () => {
     const harness = dashHarness()
-    const engine = harness.adapter.createEngine()
+    const engine = await harness.adapter.createEngine()
     const load = engine.load(new HttpAudioSource('/stream.mpd'))
     const loadExpectation = expect(load).rejects.toMatchObject({ code: 'MANIFEST_ERROR' })
     await Promise.resolve()

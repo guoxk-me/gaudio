@@ -11,7 +11,7 @@ export interface AudioEngineAdapter {
    * @returns An engine owned by the caller.
    * @throws `GAudioError` when the required playback implementation is unavailable.
    */
-  createEngine: () => AudioEngine
+  createEngine: () => AudioEngine | Promise<AudioEngine>
   /**
    * Checks whether the current browser supports this adapter.
    *

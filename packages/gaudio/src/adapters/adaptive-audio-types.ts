@@ -43,7 +43,7 @@ export interface AdaptiveManifestUpdate extends AdaptivePlaybackInfo {
   variants: readonly AdaptiveVariant[]
 }
 
-/** Reports an initial or automatic adaptive quality selection. */
+/** Reports an initial, automatic, or manual adaptive quality selection. */
 export interface AdaptiveVariantUpdate extends AdaptivePlaybackInfo {
   /** Previously selected variant identifier, when known. */
   previousVariantId?: string

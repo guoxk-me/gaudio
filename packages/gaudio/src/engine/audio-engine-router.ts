@@ -71,7 +71,7 @@ export class AudioEngineRouter implements AudioEngine {
 
   async load(source: AudioSource): Promise<void> {
     const protocol = resolveAudioProtocol(source)
-    const engine = this.engineForProtocol(protocol)
+    const engine = await this.engineForProtocol(protocol)
     await engine.load(source)
   }
 
@@ -253,7 +253,7 @@ export class AudioEngineRouter implements AudioEngine {
     this.events.clear()
   }
 
-  private engineForProtocol(protocol: AudioProtocol): AudioEngine {
+  private async engineForProtocol(protocol: AudioProtocol): Promise<AudioEngine> {
     if (this.activeEngine && this.activeProtocol === protocol) {
       return this.activeEngine
     }
@@ -270,7 +270,8 @@ export class AudioEngineRouter implements AudioEngine {
       if (!adapter.isSupported()) {
         throw new GAudioError('PROTOCOL_UNSUPPORTED', `${protocol.toUpperCase()} playback is not supported in this browser`)
       }
-      engine = adapter.createEngine()
+      // AI modified: DASH loads dash.js lazily so importing gaudio/dash is SSR-safe.
+      engine = await adapter.createEngine()
     }
 
     this.replaceActiveEngine(engine, protocol)

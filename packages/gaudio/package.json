@@ -3,6 +3,26 @@
   "type": "module",
   "version": "0.4.0",
   "description": "A browser-first TypeScript audio streaming library.",
+  "author": "guoxk",
+  "license": "MIT",
+  "homepage": "https://github.com/guoxk/gaudio#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/guoxk/gaudio.git"
+  },
+  "bugs": {
+    "url": "https://github.com/guoxk/gaudio/issues"
+  },
+  "keywords": [
+    "audio",
+    "streaming",
+    "hls",
+    "dash",
+    "browser",
+    "media",
+    "player",
+    "typescript"
+  ],
   "sideEffects": false,
   "exports": {
     ".": {
@@ -25,6 +45,7 @@
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "files": [
+    "LICENSE",
     "README.md",
     "dist"
   ],

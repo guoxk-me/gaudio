@@ -14,6 +14,14 @@ describe('package exports', () => {
     })
   })
 
+  it('imports the DASH entry point without browser globals', async () => {
+    const { createDashAdapter } = await import('./adapters/dash')
+    const dashAdapter = createDashAdapter()
+
+    expect(dashAdapter.protocol).toBe('dash')
+    expect(dashAdapter.isSupported()).toBe(false)
+  })
+
   it('publishes isolated HLS and DASH entry points with optional peers', async () => {
     const [packageJsonText, tsdownConfig, rootEntry] = await Promise.all([
       readFile(resolve(projectRoot, 'package.json'), 'utf8'),

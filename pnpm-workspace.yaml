@@ -1,3 +1,6 @@
 packages:
   - apps/*
   - packages/*
+allowBuilds:
+  # AI modified: esbuild needs its install script to provide platform binaries.
+  esbuild: true

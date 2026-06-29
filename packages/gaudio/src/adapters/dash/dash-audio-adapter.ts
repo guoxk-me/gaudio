@@ -44,9 +44,13 @@ export interface DashAudioAdapter extends AudioEngineAdapter {
 
 interface DashAdapterDependencies {
   audioElementFactory: () => HTMLAudioElement
+  loadDashRuntime: () => DashRuntime | Promise<DashRuntime>
+  isDashSupported: () => boolean
+}
+
+interface DashRuntime {
   createDashPlayer: () => MediaPlayerClass
   events: MediaPlayerEvents
-  isDashSupported: () => boolean
 }
 
 export class DashAudioAdapterImpl implements DashAudioAdapter {
@@ -73,17 +77,19 @@ export class DashAudioAdapterImpl implements DashAudioAdapter {
     return this.dependencies.isDashSupported()
   }
 
-  createEngine(): AudioEngine {
+  async createEngine(): Promise<AudioEngine> {
     if (!this.isSupported()) {
       throw new GAudioError('PROTOCOL_UNSUPPORTED', 'DASH playback is not supported in this browser')
     }
 
+    // AI modified: defer dash.js loading until playback uses the DASH adapter.
+    const dashRuntime = await this.dependencies.loadDashRuntime()
     const audioElement = this.dependencies.audioElementFactory()
     const engine = new DashAudioEngine({
       settings: structuredClone(this.settings),
       audioElement,
-      createDashPlayer: this.dependencies.createDashPlayer,
-      events: this.dependencies.events,
+      createDashPlayer: dashRuntime.createDashPlayer,
+      events: dashRuntime.events,
       onDashInstanceChange: (instance) => {
         if (this.activeEngine === engine) {
           this.dashInstance = instance
