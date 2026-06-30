@@ -122,7 +122,7 @@ player.on('streamerror', update => console.log(update.category, update.isFatal, 
 | `bitrate` | `number` | Declared bitrate in bits per second. |
 | `codecs` | `string \| undefined` | Codec declaration when the manifest exposes it. |
 
-`AdaptiveVariantUpdate.reason` is `'initial'` for the first selection and `'automatic'` for later ABR changes. Manual vendor-level quality changes can still arrive as vendor events, but GAudio does not currently standardize a manual reason.
+`AdaptiveVariantUpdate.reason` is `'initial'` for the first selection, `'automatic'` for later ABR changes, and `'manual'` when `setAdaptiveQuality()` selects a specific variant.
 
 Native HLS usually emits only `adaptivechange`; browser-native playback does not expose the same manifest, variant, segment, or recoverable-error details as `hls.js`.
 

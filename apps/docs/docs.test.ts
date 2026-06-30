@@ -51,12 +51,16 @@ describe('documentation application', () => {
     expect(chineseGuideFiles).not.toContain('migration.md')
     expect(englishGuideFiles).toEqual(expect.arrayContaining([
       'getting-started.md',
+      'configuration.md',
+      'recipes.md',
       'adaptive-playback.md',
       'events.md',
       'api-reference.md',
     ]))
     expect(chineseGuideFiles).toEqual(expect.arrayContaining([
       'getting-started.md',
+      'configuration.md',
+      'recipes.md',
       'adaptive-playback.md',
       'events.md',
       'api-reference.md',
@@ -102,5 +106,31 @@ describe('documentation application', () => {
     expect(chineseGuide).toContain('静音的 analyzer 样本')
     expect(englishApiReference).toContain('does not manage headers')
     expect(readme).toContain('does not attach headers')
+  })
+
+  it('documents complete configuration and scenario recipes in both languages', async () => {
+    const [englishConfiguration, chineseConfiguration, englishRecipes, chineseRecipes, englishEvents, chineseEvents] = await Promise.all([
+      readFile(resolve(docsRoot, 'guide/configuration.md'), 'utf8'),
+      readFile(resolve(docsRoot, 'zh/guide/configuration.md'), 'utf8'),
+      readFile(resolve(docsRoot, 'guide/recipes.md'), 'utf8'),
+      readFile(resolve(docsRoot, 'zh/guide/recipes.md'), 'utf8'),
+      readFile(resolve(docsRoot, 'guide/events.md'), 'utf8'),
+      readFile(resolve(docsRoot, 'zh/guide/events.md'), 'utf8'),
+    ])
+
+    expect(englishConfiguration).toContain('Player options')
+    expect(englishConfiguration).toContain('Media Session configuration')
+    expect(englishConfiguration).toContain('Adaptive adapter configuration')
+    expect(chineseConfiguration).toContain('Player 参数')
+    expect(chineseConfiguration).toContain('Media Session 配置')
+    expect(chineseConfiguration).toContain('自适应 adapter 配置')
+    expect(englishRecipes).toContain('Signed URL source')
+    expect(englishRecipes).toContain('Canvas spectrum visualizer')
+    expect(englishRecipes).toContain('Runtime adaptive tuning')
+    expect(chineseRecipes).toContain('签名 URL source')
+    expect(chineseRecipes).toContain('Canvas 频谱可视化')
+    expect(chineseRecipes).toContain('运行时自适应调优')
+    expect(englishEvents).toContain('manual')
+    expect(chineseEvents).toContain('manual')
   })
 })

@@ -46,6 +46,9 @@ export default defineConfig({
               text: 'Guide',
               items: [
                 { text: 'Getting Started', link: '/guide/getting-started' },
+                // AI modified: expose complete configuration and scenario examples from the guide sidebar.
+                { text: 'Configuration', link: '/guide/configuration' },
+                { text: 'Recipes', link: '/guide/recipes' },
                 { text: 'Adaptive Playback', link: '/guide/adaptive-playback' },
                 { text: 'Events', link: '/guide/events' },
                 { text: 'API Reference', link: '/guide/api-reference' },
@@ -73,6 +76,9 @@ export default defineConfig({
               text: '指南',
               items: [
                 { text: '快速开始', link: '/zh/guide/getting-started' },
+                // AI modified: expose complete configuration and scenario examples from the Chinese guide sidebar.
+                { text: '配置总览', link: '/zh/guide/configuration' },
+                { text: '场景示例', link: '/zh/guide/recipes' },
                 { text: '自适应播放', link: '/zh/guide/adaptive-playback' },
                 { text: '事件', link: '/zh/guide/events' },
                 { text: 'API 参考', link: '/zh/guide/api-reference' },
