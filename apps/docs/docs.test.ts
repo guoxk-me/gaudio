@@ -18,6 +18,8 @@ describe('documentation application', () => {
     }
     const typeDocConfig = JSON.parse(typeDocConfigText) as {
       entryFileName?: string
+      mergeReadme?: boolean
+      readme?: string
     }
 
     expect(packageJson.private).toBe(true)
@@ -36,15 +38,27 @@ describe('documentation application', () => {
     expect(vitePressConfig).not.toContain('Migration')
     expect(vitePressConfig).not.toContain('/guide/migration')
     expect(typeDocConfig.entryFileName).toBe('index')
+    expect(typeDocConfig.readme).toBe('api-overview.md')
+    expect(typeDocConfig.mergeReadme).toBe(true)
+  })
+
+  it('curates the generated API entry page', async () => {
+    const apiOverview = await readFile(resolve(docsRoot, 'api-overview.md'), 'utf8')
+
+    // AI modified: guard the TypeDoc overview source so /api/ stays useful after regeneration.
+    expect(apiOverview).toContain('## Start Here')
+    expect(apiOverview).toContain('AudioPlayer')
+    expect(apiOverview).toContain('Adaptive Playback')
+    expect(apiOverview).toContain('gaudio/hls')
+    expect(apiOverview).toContain('gaudio/dash')
   })
 
   it('ships bilingual guide pages without migration documentation', async () => {
-    const [englishGuideFiles, chineseGuideFiles, englishHome, chineseHome, homeShowcase] = await Promise.all([
+    const [englishGuideFiles, chineseGuideFiles, englishHome, chineseHome] = await Promise.all([
       readdir(resolve(docsRoot, 'guide')),
       readdir(resolve(docsRoot, 'zh/guide')),
       readFile(resolve(docsRoot, 'index.md'), 'utf8'),
       readFile(resolve(docsRoot, 'zh/index.md'), 'utf8'),
-      readFile(resolve(docsRoot, '.vitepress/theme/components/HomeShowcase.vue'), 'utf8'),
     ])
 
     expect(englishGuideFiles).not.toContain('migration.md')
@@ -66,10 +80,16 @@ describe('documentation application', () => {
       'api-reference.md',
     ]))
     expect(englishHome).toContain('Pre-release')
-    expect(englishHome).toContain('<HomeShowcase />')
-    expect(homeShowcase).toContain('Core playback in one object')
-    expect(homeShowcase).toContain('setAdaptiveQuality')
+    // AI modified: keep the home page focused on the library capability surface.
+    expect(englishHome).toContain('Capability Map')
+    expect(englishHome).toContain('Source lifecycle')
+    expect(englishHome).toContain('Adaptive delivery')
+    expect(englishHome).toContain('<HomeMiniPlayer />')
     expect(chineseHome).toContain('预发布')
+    expect(chineseHome).toContain('能力地图')
+    expect(chineseHome).toContain('Source 生命周期')
+    expect(chineseHome).toContain('自适应分发')
+    expect(chineseHome).toContain('<HomeMiniPlayer />')
   })
 
   it('documents adaptive content types in both languages', async () => {

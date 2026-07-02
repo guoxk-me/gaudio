@@ -2,6 +2,8 @@ export interface DemoTrack {
   id: string
   title: string
   artist: string
+  coverThumb: string
+  coverFile: string
 }
 
 export interface DemoFormatGroup {
@@ -11,9 +13,36 @@ export interface DemoFormatGroup {
   mimeType: string
 }
 
+// AI modified: docs use generated original samples to avoid third-party music rights.
 export const demoTracks: DemoTrack[] = [
-  // AI modified: use a clear demo-facing artist label instead of exposing missing source metadata.
-  { id: 'pineapple-slice', title: 'Pineapple Slice Instrumental', artist: 'GAudio sample' },
+  {
+    id: 'aurora-loop',
+    title: 'Aurora Loop',
+    artist: 'GAudio original',
+    coverThumb: 'aurora-loop.webp',
+    coverFile: 'aurora-loop.png',
+  },
+  {
+    id: 'city-lantern',
+    title: 'City Lantern',
+    artist: 'GAudio original',
+    coverThumb: 'city-lantern.webp',
+    coverFile: 'city-lantern.png',
+  },
+  {
+    id: 'signal-bloom',
+    title: 'Signal Bloom',
+    artist: 'GAudio original',
+    coverThumb: 'signal-bloom.webp',
+    coverFile: 'signal-bloom.png',
+  },
+  {
+    id: 'warm-current',
+    title: 'Warm Current',
+    artist: 'GAudio original',
+    coverThumb: 'warm-current.webp',
+    coverFile: 'warm-current.png',
+  },
 ]
 
 export const demoFormatGroups: DemoFormatGroup[] = [
@@ -27,6 +56,14 @@ export const demoFormatGroups: DemoFormatGroup[] = [
 
 export function demoSampleUrl(formatFolder: string, trackId: string, extension: string): string {
   return `${import.meta.env.BASE_URL}audio/${formatFolder}/${trackId}${extension}`
+}
+
+export function demoCoverThumbUrl(coverThumb: string): string {
+  return `${import.meta.env.BASE_URL}cover/thumbs/${coverThumb}`
+}
+
+export function demoCoverArtUrl(coverFile: string): string {
+  return `${import.meta.env.BASE_URL}cover/${encodeURIComponent(coverFile)}`
 }
 
 export function findDemoTrack(trackId: string): DemoTrack {

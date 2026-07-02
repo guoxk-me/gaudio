@@ -7,3 +7,5 @@ overrides:
 allowBuilds:
   # AI modified: esbuild needs its install script to provide platform binaries.
   esbuild: true
+  # AI modified: vue-demi needs its postinstall bridge for Vue 3 consumers.
+  vue-demi: true

@@ -27,6 +27,23 @@ pnpm add gaudio dashjs
 
 The root entry does not import `hls.js` or `dashjs`.
 
+## Capability map
+
+GAudio combines a small high-level player with lower-level escape hatches for audio-heavy applications:
+
+| Capability | APIs to reach for |
+| --- | --- |
+| Native browser playback | `AudioPlayer`, `MediaElementAudioEngine`, `canPlayType()`, `getBufferedRanges()`, `getSeekableRanges()`, `getPlayedRanges()` |
+| Product playback controls | `load()`, `play()`, `pause()`, `stop()`, `seek()`, `fastSeek()`, volume, mute, loop, autoplay, preload, playback-rate, and pitch-preservation APIs |
+| Queue and catalog flows | `setPlaylist()`, `next()`, `previous()`, `fallbackSources`, `metadata`, `audioTracks`, and `selectAudioTrack()` |
+| Source ownership | URL strings, `AudioSourceDescription`, `HttpAudioSource`, `BlobAudioSource`, and custom lazy `AudioSource` objects with `open()` and `close()` |
+| System media controls | `mediaSession`, `setMediaSessionMetadata()`, browser action handlers, headset controls, keyboard media keys, and lock-screen metadata where supported |
+| Visualization and metering | `analyzer: true`, `getAnalyzer()`, `AudioAnalyzer`, frequency data, waveform data, and custom analyzer factories |
+| Adaptive audio streaming | `createHlsAdapter()`, `createDashAdapter()`, `AdaptivePlaybackPreset`, `contentType`, manifest events, segment events, variant events, and `setAdaptiveQuality()` |
+| Observability and cleanup | Typed `AudioPlayerEvents`, `once()`, `removeAllListeners()`, `GAudioError` codes, active source inspection, active protocol inspection, and `dispose()` |
+
+Core-only applications can stay on the root `gaudio` import. Adaptive applications opt into `gaudio/hls` or `gaudio/dash` so vendor code and configuration stay out of native-media bundles.
+
 ## Quick start
 
 ```ts
