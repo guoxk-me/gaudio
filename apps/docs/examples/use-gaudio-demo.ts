@@ -10,6 +10,8 @@ import {
   defaultDemoFormatFolder,
   defaultDemoSampleUrl,
   defaultDemoTrackId,
+  demoCoverArtUrl,
+  demoCoverThumbUrl,
   demoFormatGroups,
   demoSampleUrl,
   demoTracks,
@@ -144,6 +146,8 @@ export function useGaudioDemo() {
     activeTrack.value.id,
     activeFormatGroup.value.extension,
   ))
+  const activeCoverThumbUrl = computed(() => demoCoverThumbUrl(activeTrack.value.coverThumb))
+  const activeCoverArtUrl = computed(() => demoCoverArtUrl(activeTrack.value.coverFile))
   const adaptiveQualityChoices = computed<AdaptiveQualityChoice[]>(() => [
     { id: automaticQualitySelection, label: 'Automatic ABR' },
     ...adaptiveVariants.value.map(variant => ({
@@ -417,6 +421,13 @@ export function useGaudioDemo() {
         title: track.title,
         artist: track.artist,
         album: 'GAudio demo',
+        artwork: [
+          {
+            src: demoCoverArtUrl(track.coverFile),
+            sizes: '512x512',
+            type: 'image/png',
+          },
+        ],
       })
       player.setSource(sourceUrl.value)
       await player.load()
@@ -611,6 +622,11 @@ export function useGaudioDemo() {
     })
   }
 
+  async function selectAdaptiveQuality(adaptiveQualityId: string): Promise<void> {
+    adaptiveQualitySelection.value = adaptiveQualityId
+    await applyAdaptiveQualitySelection()
+  }
+
   async function runAnalyzerPreview(): Promise<void> {
     await withBusyControls(async () => {
       const analyzer = playerAnalyzer()
@@ -687,7 +703,8 @@ export function useGaudioDemo() {
 
   onMounted(async () => {
     hlsAdapter = createHlsAdapter({
-      playbackStrategy: 'native-first',
+      // AI modified: prefer hls.js in the demo so HLS variants can be inspected and selected manually.
+      playbackStrategy: 'hls-first',
       preset: AdaptivePlaybackPreset.Balanced,
     })
     dashAdapter = createDashAdapter({ preset: AdaptivePlaybackPreset.Balanced })
@@ -736,9 +753,12 @@ export function useGaudioDemo() {
     demoTracks,
     demoFormatGroups,
     activeTrack,
+    activeFormatFolder,
     activeFormatGroup,
     activeSampleLabel,
     activeSamplePath,
+    activeCoverThumbUrl,
+    activeCoverArtUrl,
     playerState,
     adaptiveImplementationLabel,
     adaptiveVariantLabel,
@@ -801,6 +821,7 @@ export function useGaudioDemo() {
     applyHlsConfigUpdate,
     applyDashSettingsUpdate,
     applyAdaptiveQualitySelection,
+    selectAdaptiveQuality,
     playerAnalyzer,
     runAnalyzerPreview,
     runEventEmitterPreview,

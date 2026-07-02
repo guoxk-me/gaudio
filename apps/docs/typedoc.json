@@ -11,7 +11,8 @@
   "tsconfig": "../../packages/gaudio/tsconfig.json",
   "out": "api",
   "entryFileName": "index",
-  "readme": "none",
+  "readme": "api-overview.md",
+  "mergeReadme": true,
   "cleanOutputDir": true,
   "excludeInternal": true,
   "intentionallyNotExported": [

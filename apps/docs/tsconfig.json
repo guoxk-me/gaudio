@@ -16,10 +16,19 @@
     "strict": true,
     "noEmit": true,
     "isolatedModules": true,
-    "skipLibCheck": true
+    "skipLibCheck": true,
+    "ignoreDeprecations": "6.0",
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./*"]
+    }
   },
   "include": [
     ".vitepress/**/*.ts",
+    ".vitepress/**/*.vue",
+    "components/**/*.ts",
+    "components/**/*.vue",
+    "lib/**/*.ts",
     "examples/**/*.ts",
     "examples/**/*.vue",
     "*.test.ts"

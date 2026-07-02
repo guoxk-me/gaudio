@@ -3,8 +3,50 @@ export type DemoLocale = 'en' | 'zh'
 export const demoText = {
   en: {
     intro: 'Load bundled samples, external URLs, explicit source objects, HLS, and DASH streams through the public GAudio API.',
+    studio: {
+      eyebrow: 'Interactive showcase',
+      title: 'GAudio Player Studio',
+      subtitle: 'A product-style player surface that exercises the full public API: playback, sources, playlists, Media Session, adaptive streaming, analyzer visualization, typed events, and utility previews.',
+      library: 'Library',
+      libraryHint: 'Switch bundled tracks and delivery formats.',
+      nowPlaying: 'Now playing',
+      featureDeck: 'API feature deck',
+      featureMapTitle: 'Public API coverage',
+      featureMapHint: 'Every tab maps to documented package exports used by real applications.',
+      featureHighlights: [
+        'AudioPlayer',
+        'AudioSource inputs',
+        'Playlist + Media Session',
+        'HLS / DASH adapters',
+        'Adaptive quality',
+        'AudioAnalyzer',
+        'EventEmitter',
+        'GAudioError',
+      ],
+      tabs: {
+        source: 'Source',
+        playlist: 'Playlist & utilities',
+        adaptive: 'Adaptive',
+        live: 'Live telemetry',
+      },
+    },
+    panels: {
+      advancedTitle: 'Advanced source controls',
+      advancedDescription: 'Protocol overrides, source modes, preload, and manual quality selection.',
+      inspectorTitle: 'Developer inspector',
+      inspectorDescription: 'Live player telemetry, event log, and API coverage utilities.',
+      statusTab: 'Status',
+      eventsTab: 'Events',
+      apiTab: 'API',
+    },
+    homeMini: {
+      ariaLabel: 'GAudio homepage mini player',
+      kicker: 'Try the library',
+      openFullDemo: 'Open interactive demo',
+      loading: 'Loading sample…',
+    },
     catalog: {
-      ariaLabel: 'Local sample catalog',
+      ariaLabel: 'Sample track catalog',
       bundledSample: 'Bundled sample',
       previous: 'Previous',
       next: 'Next',
@@ -58,6 +100,15 @@ export const demoText = {
         quality: 'Quality',
         segment: 'Segment',
       },
+    },
+    adaptiveQuality: {
+      ariaLabel: 'Adaptive bitrate controls',
+      kicker: 'Adaptive delivery',
+      title: 'Adaptive bitrate',
+      options: 'Bitrate choices',
+      currentBitrate: 'Current bitrate',
+      variants: 'Available variants',
+      waiting: 'Waiting for HLS or DASH manifest',
     },
     visualizer: {
       ariaLabel: 'Audio analyzer visualization',
@@ -115,8 +166,50 @@ export const demoText = {
   },
   zh: {
     intro: '通过 GAudio 公共 API 加载内置样例、外部 URL、显式 Source 对象、HLS 与 DASH 流。',
+    studio: {
+      eyebrow: '交互式展示',
+      title: 'GAudio Player Studio',
+      subtitle: '以产品级播放器界面完整演示公共 API：播放控制、Source 输入、Playlist、Media Session、自适应流、Analyzer 可视化、类型化事件与工具预览。',
+      library: '曲库',
+      libraryHint: '切换内置曲目与分发格式。',
+      nowPlaying: '正在播放',
+      featureDeck: 'API 功能面板',
+      featureMapTitle: '公共 API 覆盖',
+      featureMapHint: '每个 Tab 都对应文档中的 package 导出，可直接映射到真实应用集成。',
+      featureHighlights: [
+        'AudioPlayer',
+        'AudioSource 输入',
+        'Playlist + Media Session',
+        'HLS / DASH adapter',
+        'Adaptive quality',
+        'AudioAnalyzer',
+        'EventEmitter',
+        'GAudioError',
+      ],
+      tabs: {
+        source: 'Source',
+        playlist: 'Playlist 与工具',
+        adaptive: 'Adaptive',
+        live: '实时遥测',
+      },
+    },
+    panels: {
+      advancedTitle: '高级 Source 控制',
+      advancedDescription: '协议覆盖、Source 模式、预加载与手动音质选择。',
+      inspectorTitle: '开发者 Inspector',
+      inspectorDescription: '实时播放器遥测、事件日志与 API 覆盖工具。',
+      statusTab: '状态',
+      eventsTab: '事件',
+      apiTab: 'API',
+    },
+    homeMini: {
+      ariaLabel: 'GAudio 首页迷你播放器',
+      kicker: '立即体验',
+      openFullDemo: '打开完整交互 Demo',
+      loading: '正在加载样例…',
+    },
     catalog: {
-      ariaLabel: '本地样例目录',
+      ariaLabel: '样例曲目目录',
       bundledSample: '内置样例',
       previous: '上一首',
       next: '下一首',
@@ -170,6 +263,15 @@ export const demoText = {
         quality: '音质',
         segment: '分段',
       },
+    },
+    adaptiveQuality: {
+      ariaLabel: '自适应码率控制',
+      kicker: '自适应分发',
+      title: '自适应码率',
+      options: '码率选项',
+      currentBitrate: '当前码率',
+      variants: '可用档位',
+      waiting: '等待 HLS 或 DASH manifest',
     },
     visualizer: {
       ariaLabel: '音频分析可视化',
@@ -229,6 +331,39 @@ export const demoText = {
 
 export interface DemoText {
   intro: string
+  studio: {
+    eyebrow: string
+    title: string
+    subtitle: string
+    library: string
+    libraryHint: string
+    nowPlaying: string
+    featureDeck: string
+    featureMapTitle: string
+    featureMapHint: string
+    featureHighlights: string[]
+    tabs: {
+      source: string
+      playlist: string
+      adaptive: string
+      live: string
+    }
+  }
+  panels: {
+    advancedTitle: string
+    advancedDescription: string
+    inspectorTitle: string
+    inspectorDescription: string
+    statusTab: string
+    eventsTab: string
+    apiTab: string
+  }
+  homeMini: {
+    ariaLabel: string
+    kicker: string
+    openFullDemo: string
+    loading: string
+  }
   catalog: {
     ariaLabel: string
     bundledSample: string
@@ -284,6 +419,15 @@ export interface DemoText {
       quality: string
       segment: string
     }
+  }
+  adaptiveQuality: {
+    ariaLabel: string
+    kicker: string
+    title: string
+    options: string
+    currentBitrate: string
+    variants: string
+    waiting: string
   }
   visualizer: {
     ariaLabel: string

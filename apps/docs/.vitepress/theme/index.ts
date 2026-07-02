@@ -1,12 +1,13 @@
 import type { Theme } from 'vitepress'
 import DefaultTheme from 'vitepress/theme'
-import HomeShowcase from './components/HomeShowcase.vue'
+import '../../assets/css/demo-ui.css'
 import './custom.css'
+import HomeMiniPlayer from './components/HomeMiniPlayer.vue'
 
-// AI modified: registers the custom home showcase used by the Markdown landing page.
+// AI modified: register demo UI styles and the homepage mini player showcase.
 export default {
   extends: DefaultTheme,
   enhanceApp({ app }) {
-    app.component('HomeShowcase', HomeShowcase)
+    app.component('HomeMiniPlayer', HomeMiniPlayer)
   },
 } satisfies Theme
