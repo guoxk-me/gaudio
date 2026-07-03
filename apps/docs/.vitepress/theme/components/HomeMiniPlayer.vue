@@ -2,11 +2,11 @@
 import { Pause, Play } from '@lucide/vue'
 import { useData, withBase } from 'vitepress'
 import { computed } from 'vue'
-import { demoLocaleForLang, demoText } from '../../../examples/demo-i18n'
-import { useHomeMiniPlayer } from '../composables/use-home-mini-player'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
+import { demoLocaleForLang, demoText } from '../../../examples/demo-i18n'
+import { useHomeMiniPlayer } from '../composables/use-home-mini-player'
 
 const { lang } = useData()
 const text = computed(() => demoText[demoLocaleForLang(lang.value)].homeMini)

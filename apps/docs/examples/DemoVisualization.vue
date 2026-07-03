@@ -271,8 +271,12 @@ onUnmounted(() => {
         :class="index > 0 ? 'border-l' : ''"
         :style="index > 0 ? { borderColor: 'var(--gaudio-studio-border)' } : undefined"
       >
-        <dt class="text-[11px] font-semibold tracking-wide uppercase" style="color: var(--gaudio-studio-text-muted)">{{ summary.label }}</dt>
-        <dd class="font-mono text-xs" style="color: var(--gaudio-studio-text)">{{ summary.value }}</dd>
+        <dt class="text-[11px] font-semibold tracking-wide uppercase" style="color: var(--gaudio-studio-text-muted)">
+          {{ summary.label }}
+        </dt>
+        <dd class="font-mono text-xs" style="color: var(--gaudio-studio-text)">
+          {{ summary.value }}
+        </dd>
       </div>
     </dl>
   </section>

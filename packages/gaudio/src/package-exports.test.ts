@@ -22,11 +22,20 @@ describe('package exports', () => {
     expect(dashAdapter.isSupported()).toBe(false)
   })
 
+  it('imports the HLS entry point without browser globals', async () => {
+    const { createHlsAdapter } = await import('./adapters/hls')
+    const hlsAdapter = createHlsAdapter()
+
+    expect(hlsAdapter.protocol).toBe('hls')
+  })
+
   it('publishes isolated HLS and DASH entry points with optional peers', async () => {
-    const [packageJsonText, tsdownConfig, rootEntry] = await Promise.all([
+    const [packageJsonText, tsdownConfig, rootEntry, hlsEntry, hlsEngine] = await Promise.all([
       readFile(resolve(projectRoot, 'package.json'), 'utf8'),
       readFile(resolve(projectRoot, 'tsdown.config.ts'), 'utf8'),
       readFile(resolve(projectRoot, 'src/index.ts'), 'utf8'),
+      readFile(resolve(projectRoot, 'src/adapters/hls/index.ts'), 'utf8'),
+      readFile(resolve(projectRoot, 'src/adapters/hls/hls-audio-engine.ts'), 'utf8'),
     ])
     const packageJson = JSON.parse(packageJsonText) as {
       exports: Record<string, unknown>
@@ -44,5 +53,8 @@ describe('package exports', () => {
     expect(tsdownConfig).toContain('dash: \'src/adapters/dash/index.ts\'')
     expect(rootEntry).not.toContain('from \'hls.js\'')
     expect(rootEntry).not.toContain('from \'dashjs\'')
+    expect(hlsEntry).toContain('import(\'hls.js\')')
+    expect(hlsEntry).not.toContain('import Hls from \'hls.js\'')
+    expect(hlsEngine).not.toContain('import { ErrorTypes, Events } from \'hls.js\'')
   })
 })

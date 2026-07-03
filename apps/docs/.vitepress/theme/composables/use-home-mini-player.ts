@@ -23,7 +23,6 @@ export function useHomeMiniPlayer() {
   const playerState = shallowRef('idle')
 
   const coverThumbUrl = computed(() => demoCoverThumbUrl(defaultTrack.coverThumb))
-  const coverArtUrl = computed(() => demoCoverArtUrl(defaultTrack.coverFile))
 
   function syncPlaybackFlags(): void {
     isPaused.value = player.isPaused()

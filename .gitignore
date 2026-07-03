@@ -3,6 +3,9 @@ node_modules
 dist
 demo/dist
 .turbo
+# AI modified: keep local Playwright artifacts out of release commits.
+output
+test-results
 apps/docs/.vitepress/cache
 apps/docs/.vitepress/dist
 apps/docs/api
