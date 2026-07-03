@@ -17,17 +17,25 @@ import type {
   AdaptiveStreamError,
   AdaptiveVariant,
 } from '../adaptive-audio-types'
-import { ErrorTypes, Events } from 'hls.js'
 import { MediaElementAudioEngine } from '../../engine/media-element-audio-engine'
 import { GAudioError } from '../../errors/errors'
 
+type HlsEvents = typeof import('hls.js').Events
+type HlsErrorTypes = typeof import('hls.js').ErrorTypes
+
 export type HlsPlaybackImplementation = 'native' | 'hls.js'
+
+export interface HlsEngineRuntime {
+  createHls: (config: Partial<HlsConfig>) => Hls
+  events: HlsEvents
+  errorTypes: HlsErrorTypes
+}
 
 interface HlsAudioEngineOptions {
   implementation: HlsPlaybackImplementation
   config: Partial<HlsConfig>
   audioElement: HTMLAudioElement
-  createHls: (config: Partial<HlsConfig>) => Hls
+  hlsRuntime?: HlsEngineRuntime
   onHlsInstanceChange: (instance: Hls | undefined) => void
   onDispose: () => void
 }
@@ -39,7 +47,7 @@ export interface HlsReloadOptions {
 
 export class HlsAudioEngine extends MediaElementAudioEngine {
   private readonly implementation: HlsPlaybackImplementation
-  private readonly createHls: (config: Partial<HlsConfig>) => Hls
+  private readonly hlsRuntime?: HlsEngineRuntime
   private readonly onHlsInstanceChange: (instance: Hls | undefined) => void
   private readonly onDispose: () => void
   private config: Partial<HlsConfig>
@@ -55,7 +63,7 @@ export class HlsAudioEngine extends MediaElementAudioEngine {
     super(options.audioElement)
     this.implementation = options.implementation
     this.config = options.config
-    this.createHls = options.createHls
+    this.hlsRuntime = options.hlsRuntime
     this.onHlsInstanceChange = options.onHlsInstanceChange
     this.onDispose = options.onDispose
   }
@@ -179,14 +187,19 @@ export class HlsAudioEngine extends MediaElementAudioEngine {
   }
 
   private createHlsInstance(url: string): void {
-    const hls = this.createHls(this.config)
+    if (!this.hlsRuntime) {
+      throw new GAudioError('PROTOCOL_UNSUPPORTED', 'hls.js runtime is unavailable')
+    }
+
+    const hls = this.hlsRuntime.createHls(this.config)
+    const events = this.hlsRuntime.events
     this.hls = hls
     this.onHlsInstanceChange(hls)
-    hls.on(Events.MANIFEST_LOADED, this.handleManifestLoaded)
-    hls.on(Events.LEVEL_SWITCHED, this.handleLevelSwitched)
-    hls.on(Events.FRAG_LOADING, this.handleFragmentLoading)
-    hls.on(Events.FRAG_LOADED, this.handleFragmentLoaded)
-    hls.on(Events.ERROR, this.handleHlsError)
+    hls.on(events.MANIFEST_LOADED, this.handleManifestLoaded)
+    hls.on(events.LEVEL_SWITCHED, this.handleLevelSwitched)
+    hls.on(events.FRAG_LOADING, this.handleFragmentLoading)
+    hls.on(events.FRAG_LOADED, this.handleFragmentLoaded)
+    hls.on(events.ERROR, this.handleHlsError)
     hls.attachMedia(this.audioElement)
     hls.loadSource(url)
   }
@@ -226,7 +239,7 @@ export class HlsAudioEngine extends MediaElementAudioEngine {
     })
   }
 
-  private readonly handleManifestLoaded = (_event: Events.MANIFEST_LOADED, payload: ManifestLoadedData): void => {
+  private readonly handleManifestLoaded = (_event: HlsEvents['MANIFEST_LOADED'], payload: ManifestLoadedData): void => {
     this.adaptiveVariants = payload.levels.map((level, index) => ({
       id: String(level.id ?? index),
       bitrate: level.bitrate,
@@ -241,7 +254,7 @@ export class HlsAudioEngine extends MediaElementAudioEngine {
     })
   }
 
-  private readonly handleLevelSwitched = (_event: Events.LEVEL_SWITCHED, payload: LevelSwitchedData): void => {
+  private readonly handleLevelSwitched = (_event: HlsEvents['LEVEL_SWITCHED'], payload: LevelSwitchedData): void => {
     const variantId = String(payload.level)
     const level = this.hls?.levels[payload.level]
     this.events.emit('variantchange', {
@@ -255,7 +268,7 @@ export class HlsAudioEngine extends MediaElementAudioEngine {
     this.previousVariantId = variantId
   }
 
-  private readonly handleFragmentLoading = (_event: Events.FRAG_LOADING, payload: FragLoadingData): void => {
+  private readonly handleFragmentLoading = (_event: HlsEvents['FRAG_LOADING'], payload: FragLoadingData): void => {
     this.events.emit('segmentloadstart', {
       protocol: 'hls',
       implementation: 'hls.js',
@@ -265,7 +278,7 @@ export class HlsAudioEngine extends MediaElementAudioEngine {
     })
   }
 
-  private readonly handleFragmentLoaded = (_event: Events.FRAG_LOADED, payload: FragLoadedData): void => {
+  private readonly handleFragmentLoaded = (_event: HlsEvents['FRAG_LOADED'], payload: FragLoadedData): void => {
     this.events.emit('segmentloaded', {
       protocol: 'hls',
       implementation: 'hls.js',
@@ -275,7 +288,7 @@ export class HlsAudioEngine extends MediaElementAudioEngine {
     })
   }
 
-  private readonly handleHlsError = (_event: Events.ERROR, payload: ErrorData): void => {
+  private readonly handleHlsError = (_event: HlsEvents['ERROR'], payload: ErrorData): void => {
     const streamError: AdaptiveStreamError = {
       protocol: 'hls',
       implementation: 'hls.js',
@@ -303,10 +316,10 @@ export class HlsAudioEngine extends MediaElementAudioEngine {
     if (payload.details.includes('frag')) {
       return 'segment'
     }
-    if (payload.type === ErrorTypes.NETWORK_ERROR) {
+    if (this.hlsRuntime && payload.type === this.hlsRuntime.errorTypes.NETWORK_ERROR) {
       return 'network'
     }
-    if (payload.type === ErrorTypes.MEDIA_ERROR) {
+    if (this.hlsRuntime && payload.type === this.hlsRuntime.errorTypes.MEDIA_ERROR) {
       return 'media'
     }
     return 'other'
