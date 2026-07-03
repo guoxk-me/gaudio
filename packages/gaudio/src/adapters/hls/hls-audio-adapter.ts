@@ -5,6 +5,7 @@ import type { HlsConfig, LoaderConfig, RetryConfig } from 'hls.js'
 import type { AudioEngine } from '../../engine/audio-engine'
 import type { AudioEngineAdapter } from '../../engine/audio-engine-adapter'
 import type { AdaptiveContentType } from '../adaptive-audio-types'
+import type { HlsEngineRuntime, HlsPlaybackImplementation } from './hls-audio-engine'
 import { GAudioError } from '../../errors/errors'
 import { AdaptivePlaybackPreset } from '../adaptive-audio-types'
 import { settingsWithChanges } from '../settings-with-changes'
@@ -97,10 +98,14 @@ export interface HlsAudioAdapter extends AudioEngineAdapter {
   updateConfig: (config: HlsAdapterConfig, options?: HlsConfigUpdateOptions) => Promise<void>
 }
 
+export interface HlsAdapterRuntime extends HlsEngineRuntime {
+  isSupported: () => boolean
+}
+
 interface HlsAdapterDependencies {
   audioElementFactory: () => HTMLAudioElement
-  createHls: (config: Partial<HlsConfig>) => Hls
-  isHlsSupported: () => boolean
+  loadHlsRuntime: () => Promise<HlsAdapterRuntime>
+  hasHlsRuntimeSupport: () => boolean
 }
 
 export class HlsAudioAdapterImpl implements HlsAudioAdapter {
@@ -130,18 +135,39 @@ export class HlsAudioAdapterImpl implements HlsAudioAdapter {
     return this.selectImplementation(false) !== undefined
   }
 
-  createEngine(): AudioEngine {
+  async createEngine(): Promise<AudioEngine> {
     const implementation = this.selectImplementation(true)
     if (!implementation) {
       throw new GAudioError('PROTOCOL_UNSUPPORTED', 'HLS playback is not supported in this browser')
     }
 
+    if (implementation === 'native') {
+      return this.createAudioEngine('native')
+    }
+
+    // AI modified: load hls.js only after HLS playback chooses the vendor runtime.
+    const hlsRuntime = await this.dependencies.loadHlsRuntime()
+    if (hlsRuntime.isSupported()) {
+      return this.createAudioEngine('hls.js', hlsRuntime)
+    }
+
+    if (this.playbackStrategy === 'hls-first' && this.supportsNativeHls()) {
+      return this.createAudioEngine('native')
+    }
+
+    throw new GAudioError('PROTOCOL_UNSUPPORTED', `HLS strategy ${this.playbackStrategy} is not supported in this browser`)
+  }
+
+  private createAudioEngine(
+    implementation: HlsPlaybackImplementation,
+    hlsRuntime?: HlsEngineRuntime,
+  ): AudioEngine {
     const audioElement = this.dependencies.audioElementFactory()
     const engine = new HlsAudioEngine({
       implementation,
       config: settingsWithChanges<Partial<HlsConfig>>({}, this.config),
       audioElement,
-      createHls: this.dependencies.createHls,
+      hlsRuntime,
       onHlsInstanceChange: (instance) => {
         if (this.activeEngine === engine) {
           this.hlsInstance = instance
@@ -180,7 +206,7 @@ export class HlsAudioAdapterImpl implements HlsAudioAdapter {
 
   private selectImplementation(shouldThrow: boolean): 'native' | 'hls.js' | undefined {
     const nativeSupported = this.supportsNativeHls()
-    const hlsSupported = this.dependencies.isHlsSupported()
+    const hlsSupported = this.dependencies.hasHlsRuntimeSupport()
 
     switch (this.playbackStrategy) {
       case 'native-first':

@@ -6,8 +6,12 @@
       "DOM",
       "DOM.Iterable"
     ],
+    "baseUrl": ".",
     "module": "ESNext",
     "moduleResolution": "Bundler",
+    "paths": {
+      "@/*": ["./*"]
+    },
     "resolveJsonModule": true,
     "types": [
       "node",
@@ -17,11 +21,7 @@
     "noEmit": true,
     "isolatedModules": true,
     "skipLibCheck": true,
-    "ignoreDeprecations": "6.0",
-    "baseUrl": ".",
-    "paths": {
-      "@/*": ["./*"]
-    }
+    "ignoreDeprecations": "6.0"
   },
   "include": [
     ".vitepress/**/*.ts",

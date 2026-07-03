@@ -51,18 +51,21 @@ interface AdapterHarness {
   adapter: HlsAudioAdapterImpl
   audioElements: FakeAudioElement[]
   hlsInstances: FakeHls[]
+  hlsRuntimeLoadCalls: () => number
 }
 
 function adapterHarness(options: {
   strategy?: 'native-first' | 'hls-first' | 'native-only' | 'hls-only'
   nativeSupport?: CanPlayTypeResult
   hlsSupport?: boolean
+  mediaSourceSupport?: boolean
   config?: HlsAdapterConfig
   contentType?: 'vod' | 'long-form' | 'live'
   preset?: AdaptivePlaybackPreset
 } = {}): AdapterHarness {
   const audioElements: FakeAudioElement[] = []
   const hlsInstances: FakeHls[] = []
+  let hlsRuntimeLoadCalls = 0
   const adapter = new HlsAudioAdapterImpl({
     playbackStrategy: options.strategy,
     config: options.config,
@@ -74,19 +77,32 @@ function adapterHarness(options: {
       audioElements.push(audioElement)
       return audioElement as unknown as HTMLAudioElement
     },
-    createHls: (config) => {
-      const hls = new FakeHls(config)
-      hlsInstances.push(hls)
-      return hls as unknown as Hls
+    loadHlsRuntime: async () => {
+      hlsRuntimeLoadCalls += 1
+      return {
+        createHls: (config) => {
+          const hls = new FakeHls(config)
+          hlsInstances.push(hls)
+          return hls as unknown as Hls
+        },
+        events: Events,
+        errorTypes: ErrorTypes,
+        isSupported: () => options.hlsSupport ?? true,
+      }
     },
-    isHlsSupported: () => options.hlsSupport ?? true,
+    hasHlsRuntimeSupport: () => options.mediaSourceSupport ?? options.hlsSupport ?? true,
   })
 
-  return { adapter, audioElements, hlsInstances }
+  return {
+    adapter,
+    audioElements,
+    hlsInstances,
+    hlsRuntimeLoadCalls: () => hlsRuntimeLoadCalls,
+  }
 }
 
 async function loadEngine(harness: AdapterHarness, url = '/stream.m3u8') {
-  const engine = harness.adapter.createEngine()
+  const engine = await harness.adapter.createEngine()
   const load = engine.load(new HttpAudioSource(url))
   await Promise.resolve()
   harness.audioElements.at(-1)?.dispatchEvent(new Event('loadedmetadata'))
@@ -298,20 +314,45 @@ describe('hlsAudioAdapter', () => {
     expect(harness.adapter.hlsInstance).toBeUndefined()
   })
 
+  it('does not load hls.js runtime for native-first native playback', async () => {
+    const harness = adapterHarness({ strategy: 'native-first', nativeSupport: 'probably' })
+
+    await loadEngine(harness)
+
+    expect(harness.hlsRuntimeLoadCalls()).toBe(0)
+    expect(harness.hlsInstances).toHaveLength(0)
+    expect(harness.adapter.implementation).toBe('native')
+  })
+
+  it('falls back to native playback when hls-first runtime support fails', async () => {
+    const harness = adapterHarness({
+      strategy: 'hls-first',
+      nativeSupport: 'probably',
+      mediaSourceSupport: true,
+      hlsSupport: false,
+    })
+
+    await loadEngine(harness)
+
+    expect(harness.hlsRuntimeLoadCalls()).toBe(1)
+    expect(harness.hlsInstances).toHaveLength(0)
+    expect(harness.adapter.implementation).toBe('native')
+  })
+
   it.each([
     ['native-only', '', true],
     ['hls-only', 'probably', false],
-  ] as const)('rejects unsupported %s playback', (strategy, nativeSupport, hlsSupport) => {
+  ] as const)('rejects unsupported %s playback', async (strategy, nativeSupport, hlsSupport) => {
     const harness = adapterHarness({ strategy, nativeSupport, hlsSupport })
 
-    expect(() => harness.adapter.createEngine()).toThrowError(expect.objectContaining({
+    await expect(harness.adapter.createEngine()).rejects.toMatchObject({
       code: 'PROTOCOL_UNSUPPORTED',
-    }))
+    })
   })
 
   it('translates manifest, variant, segment, and recoverable error events', async () => {
     const harness = adapterHarness({ strategy: 'hls-only' })
-    const engine = harness.adapter.createEngine()
+    const engine = await harness.adapter.createEngine()
     const manifests: AudioEngineEvents['manifestloaded'][] = []
     const variants: AudioEngineEvents['variantchange'][] = []
     const segmentStarts: AudioEngineEvents['segmentloadstart'][] = []
@@ -412,7 +453,7 @@ describe('hlsAudioAdapter', () => {
     [ErrorDetails.BUFFER_APPEND_ERROR, 'ADAPTIVE_STREAM_ERROR'],
   ] as const)('publishes fatal %s errors as %s', async (details, errorCode) => {
     const harness = adapterHarness({ strategy: 'hls-only' })
-    const engine = harness.adapter.createEngine()
+    const engine = await harness.adapter.createEngine()
     const errorCodes: string[] = []
     engine.on('error', error => errorCodes.push(error.code))
     const load = engine.load(new HttpAudioSource('/stream.m3u8'))

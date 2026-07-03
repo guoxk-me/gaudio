@@ -43,10 +43,12 @@ test('interactive audio demo renders the playable surface', async ({ page }) => 
   await sampleCatalog.getByRole('button', { name: /Signal Bloom/ }).click()
   await expect(page.getByRole('heading', { name: 'Signal Bloom' })).toBeVisible()
 
+  // AI modified: select HLS before opening Adaptive because changing format remounts the tab panel.
+  await page.locator('.gaudio-studio').getByRole('button', { name: 'HLS', exact: true }).click()
+  await expect(page.locator('.gaudio-studio')).toContainText('hls / hls.js')
   await page.getByRole('tab', { name: 'Adaptive' }).click()
   const adaptiveControls = page.getByRole('region', { name: 'Adaptive' })
   await expect(adaptiveControls).toBeVisible()
-  await page.locator('.gaudio-studio').getByRole('button', { name: 'HLS', exact: true }).click()
   const manualQualityOption = adaptiveControls.locator('button, [role="radio"]').filter({ hasText: /kbps/ }).first()
   await expect.poll(async () => manualQualityOption.count()).toBeGreaterThan(0)
   await manualQualityOption.click()

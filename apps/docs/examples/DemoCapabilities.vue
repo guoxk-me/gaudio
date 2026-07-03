@@ -49,8 +49,12 @@ const capabilityRows = computed(() => props.text.capabilities.apiCoverage)
         </thead>
         <tbody>
           <tr v-for="[api, demoSurface] in capabilityRows" :key="api" class="border-t border-border">
-            <td class="px-3 py-3 font-mono text-xs font-semibold">{{ api }}</td>
-            <td class="px-3 py-3" style="color: var(--gaudio-studio-text-muted)">{{ demoSurface }}</td>
+            <td class="px-3 py-3 font-mono text-xs font-semibold">
+              {{ api }}
+            </td>
+            <td class="px-3 py-3" style="color: var(--gaudio-studio-text-muted)">
+              {{ demoSurface }}
+            </td>
           </tr>
         </tbody>
       </table>
@@ -67,7 +71,9 @@ const capabilityRows = computed(() => props.text.capabilities.apiCoverage)
           <dl class="grid gap-3 text-sm">
             <template v-for="browserSupportRow in browserSupportRows" :key="browserSupportRow.mimeType">
               <div class="grid gap-1">
-                <dt class="text-muted-foreground font-medium">{{ browserSupportRow.label }}</dt>
+                <dt class="text-muted-foreground font-medium">
+                  {{ browserSupportRow.label }}
+                </dt>
                 <dd>
                   <span>{{ browserSupportRow.support }}</span>
                   <small class="text-muted-foreground block font-mono text-xs">{{ browserSupportRow.mimeType }}</small>
@@ -88,7 +94,9 @@ const capabilityRows = computed(() => props.text.capabilities.apiCoverage)
           <dl class="grid gap-3 text-sm">
             <template v-for="adapterDiagnosticRow in adapterDiagnosticRows" :key="adapterDiagnosticRow.label">
               <div class="grid gap-1">
-                <dt class="text-muted-foreground font-medium">{{ adapterDiagnosticRow.label }}</dt>
+                <dt class="text-muted-foreground font-medium">
+                  {{ adapterDiagnosticRow.label }}
+                </dt>
                 <dd>{{ adapterDiagnosticRow.value }}</dd>
               </div>
             </template>
@@ -113,35 +121,51 @@ const capabilityRows = computed(() => props.text.capabilities.apiCoverage)
         <CardContent class="flex flex-col gap-4">
           <dl class="grid gap-3 text-sm md:grid-cols-2">
             <div class="grid gap-1">
-              <dt class="text-muted-foreground font-medium">{{ text.capabilities.sourceLifecycle }}</dt>
+              <dt class="text-muted-foreground font-medium">
+                {{ text.capabilities.sourceLifecycle }}
+              </dt>
               <dd>{{ sourceLifecycleLabel }}</dd>
             </div>
             <div class="grid gap-1">
-              <dt class="text-muted-foreground font-medium">{{ text.capabilities.playlist }}</dt>
+              <dt class="text-muted-foreground font-medium">
+                {{ text.capabilities.playlist }}
+              </dt>
               <dd>{{ playlistStatus }}</dd>
             </div>
             <div class="grid gap-1">
-              <dt class="text-muted-foreground font-medium">{{ text.capabilities.mediaSession }}</dt>
+              <dt class="text-muted-foreground font-medium">
+                {{ text.capabilities.mediaSession }}
+              </dt>
               <dd>{{ mediaSessionStatus }}</dd>
             </div>
             <div class="grid gap-1">
-              <dt class="text-muted-foreground font-medium">{{ text.capabilities.analyzer }}</dt>
+              <dt class="text-muted-foreground font-medium">
+                {{ text.capabilities.analyzer }}
+              </dt>
               <dd>{{ analyzerStatus }}</dd>
             </div>
             <div class="grid gap-1">
-              <dt class="text-muted-foreground font-medium">{{ text.capabilities.frequency }}</dt>
+              <dt class="text-muted-foreground font-medium">
+                {{ text.capabilities.frequency }}
+              </dt>
               <dd>{{ frequencyPreview }}</dd>
             </div>
             <div class="grid gap-1">
-              <dt class="text-muted-foreground font-medium">{{ text.capabilities.waveform }}</dt>
+              <dt class="text-muted-foreground font-medium">
+                {{ text.capabilities.waveform }}
+              </dt>
               <dd>{{ waveformPreview }}</dd>
             </div>
             <div class="grid gap-1">
-              <dt class="text-muted-foreground font-medium">{{ text.capabilities.eventEmitter }}</dt>
+              <dt class="text-muted-foreground font-medium">
+                {{ text.capabilities.eventEmitter }}
+              </dt>
               <dd>{{ eventEmitterStatus }}</dd>
             </div>
             <div class="grid gap-1">
-              <dt class="text-muted-foreground font-medium">{{ text.capabilities.error }}</dt>
+              <dt class="text-muted-foreground font-medium">
+                {{ text.capabilities.error }}
+              </dt>
               <dd>{{ errorPreviewStatus }}</dd>
             </div>
           </dl>
