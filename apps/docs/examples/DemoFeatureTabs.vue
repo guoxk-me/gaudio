@@ -16,6 +16,7 @@ import {
 } from '@/components/ui/select'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
+import { demoStatusForDisplay } from './demo-i18n'
 import DemoCapabilities from './DemoCapabilities.vue'
 import DemoStatus from './DemoStatus.vue'
 
@@ -35,17 +36,25 @@ const {
   applyDashSettingsUpdate,
   applyHlsConfigUpdate,
   browserSupportRows,
+  canUseBlobSource,
+  canNavigateToNextPlaylistTrack,
+  canNavigateToPreviousPlaylistTrack,
+  canSelectAlternateAudioTrack,
   isBusy,
   isLooping,
   loadSource,
   mediaSessionStatus,
+  operationError,
   playlistStatus,
   preload,
+  previousPreviewPlaylistTrack,
   protocolOverride,
   runAnalyzerPreview,
   runErrorPreview,
   runEventEmitterPreview,
   runPlaylistPreview,
+  nextPreviewPlaylistTrack,
+  selectAlternateAudioTrackPreview,
   selectAdaptiveQuality,
   setAutoplay,
   setLoop,
@@ -81,17 +90,27 @@ const preloadOptions = [
 ]
 
 const sourceModeOptions = computed(() => [
-  { value: 'url-string', label: props.text.controls.sourceModes.urlString },
-  { value: 'source-description', label: props.text.controls.sourceModes.sourceDescription },
-  { value: 'http-source', label: props.text.controls.sourceModes.httpSource },
-  { value: 'blob-source', label: props.text.controls.sourceModes.blobSource },
-  { value: 'custom-source', label: props.text.controls.sourceModes.customSource },
+  { value: 'url-string', label: props.text.controls.sourceModes.urlString, disabled: false },
+  { value: 'source-description', label: props.text.controls.sourceModes.sourceDescription, disabled: false },
+  { value: 'http-source', label: props.text.controls.sourceModes.httpSource, disabled: false },
+  {
+    value: 'blob-source',
+    label: canUseBlobSource.value
+      ? props.text.controls.sourceModes.blobSource
+      : `${props.text.controls.sourceModes.blobSource} — ${props.text.controls.sourceModes.blobSourceSingleFileOnly}`,
+    disabled: !canUseBlobSource.value,
+  },
+  { value: 'custom-source', label: props.text.controls.sourceModes.customSource, disabled: false },
 ])
 
 const qualityOptions = computed(() => adaptiveQualityChoices.value.map(qualityChoice => ({
   value: qualityChoice.id,
   label: qualityChoice.id === 'auto' ? props.text.controls.automaticQuality : qualityChoice.label,
 })))
+
+const playlistStatusLabel = computed(() => demoStatusForDisplay(playlistStatus.value, props.text))
+const mediaSessionStatusLabel = computed(() => demoStatusForDisplay(mediaSessionStatus.value, props.text))
+const sourceLifecycleStatusLabel = computed(() => demoStatusForDisplay(sourceLifecycleLabel.value, props.text))
 
 function updateLoop(checked: boolean | 'indeterminate'): void {
   isLooping.value = checked === true
@@ -110,8 +129,25 @@ function updatePreservePitch(checked: boolean | 'indeterminate'): void {
 </script>
 
 <template>
-  <section class="gaudio-studio__features" :aria-label="text.studio.featureDeck">
+  <!-- AI modified: announce long-running demo actions while preserving the tab component's control-only role. -->
+  <p class="sr-only" role="status" aria-live="polite" aria-atomic="true">
+    {{ isBusy ? text.controls.operationPending : '' }}
+  </p>
+  <section
+    class="gaudio-studio__features"
+    :aria-label="text.studio.featureDeck"
+    :aria-busy="isBusy"
+  >
     <!-- AI modified: API controls now share the studio grid instead of rendering as a detached card. -->
+    <p
+      v-if="operationError"
+      role="alert"
+      class="mb-3 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm"
+      style="color: var(--gaudio-studio-text)"
+    >
+      <strong>{{ text.controls.operationError }}:</strong>
+      {{ operationError }}
+    </p>
     <Tabs default-value="source" class="gap-3">
       <TabsList class="gaudio-studio__feature-tabs">
         <TabsTrigger value="source" class="flex-none text-xs sm:text-sm">
@@ -128,10 +164,11 @@ function updatePreservePitch(checked: boolean | 'indeterminate'): void {
         </TabsTrigger>
       </TabsList>
 
-      <TabsContent value="source" role="region" aria-label="Source" class="gaudio-studio__panel gaudio-studio__source-panel mt-0">
+      <!-- AI modified: retain Reka tabpanel semantics and associate visible labels with each form control. -->
+      <TabsContent value="source" class="gaudio-studio__panel gaudio-studio__source-panel mt-0">
         <div class="gaudio-studio__source-summary">
           <div class="min-w-0">
-            <strong class="block truncate text-sm" style="color: var(--gaudio-studio-text)">{{ activeSampleLabel }}</strong>
+            <strong class="block truncate text-sm" style="color: var(--gaudio-studio-text)">{{ activeSampleLabel ?? text.catalog.manualSource }}</strong>
             <code class="block truncate text-[11px]" style="color: var(--gaudio-studio-text-muted)">{{ activeSamplePath }}</code>
           </div>
         </div>
@@ -139,13 +176,13 @@ function updatePreservePitch(checked: boolean | 'indeterminate'): void {
         <div class="gaudio-studio__field-grid">
           <div class="gaudio-studio__field gaudio-studio__field--wide">
             <Label for="source-url" style="color: var(--gaudio-studio-text)">{{ text.controls.sourceUrl }}</Label>
-            <Input id="source-url" v-model="sourceUrl" type="url" autocomplete="off" />
+            <Input id="source-url" v-model="sourceUrl" name="source-url" type="url" autocomplete="off" :spellcheck="false" :disabled="isBusy" />
           </div>
 
           <div class="gaudio-studio__field">
-            <Label style="color: var(--gaudio-studio-text)">{{ text.controls.protocol }}</Label>
-            <Select v-model="protocolOverride">
-              <SelectTrigger class="w-full">
+            <Label for="studio-protocol" style="color: var(--gaudio-studio-text)">{{ text.controls.protocol }}</Label>
+            <Select v-model="protocolOverride" :disabled="isBusy">
+              <SelectTrigger id="studio-protocol" class="w-full">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -159,14 +196,19 @@ function updatePreservePitch(checked: boolean | 'indeterminate'): void {
           </div>
 
           <div class="gaudio-studio__field">
-            <Label style="color: var(--gaudio-studio-text)">{{ text.controls.sourceMode }}</Label>
-            <Select v-model="sourceMode">
-              <SelectTrigger class="w-full">
+            <Label for="studio-source-mode" style="color: var(--gaudio-studio-text)">{{ text.controls.sourceMode }}</Label>
+            <Select v-model="sourceMode" :disabled="isBusy">
+              <SelectTrigger id="studio-source-mode" class="w-full">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
                 <SelectGroup>
-                  <SelectItem v-for="option in sourceModeOptions" :key="option.value" :value="option.value">
+                  <SelectItem
+                    v-for="option in sourceModeOptions"
+                    :key="option.value"
+                    :value="option.value"
+                    :disabled="option.disabled"
+                  >
                     {{ option.label }}
                   </SelectItem>
                 </SelectGroup>
@@ -175,9 +217,9 @@ function updatePreservePitch(checked: boolean | 'indeterminate'): void {
           </div>
 
           <div class="gaudio-studio__field">
-            <Label style="color: var(--gaudio-studio-text)">{{ text.controls.quality }}</Label>
+            <Label for="studio-audio-quality" style="color: var(--gaudio-studio-text)">{{ text.controls.quality }}</Label>
             <Select v-model="adaptiveQualitySelection" :disabled="isBusy" @update:model-value="applyAdaptiveQualitySelection">
-              <SelectTrigger class="w-full">
+              <SelectTrigger id="studio-audio-quality" class="w-full">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -191,9 +233,9 @@ function updatePreservePitch(checked: boolean | 'indeterminate'): void {
           </div>
 
           <div class="gaudio-studio__field">
-            <Label style="color: var(--gaudio-studio-text)">{{ text.controls.preload }}</Label>
-            <Select v-model="preload" @update:model-value="setPreload">
-              <SelectTrigger class="w-full">
+            <Label for="studio-preload" style="color: var(--gaudio-studio-text)">{{ text.controls.preload }}</Label>
+            <Select v-model="preload" :disabled="isBusy" @update:model-value="setPreload">
+              <SelectTrigger id="studio-preload" class="w-full">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -234,25 +276,52 @@ function updatePreservePitch(checked: boolean | 'indeterminate'): void {
           <div class="gaudio-studio__stat-card">
             <span class="text-xs font-semibold uppercase" style="color: var(--gaudio-studio-text-muted)">{{ text.capabilities.playlist }}</span>
             <p class="text-sm" style="color: var(--gaudio-studio-text)">
-              {{ playlistStatus }}
+              {{ playlistStatusLabel }}
             </p>
           </div>
           <div class="gaudio-studio__stat-card">
             <span class="text-xs font-semibold uppercase" style="color: var(--gaudio-studio-text-muted)">{{ text.capabilities.mediaSession }}</span>
             <p class="text-sm" style="color: var(--gaudio-studio-text)">
-              {{ mediaSessionStatus }}
+              {{ mediaSessionStatusLabel }}
             </p>
           </div>
           <div class="gaudio-studio__stat-card">
             <span class="text-xs font-semibold uppercase" style="color: var(--gaudio-studio-text-muted)">{{ text.capabilities.sourceLifecycle }}</span>
             <p class="text-sm" style="color: var(--gaudio-studio-text)">
-              {{ sourceLifecycleLabel }}
+              {{ sourceLifecycleStatusLabel }}
             </p>
           </div>
         </div>
         <div class="mt-3 flex flex-wrap gap-2">
           <Button variant="outline" size="sm" class="gaudio-studio__action-button" :disabled="isBusy" @click="runPlaylistPreview">
             {{ text.capabilities.runPlaylist }}
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            class="gaudio-studio__action-button"
+            :disabled="isBusy || !canSelectAlternateAudioTrack"
+            @click="selectAlternateAudioTrackPreview"
+          >
+            {{ text.capabilities.selectAlternateAudio }}
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            class="gaudio-studio__action-button"
+            :disabled="isBusy || !canNavigateToPreviousPlaylistTrack"
+            @click="previousPreviewPlaylistTrack"
+          >
+            {{ text.capabilities.previousPlaylistTrack }}
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            class="gaudio-studio__action-button"
+            :disabled="isBusy || !canNavigateToNextPlaylistTrack"
+            @click="nextPreviewPlaylistTrack"
+          >
+            {{ text.capabilities.nextPlaylistTrack }}
           </Button>
           <Button variant="outline" size="sm" class="gaudio-studio__action-button" :disabled="isBusy" @click="runAnalyzerPreview">
             {{ text.capabilities.runAnalyzer }}
@@ -266,11 +335,12 @@ function updatePreservePitch(checked: boolean | 'indeterminate'): void {
         </div>
       </TabsContent>
 
-      <TabsContent value="adaptive" role="region" aria-label="Adaptive" class="gaudio-studio__panel gaudio-studio__panel-scroll mt-0 flex flex-col gap-3">
+      <TabsContent value="adaptive" class="gaudio-studio__panel gaudio-studio__panel-scroll mt-0 flex flex-col gap-3">
         <ToggleGroup
           type="single"
           variant="outline"
           class="gaudio-studio__segmented flex flex-wrap justify-start"
+          :aria-label="text.adaptiveQuality.ariaLabel"
           :model-value="adaptiveQualitySelection"
           @update:model-value="(value) => value && typeof value === 'string' && selectAdaptiveQuality(value)"
         >
@@ -295,7 +365,7 @@ function updatePreservePitch(checked: boolean | 'indeterminate'): void {
               {{ row.label }}
             </p>
             <p class="text-xs" style="color: var(--gaudio-studio-text-muted)">
-              {{ row.support }} · {{ row.mimeType }}
+              {{ demoStatusForDisplay(row.support, text) }} · {{ row.mimeType }}
             </p>
           </div>
         </div>
@@ -303,10 +373,10 @@ function updatePreservePitch(checked: boolean | 'indeterminate'): void {
         <div class="grid gap-2 sm:grid-cols-2">
           <div v-for="row in adapterDiagnosticRows" :key="row.label" class="gaudio-studio__stat-card">
             <p class="text-xs uppercase" style="color: var(--gaudio-studio-text-muted)">
-              {{ row.label }}
+              {{ demoStatusForDisplay(row.label, text) }}
             </p>
             <p class="font-mono text-xs" style="color: var(--gaudio-studio-text)">
-              {{ row.value }}
+              {{ demoStatusForDisplay(row.value, text) }}
             </p>
           </div>
         </div>
@@ -321,7 +391,7 @@ function updatePreservePitch(checked: boolean | 'indeterminate'): void {
         </div>
       </TabsContent>
 
-      <TabsContent value="live" role="region" :aria-label="text.status.ariaLabel" class="gaudio-studio__panel gaudio-studio__panel-scroll mt-0">
+      <TabsContent value="live" class="gaudio-studio__panel gaudio-studio__panel-scroll mt-0">
         <Tabs default-value="status" class="gap-2">
           <TabsList class="gaudio-studio__segmented h-auto flex-wrap justify-start">
             <TabsTrigger value="status" class="flex-none text-xs sm:text-sm">

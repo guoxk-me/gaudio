@@ -5,7 +5,7 @@ import type { DemoFormatGroup, DemoTrack } from './demo-samples'
 import { AdaptivePlaybackPreset, AudioPlayer, BlobAudioSource, EventEmitter, GAudioError, HttpAudioSource } from 'gaudio'
 import { createDashAdapter } from 'gaudio/dash'
 import { createHlsAdapter } from 'gaudio/hls'
-import { computed, onMounted, onUnmounted, shallowRef } from 'vue'
+import { computed, onMounted, onUnmounted, shallowRef, watch } from 'vue'
 import {
   defaultDemoFormatFolder,
   defaultDemoSampleUrl,
@@ -15,11 +15,10 @@ import {
   demoFormatGroups,
   demoSampleUrl,
   demoTracks,
-  findDemoFormatGroup,
-  findDemoTrack,
 } from './demo-samples'
 
-const seekRangeMax = 1000
+// AI modified: one keyboard slider step now advances one percent of the active timeline.
+const seekRangeMax = 100
 const automaticQualitySelection = 'auto'
 
 type ProtocolOverride = 'auto' | AudioProtocol
@@ -43,6 +42,23 @@ interface AdaptiveQualityChoice {
 
 interface DemoEmitterEvents {
   preview: string
+}
+
+export interface DemoEventEntry {
+  id: number
+  message: string
+  timestamp: number
+}
+
+interface DemoSourceRequest {
+  sourceMode: DemoSourceMode
+  sourceUrl: string
+  protocolOverride: ProtocolOverride
+}
+
+interface DemoCatalogSelection {
+  formatGroup: DemoFormatGroup
+  track: DemoTrack
 }
 
 function secondsForDisplay(seconds: number): string {
@@ -83,6 +99,71 @@ function sourceProtocol(protocolOverride: ProtocolOverride): AudioProtocol | und
   return protocolOverride === 'auto' ? undefined : protocolOverride
 }
 
+function mimeTypeForSource(sourceUrl: string, protocol: AudioProtocol | undefined): string | undefined {
+  if (protocol === 'hls') {
+    return 'application/vnd.apple.mpegurl'
+  }
+
+  if (protocol === 'dash') {
+    return 'application/dash+xml'
+  }
+
+  const sourcePath = sourceUrl.split(/[?#]/)[0].toLowerCase()
+  if (sourcePath.endsWith('.m3u')) {
+    // AI modified: legacy HLS playlist URLs need the same HTTP-only handling as .m3u8 manifests.
+    return 'application/vnd.apple.mpegurl'
+  }
+
+  return demoFormatGroups.find(formatGroup => sourcePath.endsWith(formatGroup.extension))?.mimeType
+}
+
+function isAdaptiveSource(protocol: AudioProtocol | undefined, mimeType: string | undefined): boolean {
+  const mediaType = mimeType?.split(';', 1)[0].trim().toLowerCase()
+
+  return protocol === 'hls'
+    || protocol === 'dash'
+    || mediaType === 'application/vnd.apple.mpegurl'
+    || mediaType === 'application/x-mpegurl'
+    || mediaType === 'application/mpegurl'
+    || mediaType === 'audio/mpegurl'
+    || mediaType === 'audio/x-mpegurl'
+    || mediaType === 'application/dash+xml'
+}
+
+function sourceAddress(sourceUrl: string): URL | undefined {
+  try {
+    const baseUrl = globalThis.location?.href ?? 'https://gaudio.invalid'
+
+    return new URL(sourceUrl, baseUrl)
+  }
+  catch {
+    return undefined
+  }
+}
+
+function catalogSelectionForSource(sourceUrl: string): DemoCatalogSelection | undefined {
+  const requestedAddress = sourceAddress(sourceUrl)
+
+  if (!requestedAddress) {
+    return undefined
+  }
+
+  for (const formatGroup of demoFormatGroups) {
+    for (const track of demoTracks) {
+      const catalogAddress = sourceAddress(demoSampleUrl(formatGroup.folder, track.id, formatGroup.extension))
+
+      if (
+        catalogAddress?.origin === requestedAddress.origin
+        && catalogAddress.pathname === requestedAddress.pathname
+      ) {
+        return { formatGroup, track }
+      }
+    }
+  }
+
+  return undefined
+}
+
 function browserSupportForDisplay(support: string, hasAdapterSupport: boolean): string {
   if (support !== '') {
     return support
@@ -92,9 +173,10 @@ function browserSupportForDisplay(support: string, hasAdapterSupport: boolean): 
 }
 
 export function useGaudioDemo() {
-  const activeFormatFolder = shallowRef(defaultDemoFormatFolder)
-  const activeTrackId = shallowRef(defaultDemoTrackId)
+  const activeFormatFolder = shallowRef<string | undefined>(defaultDemoFormatFolder)
+  const activeTrackId = shallowRef<string | undefined>(defaultDemoTrackId)
   const sourceUrl = shallowRef(defaultDemoSampleUrl)
+  const activeSourceUrl = shallowRef(defaultDemoSampleUrl)
   const protocolOverride = shallowRef<ProtocolOverride>('auto')
   const sourceMode = shallowRef<DemoSourceMode>('url-string')
   const playerState = shallowRef('idle')
@@ -112,6 +194,7 @@ export function useGaudioDemo() {
   const playbackRateLabel = shallowRef('1.00x')
   const currentTimeLabel = shallowRef('0:00')
   const durationLabel = shallowRef('0:00')
+  const durationSeconds = shallowRef(0)
   const seekValue = shallowRef(0)
   const volume = shallowRef(0.8)
   const playbackRate = shallowRef(1)
@@ -123,8 +206,9 @@ export function useGaudioDemo() {
   const isPaused = shallowRef(true)
   const isEnded = shallowRef(false)
   const isSeeking = shallowRef(false)
-  const eventLog = shallowRef<string[]>([])
+  const eventLog = shallowRef<DemoEventEntry[]>([])
   const isBusy = shallowRef(false)
+  const operationError = shallowRef<string | undefined>()
   const browserSupportRows = shallowRef<BrowserSupportRow[]>([])
   const adapterDiagnosticRows = shallowRef<AdapterDiagnosticRow[]>([])
   const sourceLifecycleLabel = shallowRef('open 0 / close 0')
@@ -137,17 +221,27 @@ export function useGaudioDemo() {
   const playlistStatus = shallowRef('not run')
   const mediaSessionStatus = shallowRef('metadata pending')
   const errorPreviewStatus = shallowRef('not run')
+  const canSelectAlternateAudioTrack = shallowRef(false)
+  const canNavigateToPreviousPlaylistTrack = shallowRef(false)
+  const canNavigateToNextPlaylistTrack = shallowRef(false)
 
-  const activeTrack = computed(() => findDemoTrack(activeTrackId.value))
-  const activeFormatGroup = computed(() => findDemoFormatGroup(activeFormatFolder.value))
-  const activeSampleLabel = computed(() => `${activeFormatGroup.value.label} · ${activeTrack.value.title}`)
-  const activeSamplePath = computed(() => demoSampleUrl(
-    activeFormatGroup.value.folder,
-    activeTrack.value.id,
-    activeFormatGroup.value.extension,
+  // AI modified: catalog selection now describes the source actually owned by the player.
+  const activeTrack = computed(() => demoTracks.find(track => track.id === activeTrackId.value))
+  const activeFormatGroup = computed(() => demoFormatGroups.find(formatGroup => (
+    formatGroup.folder === activeFormatFolder.value
+  )))
+  const activeSampleLabel = computed(() => (
+    activeFormatGroup.value && activeTrack.value
+      ? `${activeFormatGroup.value.label} · ${activeTrack.value.title}`
+      : undefined
   ))
-  const activeCoverThumbUrl = computed(() => demoCoverThumbUrl(activeTrack.value.coverThumb))
-  const activeCoverArtUrl = computed(() => demoCoverArtUrl(activeTrack.value.coverFile))
+  const activeSamplePath = computed(() => activeSourceUrl.value)
+  const activeCoverThumbUrl = computed(() => (
+    activeTrack.value ? demoCoverThumbUrl(activeTrack.value.coverThumb) : undefined
+  ))
+  const activeCoverArtUrl = computed(() => (
+    activeTrack.value ? demoCoverArtUrl(activeTrack.value.coverFile) : undefined
+  ))
   const adaptiveQualityChoices = computed<AdaptiveQualityChoice[]>(() => [
     { id: automaticQualitySelection, label: 'Automatic ABR' },
     ...adaptiveVariants.value.map(variant => ({
@@ -155,19 +249,47 @@ export function useGaudioDemo() {
       label: variantChoiceLabel(variant),
     })),
   ])
+  const canUseBlobSource = computed(() => {
+    const protocol = sourceProtocol(protocolOverride.value)
+
+    return !isAdaptiveSource(protocol, mimeTypeForSource(sourceUrl.value, protocol))
+  })
+
+  watch(canUseBlobSource, (canUseBlob) => {
+    if (!canUseBlob && sourceMode.value === 'blob-source') {
+      // AI modified: manifest-relative segments require the original HTTP URL as their resolution base.
+      sourceMode.value = 'http-source'
+    }
+  }, { flush: 'sync' })
+  const canSeek = computed(() => (
+    !isBusy.value
+    && Number.isFinite(durationSeconds.value)
+    && durationSeconds.value > 0
+  ))
 
   let player: AudioPlayer
   let hlsAdapter: HlsAudioAdapter
   let dashAdapter: DashAudioAdapter
+  let nextEventId = 0
 
   function addEvent(message: string): void {
-    eventLog.value = [`${new Date().toLocaleTimeString()} ${message}`, ...eventLog.value].slice(0, 16)
+    nextEventId += 1
+    eventLog.value = [{
+      id: nextEventId,
+      message,
+      // AI modified: retain the instant so each locale can render its own time convention.
+      timestamp: Date.now(),
+    }, ...eventLog.value].slice(0, 16)
   }
 
   function updatePlaybackPosition(currentTime: number, duration: number): void {
     currentTimeLabel.value = secondsForDisplay(currentTime)
     durationLabel.value = secondsForDisplay(duration)
-    seekValue.value = duration > 0 ? (currentTime / duration) * seekRangeMax : 0
+    durationSeconds.value = Number.isFinite(duration) && duration > 0 ? duration : 0
+    // AI modified: keep media telemetry aligned with the seek control's integer step across browsers.
+    seekValue.value = durationSeconds.value > 0
+      ? Math.min(seekRangeMax, Math.max(0, Math.round((currentTime / duration) * seekRangeMax)))
+      : 0
   }
 
   function updateMediaStatus(): void {
@@ -220,19 +342,63 @@ export function useGaudioDemo() {
     const playlistLength = player.getPlaylist().length
     const playlistIndex = player.getPlaylistIndex()
     const selectedTrack = player.getSelectedAudioTrack()
-    const audioTrackCount = player.getAudioTracks().length
+    const audioTracks = player.getAudioTracks()
+    const audioTrackCount = audioTracks.length
 
     playlistStatus.value = playlistLength === 0
       ? 'direct source'
       : `${playlistLength} tracks / index ${playlistIndex} / audio tracks ${audioTrackCount} / selected ${selectedTrack?.id ?? 'default'}`
+    canSelectAlternateAudioTrack.value = audioTracks.some(audioTrack => audioTrack.id !== selectedTrack?.id)
+    canNavigateToPreviousPlaylistTrack.value = playlistIndex > 0
+    canNavigateToNextPlaylistTrack.value = playlistIndex >= 0 && playlistIndex < playlistLength - 1
   }
 
   function updateMediaSessionStatus(): void {
-    const metadata = player.getMediaSessionMetadata()
+    const playlistTrack = player.getPlaylist()[player.getPlaylistIndex()]
+    // AI modified: the inspector shows active playlist metadata before the direct-source fallback metadata.
+    const metadata = playlistTrack?.metadata ?? player.getMediaSessionMetadata()
 
     mediaSessionStatus.value = metadata
       ? `${metadata.title ?? 'untitled'} · ${metadata.artist ?? 'unknown artist'}`
       : 'none'
+  }
+
+  function setCatalogMediaSession(track: DemoTrack): void {
+    player.setMediaSessionMetadata({
+      title: track.title,
+      artist: track.artist,
+      album: 'GAudio demo',
+      artwork: [
+        {
+          src: demoCoverArtUrl(track.coverFile),
+          sizes: '512x512',
+          type: 'image/png',
+        },
+      ],
+    })
+  }
+
+  function reflectSourceOwnership(loadedSourceUrl: string): void {
+    const catalogSelection = catalogSelectionForSource(loadedSourceUrl)
+
+    activeSourceUrl.value = loadedSourceUrl
+    activeTrackId.value = catalogSelection?.track.id
+    activeFormatFolder.value = catalogSelection?.formatGroup.folder
+
+    if (catalogSelection) {
+      setCatalogMediaSession(catalogSelection.track)
+      return
+    }
+
+    player.setMediaSessionMetadata(undefined)
+  }
+
+  function syncPlayerSnapshot(): void {
+    playerState.value = player.getState()
+    updatePlaybackPosition(player.getCurrentTime(), player.getDuration())
+    updateMediaStatus()
+    updatePlaylistStatus()
+    updateMediaSessionStatus()
   }
 
   function resetAdaptiveQualityControls(controlLabel = 'automatic ABR'): void {
@@ -241,39 +407,63 @@ export function useGaudioDemo() {
     adaptiveQualityControlLabel.value = controlLabel
   }
 
-  // AI modified: expose every public source input shape through one demo selector.
-  async function audioSourceForLoad(): Promise<string | AudioSourceDescription | AudioSource> {
-    const protocol = sourceProtocol(protocolOverride.value)
+  function resetAdaptivePlaybackStatus(): void {
+    adaptiveImplementationLabel.value = 'media element'
+    adaptiveVariantLabel.value = 'automatic'
+    adaptiveBitrateLabel.value = 'unknown'
+    manifestVariantLabel.value = 'none'
+    segmentLabel.value = 'none'
+    resetAdaptiveQualityControls()
+  }
+
+  // AI modified: explicit protocol choices and edited URLs now keep their routing metadata together.
+  async function audioSourceForLoad(sourceRequest: DemoSourceRequest): Promise<string | AudioSourceDescription | AudioSource> {
+    const protocol = sourceProtocol(sourceRequest.protocolOverride)
+    const mimeType = mimeTypeForSource(sourceRequest.sourceUrl, protocol)
     const sourceDescription: AudioSourceDescription = {
-      url: sourceUrl.value,
+      url: sourceRequest.sourceUrl,
       protocol,
-      mimeType: activeFormatGroup.value.mimeType,
+      mimeType,
     }
 
-    switch (sourceMode.value) {
+    switch (sourceRequest.sourceMode) {
       case 'source-description':
         return sourceDescription
       case 'http-source':
         return new HttpAudioSource(sourceDescription)
       case 'blob-source': {
-        const response = await fetch(sourceUrl.value)
+        const response = await fetch(sourceRequest.sourceUrl)
+
+        if (!response.ok) {
+          throw new Error(`Unable to load demo source: HTTP ${response.status} ${response.statusText}`)
+        }
+
         const sourceBlob = await response.blob()
+        const sourceMimeType = sourceBlob.type || mimeType
+
+        if (isAdaptiveSource(protocol, sourceMimeType)) {
+          // AI modified: response metadata catches edited manifest URLs whose extension did not reveal the protocol.
+          return new HttpAudioSource({
+            ...sourceDescription,
+            mimeType: sourceMimeType,
+          })
+        }
 
         return new BlobAudioSource(sourceBlob, {
           protocol,
-          mimeType: sourceBlob.type || activeFormatGroup.value.mimeType,
+          mimeType: sourceMimeType,
         })
       }
       case 'custom-source':
         return {
           kind: 'url',
-          url: sourceUrl.value,
+          url: sourceRequest.sourceUrl,
           protocol,
-          mimeType: activeFormatGroup.value.mimeType,
+          mimeType,
           open: async () => {
             customSourceOpenCount.value += 1
             updateSourceLifecycle()
-            return { url: sourceUrl.value }
+            return { url: sourceRequest.sourceUrl }
           },
           close: async () => {
             customSourceCloseCount.value += 1
@@ -281,18 +471,24 @@ export function useGaudioDemo() {
           },
         }
       case 'url-string':
-        return sourceUrl.value
+        return protocol === undefined ? sourceRequest.sourceUrl : sourceDescription
     }
   }
 
   async function withBusyControls(action: () => Promise<void>): Promise<void> {
     isBusy.value = true
+    operationError.value = undefined
 
     try {
       await action()
     }
     catch (error) {
-      addEvent(error instanceof Error ? error.message : 'unknown error')
+      const errorMessage = error instanceof Error ? error.message : 'unknown error'
+
+      // AI modified: failed controls expose the error and resync every player-owned status before becoming interactive.
+      operationError.value = errorMessage
+      addEvent(errorMessage)
+      syncPlayerSnapshot()
     }
     finally {
       isBusy.value = false
@@ -308,7 +504,7 @@ export function useGaudioDemo() {
 
     activePlayer.on('loadstart', () => addEvent('loadstart'))
     activePlayer.on('loadedmetadata', ({ duration }) => {
-      durationLabel.value = secondsForDisplay(duration)
+      updatePlaybackPosition(activePlayer.getCurrentTime(), duration)
       seekableLabel.value = rangesForDisplay(activePlayer.getSeekableRanges())
       updatePlaylistStatus()
       updateMediaSessionStatus()
@@ -341,7 +537,7 @@ export function useGaudioDemo() {
       playedLabel.value = rangesForDisplay(activePlayer.getPlayedRanges())
     })
     activePlayer.on('durationchange', ({ duration }) => {
-      durationLabel.value = secondsForDisplay(duration)
+      updatePlaybackPosition(activePlayer.getCurrentTime(), duration)
     })
     activePlayer.on('bufferupdate', ({ ranges }) => {
       bufferedLabel.value = rangesForDisplay(ranges)
@@ -404,32 +600,20 @@ export function useGaudioDemo() {
   }
 
   async function applyActiveSample(): Promise<void> {
-    const formatGroup = activeFormatGroup.value
-    const track = activeTrack.value
+    const formatGroup = activeFormatGroup.value ?? demoFormatGroups[0]
+    const track = activeTrack.value ?? demoTracks[0]
+
+    activeFormatFolder.value = formatGroup.folder
+    activeTrackId.value = track.id
     sourceUrl.value = demoSampleUrl(formatGroup.folder, track.id, formatGroup.extension)
+    activeSourceUrl.value = sourceUrl.value
     protocolOverride.value = 'auto'
     sourceMode.value = 'url-string'
-    adaptiveImplementationLabel.value = 'media element'
-    adaptiveVariantLabel.value = 'automatic'
-    adaptiveBitrateLabel.value = 'unknown'
-    manifestVariantLabel.value = 'none'
-    segmentLabel.value = 'none'
-    resetAdaptiveQualityControls()
+    resetAdaptivePlaybackStatus()
 
     await withBusyControls(async () => {
-      player.setMediaSessionMetadata({
-        title: track.title,
-        artist: track.artist,
-        album: 'GAudio demo',
-        artwork: [
-          {
-            src: demoCoverArtUrl(track.coverFile),
-            sizes: '512x512',
-            type: 'image/png',
-          },
-        ],
-      })
       player.setSource(sourceUrl.value)
+      setCatalogMediaSession(track)
       await player.load()
       updateMediaStatus()
       updateBrowserSupport()
@@ -441,47 +625,67 @@ export function useGaudioDemo() {
   }
 
   async function selectTrack(track: DemoTrack): Promise<void> {
-    if (activeTrackId.value === track.id) {
-      return
-    }
-
     activeTrackId.value = track.id
+    activeFormatFolder.value ??= defaultDemoFormatFolder
     await applyActiveSample()
   }
 
   async function selectFormat(formatGroup: DemoFormatGroup): Promise<void> {
-    if (activeFormatFolder.value === formatGroup.folder) {
-      return
-    }
-
     activeFormatFolder.value = formatGroup.folder
+    activeTrackId.value ??= defaultDemoTrackId
     await applyActiveSample()
   }
 
   async function nextTrack(): Promise<void> {
     const currentIndex = demoTracks.findIndex(track => track.id === activeTrackId.value)
     const nextIndex = (currentIndex + 1) % demoTracks.length
+
     activeTrackId.value = demoTracks[nextIndex].id
+    activeFormatFolder.value ??= defaultDemoFormatFolder
     await applyActiveSample()
   }
 
   async function prevTrack(): Promise<void> {
     const currentIndex = demoTracks.findIndex(track => track.id === activeTrackId.value)
-    const previousIndex = (currentIndex - 1 + demoTracks.length) % demoTracks.length
+    const previousIndex = currentIndex < 0
+      ? demoTracks.length - 1
+      : (currentIndex - 1 + demoTracks.length) % demoTracks.length
+
     activeTrackId.value = demoTracks[previousIndex].id
+    activeFormatFolder.value ??= defaultDemoFormatFolder
     await applyActiveSample()
   }
 
   async function loadSource(): Promise<void> {
+    if (!canUseBlobSource.value && sourceMode.value === 'blob-source') {
+      // AI modified: programmatic same-tick loads follow the same adaptive-manifest constraint as the UI.
+      sourceMode.value = 'http-source'
+    }
+    const sourceRequest: DemoSourceRequest = {
+      sourceMode: sourceMode.value,
+      sourceUrl: sourceUrl.value,
+      protocolOverride: protocolOverride.value,
+    }
+
     await withBusyControls(async () => {
-      player.setSource(await audioSourceForLoad())
+      const requestedSource = await audioSourceForLoad(sourceRequest)
+      const loadedSourceMode = sourceRequest.sourceMode === 'blob-source'
+        && requestedSource instanceof HttpAudioSource
+        ? 'http-source'
+        : sourceRequest.sourceMode
+      sourceMode.value = loadedSourceMode
+
+      // AI modified: a committed source must not inherit catalog, Media Session, or adaptive state from the previous engine.
+      resetAdaptivePlaybackStatus()
+      player.setSource(requestedSource)
+      reflectSourceOwnership(sourceRequest.sourceUrl)
       await player.load()
       updateMediaStatus()
       updateBrowserSupport()
       updateAdapterDiagnostics()
       updatePlaylistStatus()
       updateMediaSessionStatus()
-      addEvent(`loaded source via ${sourceMode.value}`)
+      addEvent(`loaded source via ${loadedSourceMode}`)
     })
   }
 
@@ -512,17 +716,22 @@ export function useGaudioDemo() {
   async function seek(): Promise<void> {
     const duration = player.getDuration()
 
-    if (duration <= 0) {
+    if (!Number.isFinite(duration) || duration <= 0) {
+      // AI modified: rejected timeline commits snap back to the actual non-seekable media position.
+      updatePlaybackPosition(player.getCurrentTime(), duration)
       return
     }
 
-    await player.seek((seekValue.value / seekRangeMax) * duration)
+    // AI modified: timeline seek failures use the same visible, retryable error path as other async controls.
+    await withBusyControls(async () => {
+      await player.seek((seekValue.value / seekRangeMax) * duration)
+    })
   }
 
   async function fastSeek(): Promise<void> {
     const duration = player.getDuration()
 
-    if (duration <= 0) {
+    if (!Number.isFinite(duration) || duration <= 0) {
       return
     }
 
@@ -658,13 +867,41 @@ export function useGaudioDemo() {
   }
 
   async function runPlaylistPreview(): Promise<void> {
-    const formatGroup = activeFormatGroup.value
-    const track = activeTrack.value
+    const formatGroup = activeFormatGroup.value ?? demoFormatGroups[0]
+    const track = activeTrack.value ?? demoTracks[0]
+    const trackIndex = demoTracks.findIndex(demoTrack => demoTrack.id === track.id)
+    const nextPlaylistTrack = demoTracks[(trackIndex + 2) % demoTracks.length]
+    const fallbackFormatGroup = formatGroup.folder === 'mp3'
+      ? (demoFormatGroups.find(group => group.folder === 'wav') ?? demoFormatGroups[1])
+      : demoFormatGroups[0]
+    const alternateFormatGroup = demoFormatGroups.find(group => (
+      group.folder !== formatGroup.folder
+      && group.folder !== fallbackFormatGroup.folder
+      && group.folder !== 'hls'
+      && group.folder !== 'dash'
+    )) ?? fallbackFormatGroup
     const primarySource = demoSampleUrl(formatGroup.folder, track.id, formatGroup.extension)
-    const fallbackSource = demoSampleUrl('mp3', track.id, '.mp3')
+    const fallbackSource = demoSampleUrl(
+      fallbackFormatGroup.folder,
+      track.id,
+      fallbackFormatGroup.extension,
+    )
+    // AI modified: alternate audio uses the same program in another valid format, so playlist metadata stays truthful.
+    const alternateSource = demoSampleUrl(
+      alternateFormatGroup.folder,
+      track.id,
+      alternateFormatGroup.extension,
+    )
+    const nextPlaylistSource = demoSampleUrl(
+      formatGroup.folder,
+      nextPlaylistTrack.id,
+      formatGroup.extension,
+    )
 
     await withBusyControls(async () => {
-      // AI modified: exercise playlist, fallback, alternate audio track, and media session APIs in one visible preview.
+      // AI modified: playlist loads start with telemetry and catalog state owned by the selected playlist source.
+      resetAdaptivePlaybackStatus()
+      // AI modified: preview controls use distinct valid resources for fallback, alternate audio, and navigation.
       player.setPlaylist([
         {
           source: primarySource,
@@ -683,15 +920,111 @@ export function useGaudioDemo() {
               source: primarySource,
               fallbackSources: [fallbackSource],
             },
+            {
+              id: 'alternate',
+              label: `${alternateFormatGroup.label} alternate`,
+              language: 'und',
+              source: alternateSource,
+            },
           ],
         },
+        {
+          source: nextPlaylistSource,
+          fallbackSources: [
+            demoSampleUrl(
+              fallbackFormatGroup.folder,
+              nextPlaylistTrack.id,
+              fallbackFormatGroup.extension,
+            ),
+          ],
+          metadata: {
+            title: nextPlaylistTrack.title,
+            artist: nextPlaylistTrack.artist,
+            album: 'GAudio playlist demo',
+          },
+        },
       ])
+      activeFormatFolder.value = formatGroup.folder
+      activeTrackId.value = track.id
+      activeSourceUrl.value = primarySource
+      sourceUrl.value = primarySource
+      protocolOverride.value = 'auto'
+      sourceMode.value = 'url-string'
+      setCatalogMediaSession(track)
       await player.load()
       updateMediaStatus()
       updatePlaylistStatus()
       updateMediaSessionStatus()
-      addEvent('playlist preview loaded with fallback source')
+      addEvent('playlist preview loaded with distinct fallback and alternate sources')
     })
+  }
+
+  function reflectActivePlaylistSource(): void {
+    const playlistTrack = player.getPlaylist()[player.getPlaylistIndex()]
+    const selectedAudioTrack = player.getSelectedAudioTrack()
+    const selectedSource = selectedAudioTrack?.source ?? playlistTrack?.source
+    const selectedSourceUrl = typeof selectedSource === 'string'
+      ? selectedSource
+      : selectedSource?.url
+    const metadata = playlistTrack?.metadata ?? player.getMediaSessionMetadata()
+    const catalogTrack = demoTracks.find(track => (
+      track.title === metadata?.title && track.artist === metadata.artist
+    ))
+    const catalogSelection = selectedSourceUrl ? catalogSelectionForSource(selectedSourceUrl) : undefined
+
+    activeSourceUrl.value = selectedSourceUrl ?? activeSourceUrl.value
+    sourceUrl.value = selectedSourceUrl ?? sourceUrl.value
+    activeTrackId.value = catalogTrack?.id ?? activeTrackId.value
+    activeFormatFolder.value = catalogSelection?.formatGroup.folder ?? activeFormatFolder.value
+  }
+
+  async function selectAlternateAudioTrackPreview(): Promise<void> {
+    const selectedAudioTrack = player.getSelectedAudioTrack()
+    const alternateAudioTrack = player.getAudioTracks().find(audioTrack => (
+      audioTrack.id !== selectedAudioTrack?.id
+    ))
+
+    if (!alternateAudioTrack) {
+      return
+    }
+
+    await withBusyControls(async () => {
+      await player.selectAudioTrack(alternateAudioTrack.id, {
+        autoplay: 'preserve',
+        preserveTime: true,
+      })
+      reflectActivePlaylistSource()
+      updateMediaStatus()
+      updatePlaylistStatus()
+      updateMediaSessionStatus()
+      addEvent(`selected alternate audio track: ${alternateAudioTrack.id}`)
+    })
+  }
+
+  async function navigatePreviewPlaylist(direction: 'previous' | 'next'): Promise<void> {
+    await withBusyControls(async () => {
+      const didNavigate = direction === 'previous'
+        ? await player.previous({ autoplay: false })
+        : await player.next({ autoplay: false })
+
+      if (!didNavigate) {
+        return
+      }
+
+      reflectActivePlaylistSource()
+      updateMediaStatus()
+      updatePlaylistStatus()
+      updateMediaSessionStatus()
+      addEvent(`${direction} playlist track: ${player.getPlaylistIndex()}`)
+    })
+  }
+
+  async function previousPreviewPlaylistTrack(): Promise<void> {
+    await navigatePreviewPlaylist('previous')
+  }
+
+  async function nextPreviewPlaylistTrack(): Promise<void> {
+    await navigatePreviewPlaylist('next')
   }
 
   function runErrorPreview(): void {
@@ -702,6 +1035,8 @@ export function useGaudioDemo() {
   }
 
   onMounted(async () => {
+    const initialTrack = demoTracks[0]
+
     hlsAdapter = createHlsAdapter({
       // AI modified: prefer hls.js in the demo so HLS variants can be inspected and selected manually.
       playbackStrategy: 'hls-first',
@@ -724,8 +1059,8 @@ export function useGaudioDemo() {
       preservesPitch: shouldPreservePitch.value,
       mediaSession: {
         metadata: {
-          title: activeTrack.value.title,
-          artist: activeTrack.value.artist,
+          title: initialTrack.title,
+          artist: initialTrack.artist,
           album: 'GAudio demo',
         },
       },
@@ -743,7 +1078,13 @@ export function useGaudioDemo() {
   })
 
   onUnmounted(() => {
-    player.dispose()
+    try {
+      player.dispose()
+    }
+    catch (error) {
+      // AI modified: cleanup failures must not abort VitePress route navigation.
+      console.warn('GAudio demo cleanup failed', error)
+    }
   })
 
   return {
@@ -765,6 +1106,7 @@ export function useGaudioDemo() {
     adaptiveBitrateLabel,
     adaptiveVariants,
     adaptiveQualityChoices,
+    canUseBlobSource,
     adaptiveQualitySelection,
     adaptiveQualityControlLabel,
     manifestVariantLabel,
@@ -775,6 +1117,7 @@ export function useGaudioDemo() {
     playbackRateLabel,
     currentTimeLabel,
     durationLabel,
+    canSeek,
     seekValue,
     seekRangeMax,
     volume,
@@ -789,6 +1132,7 @@ export function useGaudioDemo() {
     isSeeking,
     eventLog,
     isBusy,
+    operationError,
     browserSupportRows,
     adapterDiagnosticRows,
     sourceLifecycleLabel,
@@ -799,6 +1143,9 @@ export function useGaudioDemo() {
     playlistStatus,
     mediaSessionStatus,
     errorPreviewStatus,
+    canSelectAlternateAudioTrack,
+    canNavigateToPreviousPlaylistTrack,
+    canNavigateToNextPlaylistTrack,
     selectTrack,
     selectFormat,
     nextTrack,
@@ -826,6 +1173,9 @@ export function useGaudioDemo() {
     runAnalyzerPreview,
     runEventEmitterPreview,
     runPlaylistPreview,
+    selectAlternateAudioTrackPreview,
+    previousPreviewPlaylistTrack,
+    nextPreviewPlaylistTrack,
     runErrorPreview,
   }
 }

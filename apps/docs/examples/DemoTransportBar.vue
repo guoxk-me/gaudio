@@ -12,6 +12,7 @@ const props = defineProps<{
 }>()
 
 const {
+  canSeek,
   currentTimeLabel,
   durationLabel,
   fastSeek,
@@ -58,7 +59,9 @@ const rateSliderValue = computed({
 
 const playbackRateLabel = computed(() => `${playbackRate.value.toFixed(2)}x`)
 
-async function onSeekCommit(): Promise<void> {
+// AI modified: Reka emits valueCommit before v-model, so seek from the committed payload.
+async function onSeekCommit(values: number[]): Promise<void> {
+  seekValue.value = values[0] ?? 0
   await seek()
 }
 
@@ -69,11 +72,12 @@ function toggleMute(): void {
 </script>
 
 <template>
-  <footer
+  <section
     role="region"
     class="gaudio-studio__transport"
-    aria-label="Music player demo"
+    :aria-label="text.controls.ariaLabel"
   >
+    <!-- AI modified: a section supports this named region without conflicting with footer semantics. -->
     <!-- AI modified: split timeline and output controls so the transport bar does not collapse on wide or narrow pages. -->
     <div class="gaudio-studio__seek-row">
       <span class="gaudio-studio__time-label">{{ currentTimeLabel }}</span>
@@ -82,17 +86,17 @@ function toggleMute(): void {
         :min="0"
         :max="seekRangeMax"
         :step="1"
-        :aria-label="text.controls.seek"
+        :disabled="!canSeek"
+        :thumb-label="text.controls.seek"
         class="min-w-0"
-        @pointerup="onSeekCommit"
-        @keydown.enter="onSeekCommit"
+        @value-commit="onSeekCommit"
       />
       <span class="gaudio-studio__time-label text-right">{{ durationLabel }}</span>
     </div>
 
     <div class="gaudio-studio__transport-controls">
       <div class="gaudio-studio__transport-main">
-        <Button variant="ghost" size="icon-sm" class="gaudio-studio__icon-button" :disabled="isBusy" aria-label="Previous track" @click="prevTrack">
+        <Button variant="ghost" size="icon-sm" class="gaudio-studio__icon-button" :disabled="isBusy" :aria-label="text.catalog.previous" @click="prevTrack">
           <SkipBack data-icon="inline-start" />
         </Button>
         <Button
@@ -117,14 +121,14 @@ function toggleMute(): void {
         <Button variant="ghost" size="icon-sm" class="gaudio-studio__icon-button" :aria-label="text.controls.stop" @click="stop">
           <Square data-icon="inline-start" />
         </Button>
-        <Button variant="ghost" size="icon-sm" class="gaudio-studio__icon-button" :disabled="isBusy" aria-label="Next track" @click="nextTrack">
+        <Button variant="ghost" size="icon-sm" class="gaudio-studio__icon-button" :disabled="isBusy" :aria-label="text.catalog.next" @click="nextTrack">
           <SkipForward data-icon="inline-start" />
         </Button>
       </div>
 
       <div class="gaudio-studio__output-controls">
         <div class="gaudio-studio__control-cluster" role="group" :aria-label="text.controls.volume">
-          <Button variant="ghost" size="icon-sm" class="gaudio-studio__icon-button" :aria-label="text.controls.muted" @click="toggleMute">
+          <Button variant="ghost" size="icon-sm" class="gaudio-studio__icon-button" :aria-label="isMuted ? text.controls.unmute : text.controls.mute" @click="toggleMute">
             <VolumeX v-if="isMuted" data-icon="inline-start" />
             <Volume2 v-else data-icon="inline-start" />
           </Button>
@@ -133,7 +137,7 @@ function toggleMute(): void {
             :min="0"
             :max="1"
             :step="0.01"
-            :aria-label="text.controls.volume"
+            :thumb-label="text.controls.volume"
             class="gaudio-studio__volume-slider"
           />
         </div>
@@ -145,17 +149,17 @@ function toggleMute(): void {
             :min="0.5"
             :max="2"
             :step="0.05"
-            :aria-label="text.controls.playbackRate"
+            :thumb-label="text.controls.playbackRate"
             class="gaudio-studio__rate-slider"
           />
           <span class="gaudio-studio__rate-label">{{ playbackRateLabel }}</span>
         </div>
 
-        <Button variant="outline" size="sm" class="gaudio-studio__quick-seek" :disabled="isBusy" @click="fastSeek">
+        <Button variant="outline" size="sm" class="gaudio-studio__quick-seek" :disabled="!canSeek" @click="fastSeek">
           <ChevronsRight data-icon="inline-start" />
           <span>{{ text.controls.fastSeek }}</span>
         </Button>
       </div>
     </div>
-  </footer>
+  </section>
 </template>

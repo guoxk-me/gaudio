@@ -4,6 +4,7 @@ import type { GaudioDemo } from './use-gaudio-demo'
 import { computed } from 'vue'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { demoStatusForDisplay } from './demo-i18n'
 
 const props = defineProps<{
   demo: GaudioDemo
@@ -35,7 +36,13 @@ const capabilityRows = computed(() => props.text.capabilities.apiCoverage)
 
 <template>
   <section :aria-label="text.capabilities.ariaLabel" class="flex flex-col gap-4">
-    <div class="gaudio-studio__surface overflow-x-auto rounded-lg">
+    <!-- AI modified: keyboard users can identify, focus, and horizontally scroll the API table. -->
+    <div
+      role="region"
+      class="gaudio-studio__surface overflow-x-auto rounded-lg"
+      tabindex="0"
+      :aria-label="text.capabilities.title"
+    >
       <table class="w-full min-w-[640px] text-left text-sm">
         <thead style="background: var(--gaudio-studio-muted)">
           <tr>
@@ -75,7 +82,7 @@ const capabilityRows = computed(() => props.text.capabilities.apiCoverage)
                   {{ browserSupportRow.label }}
                 </dt>
                 <dd>
-                  <span>{{ browserSupportRow.support }}</span>
+                  <span>{{ demoStatusForDisplay(browserSupportRow.support, text) }}</span>
                   <small class="text-muted-foreground block font-mono text-xs">{{ browserSupportRow.mimeType }}</small>
                 </dd>
               </div>
@@ -95,9 +102,9 @@ const capabilityRows = computed(() => props.text.capabilities.apiCoverage)
             <template v-for="adapterDiagnosticRow in adapterDiagnosticRows" :key="adapterDiagnosticRow.label">
               <div class="grid gap-1">
                 <dt class="text-muted-foreground font-medium">
-                  {{ adapterDiagnosticRow.label }}
+                  {{ demoStatusForDisplay(adapterDiagnosticRow.label, text) }}
                 </dt>
-                <dd>{{ adapterDiagnosticRow.value }}</dd>
+                <dd>{{ demoStatusForDisplay(adapterDiagnosticRow.value, text) }}</dd>
               </div>
             </template>
           </dl>
@@ -124,25 +131,25 @@ const capabilityRows = computed(() => props.text.capabilities.apiCoverage)
               <dt class="text-muted-foreground font-medium">
                 {{ text.capabilities.sourceLifecycle }}
               </dt>
-              <dd>{{ sourceLifecycleLabel }}</dd>
+              <dd>{{ demoStatusForDisplay(sourceLifecycleLabel, text) }}</dd>
             </div>
             <div class="grid gap-1">
               <dt class="text-muted-foreground font-medium">
                 {{ text.capabilities.playlist }}
               </dt>
-              <dd>{{ playlistStatus }}</dd>
+              <dd>{{ demoStatusForDisplay(playlistStatus, text) }}</dd>
             </div>
             <div class="grid gap-1">
               <dt class="text-muted-foreground font-medium">
                 {{ text.capabilities.mediaSession }}
               </dt>
-              <dd>{{ mediaSessionStatus }}</dd>
+              <dd>{{ demoStatusForDisplay(mediaSessionStatus, text) }}</dd>
             </div>
             <div class="grid gap-1">
               <dt class="text-muted-foreground font-medium">
                 {{ text.capabilities.analyzer }}
               </dt>
-              <dd>{{ analyzerStatus }}</dd>
+              <dd>{{ demoStatusForDisplay(analyzerStatus, text) }}</dd>
             </div>
             <div class="grid gap-1">
               <dt class="text-muted-foreground font-medium">
@@ -160,13 +167,13 @@ const capabilityRows = computed(() => props.text.capabilities.apiCoverage)
               <dt class="text-muted-foreground font-medium">
                 {{ text.capabilities.eventEmitter }}
               </dt>
-              <dd>{{ eventEmitterStatus }}</dd>
+              <dd>{{ demoStatusForDisplay(eventEmitterStatus, text) }}</dd>
             </div>
             <div class="grid gap-1">
               <dt class="text-muted-foreground font-medium">
                 {{ text.capabilities.error }}
               </dt>
-              <dd>{{ errorPreviewStatus }}</dd>
+              <dd>{{ demoStatusForDisplay(errorPreviewStatus, text) }}</dd>
             </div>
           </dl>
           <div class="flex flex-wrap gap-2">

@@ -23,7 +23,7 @@ const text = computed(() => demoText[demoLocaleForLang(lang.value)])
     <div class="gaudio-studio__shell">
       <div
         class="gaudio-studio__backdrop"
-        :style="{ backgroundImage: `url(${demo.activeCoverThumbUrl})` }"
+        :style="{ backgroundImage: demo.activeCoverThumbUrl ? `url(${demo.activeCoverThumbUrl})` : 'none' }"
         aria-hidden="true"
       />
 

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { DemoText } from './demo-i18n'
 import type { GaudioDemo } from './use-gaudio-demo'
-import { computed, onMounted, onUnmounted, shallowRef, useTemplateRef } from 'vue'
+import { computed, onMounted, onUnmounted, shallowRef, useTemplateRef, watch } from 'vue'
 
 interface CanvasDimensions {
   width: number
@@ -25,8 +25,8 @@ const props = defineProps<{
 }>()
 
 const analyzerCanvas = useTemplateRef<HTMLCanvasElement>('analyzerCanvas')
-const analyzerStatus = shallowRef('waiting for player analyzer')
-const analyzerPeakLabel = shallowRef('none')
+const analyzerStatus = shallowRef(props.text.visualizer.stopped)
+const analyzerPeakLabel = shallowRef(props.text.visualizer.none)
 const analyzerEnergyLabel = shallowRef('0%')
 
 const analyzerSummary = computed(() => [
@@ -36,6 +36,16 @@ const analyzerSummary = computed(() => [
 ])
 
 let animationId = 0
+let canvasDimensionsCache: CanvasDimensions | undefined
+let analyzerPaletteCache: AnalyzerPalette | undefined
+let isCanvasVisible = false
+let isDocumentVisible = true
+let shouldReduceMotion = false
+let lastSummaryUpdate = 0
+let intersectionObserver: IntersectionObserver | undefined
+let resizeObserver: ResizeObserver | undefined
+let themeObserver: MutationObserver | undefined
+let motionPreference: MediaQueryList | undefined
 
 function cssVariableColor(canvas: HTMLCanvasElement, name: string, fallbackColor: string): string {
   return getComputedStyle(canvas.closest('.gaudio-studio') ?? canvas).getPropertyValue(name).trim() || fallbackColor
@@ -70,6 +80,18 @@ function canvasDimensions(canvas: HTMLCanvasElement): CanvasDimensions {
 
 function canvasContext(): CanvasRenderingContext2D | undefined {
   return analyzerCanvas.value?.getContext('2d') ?? undefined
+}
+
+function refreshCanvasPresentation(): void {
+  const canvas = analyzerCanvas.value
+
+  if (!canvas) {
+    return
+  }
+
+  // AI modified: expensive layout and style reads now run only after resize or theme changes.
+  canvasDimensionsCache = canvasDimensions(canvas)
+  analyzerPaletteCache = analyzerPalette(canvas)
 }
 
 function paintAnalyzerBackground(context: CanvasRenderingContext2D, dimensions: CanvasDimensions, palette: AnalyzerPalette): void {
@@ -113,10 +135,10 @@ function paintIdleAnalyzer(context: CanvasRenderingContext2D, dimensions: Canvas
 
   context.fillStyle = palette.text
   context.font = `${Math.max(12, Math.round(width / 90))}px ui-monospace, SFMono-Regular, Consolas, monospace`
-  context.fillText('Analyzer waiting for loaded player audio', 22, height * 0.48)
+  context.fillText(props.text.visualizer.waitingCanvas, 22, height * 0.48)
 
-  analyzerStatus.value = 'waiting'
-  analyzerPeakLabel.value = 'none'
+  analyzerStatus.value = props.text.visualizer.stopped
+  analyzerPeakLabel.value = props.text.visualizer.none
   analyzerEnergyLabel.value = '0%'
 }
 
@@ -206,22 +228,46 @@ function paintLevelMeters(context: CanvasRenderingContext2D, dimensions: CanvasD
   })
 }
 
-function paintAnalyzerFrame(): void {
+function isAnalyzerAnimating(): boolean {
+  return isCanvasVisible
+    && isDocumentVisible
+    && !shouldReduceMotion
+    && !props.demo.isPaused.value
+    && props.demo.playerAnalyzer() !== undefined
+}
+
+function requestAnalyzerFrame(): void {
+  if (animationId !== 0 || !isCanvasVisible || !isDocumentVisible) {
+    return
+  }
+
+  animationId = window.requestAnimationFrame(paintAnalyzerFrame)
+}
+
+function paintAnalyzerFrame(timestamp = 0): void {
+  animationId = 0
   const canvas = analyzerCanvas.value
   const context = canvasContext()
 
   if (!canvas || !context) {
-    animationId = window.requestAnimationFrame(paintAnalyzerFrame)
     return
   }
 
-  const dimensions = canvasDimensions(canvas)
-  const palette = analyzerPalette(canvas)
+  if (!canvasDimensionsCache || !analyzerPaletteCache) {
+    refreshCanvasPresentation()
+  }
+
+  const dimensions = canvasDimensionsCache
+  const palette = analyzerPaletteCache
+
+  if (!dimensions || !palette) {
+    return
+  }
+
   const analyzer = props.demo.playerAnalyzer()
 
   if (!analyzer) {
     paintIdleAnalyzer(context, dimensions, palette)
-    animationId = window.requestAnimationFrame(paintAnalyzerFrame)
     return
   }
 
@@ -237,20 +283,100 @@ function paintAnalyzerFrame(): void {
   paintSpectrum(context, dimensions, frequencySamples, palette)
   paintLevelMeters(context, dimensions, waveformSamples, palette)
 
-  // AI modified: analyzer visualization now reflects the active AudioPlayer signal instead of a synthetic oscillator.
-  analyzerStatus.value = props.demo.isPaused.value ? 'ready' : 'live from player'
-  analyzerPeakLabel.value = peakSample === 0 ? 'none' : `${peakFrequency} Hz`
-  analyzerEnergyLabel.value = `${Math.round((averageEnergy / 255) * 100)}%`
-  animationId = window.requestAnimationFrame(paintAnalyzerFrame)
+  if (timestamp - lastSummaryUpdate >= 250 || !isAnalyzerAnimating()) {
+    // AI modified: reactive status writes are throttled while canvas painting remains smooth.
+    analyzerStatus.value = props.demo.isPaused.value || shouldReduceMotion
+      ? props.text.visualizer.ready
+      : props.text.visualizer.running
+    analyzerPeakLabel.value = peakSample === 0 ? props.text.visualizer.none : `${peakFrequency} Hz`
+    analyzerEnergyLabel.value = `${Math.round((averageEnergy / 255) * 100)}%`
+    lastSummaryUpdate = timestamp
+  }
+
+  if (isAnalyzerAnimating()) {
+    requestAnalyzerFrame()
+  }
 }
 
 onMounted(() => {
-  animationId = window.requestAnimationFrame(paintAnalyzerFrame)
+  const canvas = analyzerCanvas.value
+
+  if (!canvas) {
+    return
+  }
+
+  isDocumentVisible = document.visibilityState === 'visible'
+  motionPreference = window.matchMedia('(prefers-reduced-motion: reduce)')
+  shouldReduceMotion = motionPreference.matches
+
+  intersectionObserver = new IntersectionObserver(([entry]) => {
+    isCanvasVisible = entry?.isIntersecting === true
+
+    if (!isCanvasVisible && animationId !== 0) {
+      window.cancelAnimationFrame(animationId)
+      animationId = 0
+      return
+    }
+
+    requestAnalyzerFrame()
+  })
+  intersectionObserver.observe(canvas)
+
+  resizeObserver = new ResizeObserver(() => {
+    refreshCanvasPresentation()
+    requestAnalyzerFrame()
+  })
+  resizeObserver.observe(canvas)
+
+  themeObserver = new MutationObserver(() => {
+    analyzerPaletteCache = undefined
+    requestAnalyzerFrame()
+  })
+  themeObserver.observe(document.documentElement, { attributeFilter: ['class'], attributes: true })
+
+  motionPreference.addEventListener('change', handleMotionPreferenceChange)
+  document.addEventListener('visibilitychange', handleDocumentVisibilityChange)
+  refreshCanvasPresentation()
 })
 
 onUnmounted(() => {
-  window.cancelAnimationFrame(animationId)
+  if (animationId !== 0) {
+    window.cancelAnimationFrame(animationId)
+  }
+
+  intersectionObserver?.disconnect()
+  resizeObserver?.disconnect()
+  themeObserver?.disconnect()
+  motionPreference?.removeEventListener('change', handleMotionPreferenceChange)
+  document.removeEventListener('visibilitychange', handleDocumentVisibilityChange)
 })
+
+function handleMotionPreferenceChange(event: MediaQueryListEvent): void {
+  shouldReduceMotion = event.matches
+
+  if (shouldReduceMotion && animationId !== 0) {
+    window.cancelAnimationFrame(animationId)
+    animationId = 0
+  }
+
+  requestAnalyzerFrame()
+}
+
+function handleDocumentVisibilityChange(): void {
+  isDocumentVisible = document.visibilityState === 'visible'
+
+  if (!isDocumentVisible && animationId !== 0) {
+    window.cancelAnimationFrame(animationId)
+    animationId = 0
+    return
+  }
+
+  requestAnalyzerFrame()
+}
+
+watch([props.demo.isPaused, props.demo.playerState], () => {
+  requestAnalyzerFrame()
+}, { flush: 'post' })
 </script>
 
 <template>
@@ -261,7 +387,16 @@ onUnmounted(() => {
       <span style="color: var(--gaudio-studio-text-muted)">{{ text.visualizer.radial }}</span>
     </div>
 
-    <canvas ref="analyzerCanvas" class="gaudio-studio__canvas h-[9.5rem] w-full md:h-[11rem]" width="920" height="320" />
+    <canvas
+      ref="analyzerCanvas"
+      class="gaudio-studio__canvas h-[9.5rem] w-full md:h-[11rem]"
+      width="920"
+      height="320"
+      role="img"
+      :aria-label="text.visualizer.description"
+    >
+      {{ text.visualizer.description }}
+    </canvas>
 
     <dl class="grid grid-cols-3 border-t" style="border-color: var(--gaudio-studio-border)">
       <div

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { DemoText } from './demo-i18n'
 import type { GaudioDemo } from './use-gaudio-demo'
-import { ScrollArea, ScrollBar } from '@/components/ui/scroll-area'
+import { ScrollArea } from '@/components/ui/scroll-area'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { demoCoverThumbUrl } from './demo-samples'
 
@@ -14,6 +14,7 @@ const {
   activeFormatFolder,
   demoFormatGroups,
   demoTracks,
+  isActiveFormat,
   isActiveTrack,
   isBusy,
   selectFormat,
@@ -45,18 +46,16 @@ const {
         class="gaudio-studio__format-grid"
         :aria-label="text.catalog.format"
         :model-value="activeFormatFolder"
-        @update:model-value="(value) => {
-          if (!value || typeof value !== 'string') return
-          const formatGroup = demoFormatGroups.find(group => group.folder === value)
-          if (formatGroup) selectFormat(formatGroup)
-        }"
       >
+        <!-- AI modified: direct activation lets an already-selected format retry a failed source. -->
         <ToggleGroupItem
           v-for="formatGroup in demoFormatGroups"
           :key="formatGroup.folder"
           :value="formatGroup.folder"
           class="gaudio-studio__format-item"
           :disabled="isBusy"
+          :aria-pressed="isActiveFormat(formatGroup.folder)"
+          @click="selectFormat(formatGroup)"
         >
           {{ formatGroup.label }}
         </ToggleGroupItem>
@@ -75,12 +74,14 @@ const {
           type="button"
           class="gaudio-studio__track-btn"
           :data-active="isActiveTrack(track.id)"
+          :aria-current="isActiveTrack(track.id) ? 'true' : undefined"
           :disabled="isBusy"
           @click="selectTrack(track)"
         >
+          <!-- AI modified: the adjacent track title names this decorative cover for assistive technology. -->
           <img
             :src="demoCoverThumbUrl(track.coverThumb)"
-            :alt="`${track.title} cover`"
+            alt=""
             class="size-10 shrink-0 rounded-md object-cover ring-1 ring-border"
             width="40"
             height="40"
@@ -92,7 +93,7 @@ const {
           </span>
         </button>
       </div>
-      <ScrollBar orientation="vertical" />
+      <!-- AI modified: the shared ScrollArea owns the single vertical scrollbar. -->
     </ScrollArea>
   </aside>
 </template>
