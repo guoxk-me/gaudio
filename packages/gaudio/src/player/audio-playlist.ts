@@ -48,7 +48,7 @@ export interface AudioPlaylistNavigationOptions {
   /**
    * Whether the selected track should begin playback after loading.
    *
-   * @defaultValue `false`
+   * When omitted, navigation inherits the player's current autoplay setting.
    */
   readonly autoplay?: boolean
 }

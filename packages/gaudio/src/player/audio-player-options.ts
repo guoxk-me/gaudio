@@ -24,7 +24,12 @@ export interface AudioPlayerAnalyzerContext {
   fftSize: number
 }
 
-/** Creates a custom analyzer for an {@link AudioPlayer}. */
+/**
+ * Creates a custom analyzer for an {@link AudioPlayer}.
+ *
+ * @param context Active engine and effective analyzer settings for this load.
+ * @returns A caller-owned analyzer, or `undefined` when analysis is unavailable.
+ */
 export type AudioPlayerAnalyzerFactory = (context: AudioPlayerAnalyzerContext) => AudioAnalyzer | undefined
 
 /** Configures player-owned audio analysis. */
