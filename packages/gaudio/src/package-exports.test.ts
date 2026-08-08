@@ -27,6 +27,7 @@ describe('package exports', () => {
     const hlsAdapter = createHlsAdapter()
 
     expect(hlsAdapter.protocol).toBe('hls')
+    expect(hlsAdapter.isSupported()).toBe(false)
   })
 
   it('publishes isolated HLS and DASH entry points with optional peers', async () => {

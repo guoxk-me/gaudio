@@ -1,3 +1,9 @@
+/**
+ * Core GAudio player, source, analysis, event, and shared adaptive-playback APIs.
+ *
+ * @module core
+ */
+// AI modified: an explicit TypeDoc module name avoids VitePress /api/index route ambiguity.
 export { AdaptivePlaybackPreset } from './adapters/adaptive-audio-types'
 export type {
   AdaptiveAudioProtocol,

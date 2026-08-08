@@ -41,6 +41,7 @@ export class FakeAudioElement extends EventTarget {
   playbackRate = 1
   currentTime = 0
   duration = 120
+  readyState = 1
   paused = true
   ended = false
   seeking = false
