@@ -6,9 +6,9 @@
       "DOM",
       "DOM.Iterable"
     ],
-    "baseUrl": ".",
     "module": "ESNext",
     "moduleResolution": "Bundler",
+    // AI modified: paths resolve from this config without TypeScript 7's removed baseUrl option.
     "paths": {
       "@/*": ["./*"]
     },
@@ -17,23 +17,37 @@
       "node",
       "vite/client"
     ],
+    // AI modified: shared configuration modules keep explicit TypeScript extensions for Node and VitePress loaders.
+    "allowImportingTsExtensions": true,
     "strict": true,
     "noEmit": true,
     "isolatedModules": true,
-    "skipLibCheck": true,
-    "ignoreDeprecations": "6.0"
+    "skipLibCheck": true
   },
   "include": [
+    // AI modified: type-check configs, API route metadata, and browser specs instead of leaving coverage gaps.
     ".vitepress/**/*.ts",
     ".vitepress/**/*.vue",
+    "*.config.ts",
     "components/**/*.ts",
     "components/**/*.vue",
+    "e2e/**/*.ts",
+    // AI modified: the shared Playwright server and browser matrix must remain inside a TypeScript gate.
+    "../../playwright.config.ts",
     "lib/**/*.ts",
     "examples/**/*.ts",
     "examples/**/*.vue",
+    "zh/api/**/*.ts",
+    // AI modified: VitePress Markdown SFC blocks must participate in vue-tsc validation.
+    "**/*.md",
     "*.test.ts"
   ],
   "exclude": [
-    ".vitepress/dist"
-  ]
+    ".vitepress/dist",
+    // AI modified: TypeDoc output is generated Markdown, not authored VitePress SFC source.
+    "api/**/*.md"
+  ],
+  "vueCompilerOptions": {
+    "vitePressExtensions": [".md"]
+  }
 }

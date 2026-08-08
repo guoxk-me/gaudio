@@ -15,7 +15,35 @@
   "mergeReadme": true,
   "cleanOutputDir": true,
   "excludeInternal": true,
+  "requiredToBeDocumented": [
+    "Module",
+    "Namespace",
+    "Enum",
+    "EnumMember",
+    "Variable",
+    "Function",
+    "Class",
+    "Interface",
+    "Constructor",
+    "Property",
+    "Method",
+    "CallSignature",
+    "IndexSignature",
+    "ConstructorSignature",
+    "Parameter",
+    "TypeParameter",
+    "Accessor",
+    "GetSignature",
+    "SetSignature",
+    "TypeAlias",
+    "Reference"
+  ],
+  "treatValidationWarningsAsErrors": true,
+  "validation": {
+    "notDocumented": true
+  },
   "intentionallyNotExported": [
+    "DashSettingChanges",
     "EventHandler"
   ]
 }

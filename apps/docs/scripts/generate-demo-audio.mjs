@@ -1,13 +1,15 @@
 import { Buffer } from 'node:buffer'
 import { spawn } from 'node:child_process'
-import { mkdir, rm, writeFile } from 'node:fs/promises'
+import { copyFile, mkdir, mkdtemp, rename, rm, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
+import process from 'node:process'
 import { fileURLToPath } from 'node:url'
 
 const scriptDir = dirname(fileURLToPath(import.meta.url))
-const audioRoot = join(scriptDir, '../public/audio')
+const publishedAudioRoot = join(scriptDir, '../public/audio')
 const sampleRate = 44_100
-const durationSeconds = 18
+// AI modified: eight-second clips preserve every format and adaptive path without shipping full demo songs.
+const durationSeconds = 8
 const channels = 2
 
 const demoTracks = [
@@ -234,7 +236,9 @@ function waveBytesForTrack(trackSpec) {
 
 async function runFfmpeg(args) {
   await new Promise((resolve, reject) => {
-    const ffmpeg = spawn('ffmpeg', ['-hide_banner', '-loglevel', 'error', ...args], {
+    // AI modified: an override makes failure recovery testable without changing the host ffmpeg installation.
+    const ffmpegCommand = process.env.GAUDIO_FFMPEG_BINARY ?? 'ffmpeg'
+    const ffmpeg = spawn(ffmpegCommand, ['-hide_banner', '-loglevel', 'error', ...args], {
       stdio: ['ignore', 'pipe', 'pipe'],
     })
     const errorChunks = []
@@ -247,22 +251,24 @@ async function runFfmpeg(args) {
         return
       }
 
-      reject(new Error(Buffer.concat(errorChunks).toString('utf8')))
+      // AI modified: surface the failed encoder command when ffmpeg exits without diagnostics.
+      const ffmpegMessage = Buffer.concat(errorChunks).toString('utf8').trim()
+      reject(new Error(`ffmpeg exited with code ${code}: ${args.join(' ')}${ffmpegMessage ? `\n${ffmpegMessage}` : ''}`))
     })
   })
 }
 
-async function encodeStandardFormats(trackSpec) {
-  const sourceWave = join(audioRoot, 'wav', `${trackSpec.id}.wav`)
+async function encodeStandardFormats(trackSpec, audioDirectory) {
+  const sourceWave = join(audioDirectory, 'wav', `${trackSpec.id}.wav`)
 
-  await runFfmpeg(['-y', '-i', sourceWave, '-codec:a', 'libmp3lame', '-b:a', '128k', join(audioRoot, 'mp3', `${trackSpec.id}.mp3`)])
-  await runFfmpeg(['-y', '-i', sourceWave, '-codec:a', 'aac', '-b:a', '128k', join(audioRoot, 'm4a', `${trackSpec.id}.m4a`)])
-  await runFfmpeg(['-y', '-i', sourceWave, '-codec:a', 'libopus', '-b:a', '96k', join(audioRoot, 'ogg', `${trackSpec.id}.ogg`)])
+  await runFfmpeg(['-y', '-i', sourceWave, '-codec:a', 'libmp3lame', '-b:a', '128k', join(audioDirectory, 'mp3', `${trackSpec.id}.mp3`)])
+  await runFfmpeg(['-y', '-i', sourceWave, '-codec:a', 'aac', '-b:a', '128k', join(audioDirectory, 'm4a', `${trackSpec.id}.m4a`)])
+  await runFfmpeg(['-y', '-i', sourceWave, '-codec:a', 'libopus', '-b:a', '96k', '-fflags', '+bitexact', join(audioDirectory, 'ogg', `${trackSpec.id}.ogg`)])
 }
 
-async function encodeHls(trackSpec) {
-  const sourceWave = join(audioRoot, 'wav', `${trackSpec.id}.wav`)
-  const outputPattern = join(audioRoot, 'hls', `${trackSpec.id}-%v.m3u8`)
+async function encodeHls(trackSpec, audioDirectory) {
+  const sourceWave = join(audioDirectory, 'wav', `${trackSpec.id}.wav`)
+  const outputPattern = join(audioDirectory, 'hls', `${trackSpec.id}-%v.m3u8`)
 
   await runFfmpeg([
     '-y',
@@ -301,7 +307,7 @@ async function encodeHls(trackSpec) {
     '-hls_playlist_type',
     'vod',
     '-hls_segment_filename',
-    join(audioRoot, 'hls', `${trackSpec.id}-%v_%03d.ts`),
+    join(audioDirectory, 'hls', `${trackSpec.id}-%v_%03d.ts`),
     '-master_pl_name',
     `${trackSpec.id}.m3u8`,
     '-var_stream_map',
@@ -310,8 +316,8 @@ async function encodeHls(trackSpec) {
   ])
 }
 
-async function encodeDash(trackSpec) {
-  const sourceWave = join(audioRoot, 'wav', `${trackSpec.id}.wav`)
+async function encodeDash(trackSpec, audioDirectory) {
+  const sourceWave = join(audioDirectory, 'wav', `${trackSpec.id}.wav`)
 
   await runFfmpeg([
     '-y',
@@ -357,24 +363,41 @@ async function encodeDash(trackSpec) {
     `${trackSpec.id}-init-$RepresentationID$.m4s`,
     '-media_seg_name',
     `${trackSpec.id}-segment-$RepresentationID$-$Number%05d$.m4s`,
-    join(audioRoot, 'dash', `${trackSpec.id}.mpd`),
+    join(audioDirectory, 'dash', `${trackSpec.id}.mpd`),
   ])
 }
 
-await rm(join(audioRoot, 'flac'), { recursive: true, force: true })
+const stagingAudioRoot = await mkdtemp(join(dirname(publishedAudioRoot), '.audio-staging-'))
+const previousAudioRoot = `${publishedAudioRoot}.previous-${process.pid}`
 
-for (const folder of ['mp3', 'wav', 'm4a', 'ogg', 'hls', 'dash']) {
-  // AI modified: regenerate demo audio folders so third-party samples cannot linger.
-  await rm(join(audioRoot, folder), { recursive: true, force: true })
-  await mkdir(join(audioRoot, folder), { recursive: true })
+try {
+  await copyFile(join(publishedAudioRoot, 'README.md'), join(stagingAudioRoot, 'README.md'))
+
+  for (const folder of ['mp3', 'wav', 'm4a', 'ogg', 'hls', 'dash']) {
+    await mkdir(join(stagingAudioRoot, folder), { recursive: true })
+  }
+
+  for (const trackSpec of demoTracks) {
+    const sourceWave = join(stagingAudioRoot, 'wav', `${trackSpec.id}.wav`)
+
+    await writeFile(sourceWave, waveBytesForTrack(trackSpec))
+    await encodeStandardFormats(trackSpec, stagingAudioRoot)
+    await encodeHls(trackSpec, stagingAudioRoot)
+    await encodeDash(trackSpec, stagingAudioRoot)
+    console.log(`generated audio samples for ${trackSpec.id}`)
+  }
+
+  // AI modified: publish only a complete sample set and restore the previous directory if the swap fails.
+  await rename(publishedAudioRoot, previousAudioRoot)
+  try {
+    await rename(stagingAudioRoot, publishedAudioRoot)
+  }
+  catch (publishError) {
+    await rename(previousAudioRoot, publishedAudioRoot)
+    throw publishError
+  }
+  await rm(previousAudioRoot, { recursive: true, force: true })
 }
-
-for (const trackSpec of demoTracks) {
-  const sourceWave = join(audioRoot, 'wav', `${trackSpec.id}.wav`)
-
-  await writeFile(sourceWave, waveBytesForTrack(trackSpec))
-  await encodeStandardFormats(trackSpec)
-  await encodeHls(trackSpec)
-  await encodeDash(trackSpec)
-  console.log(`generated audio samples for ${trackSpec.id}`)
+finally {
+  await rm(stagingAudioRoot, { recursive: true, force: true })
 }
