@@ -5,7 +5,7 @@ import type { HTMLAttributes } from 'vue'
 import type { toggleVariants } from '@/components/ui/toggle'
 import { reactiveOmit } from '@vueuse/core'
 import { ToggleGroupRoot, useForwardPropsEmits } from 'reka-ui'
-import { provide } from 'vue'
+import { computed, provide } from 'vue'
 import { cn } from '@/lib/utils'
 
 type ToggleGroupVariants = VariantProps<typeof toggleVariants>
@@ -21,13 +21,14 @@ const props = withDefaults(defineProps<ToggleGroupRootProps & {
 
 const emits = defineEmits<ToggleGroupRootEmits>()
 
-provide('toggleGroup', {
+// AI modified: derive group styling context so item styles follow reactive prop changes.
+provide('toggleGroup', computed(() => ({
   variant: props.variant,
   size: props.size,
   spacing: props.spacing,
-})
+})))
 
-const delegatedProps = reactiveOmit(props, 'class', 'size', 'variant')
+const delegatedProps = reactiveOmit(props, 'class', 'size', 'spacing', 'variant')
 const forwarded = useForwardPropsEmits(delegatedProps, emits)
 </script>
 
@@ -42,7 +43,7 @@ const forwarded = useForwardPropsEmits(delegatedProps, emits)
       '--gap': spacing,
     }"
     v-bind="forwarded"
-    :class="cn('group/toggle-group flex w-fit items-center gap-[--spacing(var(--gap))] rounded-md data-[spacing=default]:data-[variant=outline]:shadow-xs', props.class)"
+    :class="cn('group/toggle-group flex w-fit items-center gap-[--spacing(var(--gap))] rounded-md data-[spacing=0]:data-[variant=outline]:shadow-xs', props.class)"
   >
     <slot v-bind="slotProps" />
   </ToggleGroupRoot>
