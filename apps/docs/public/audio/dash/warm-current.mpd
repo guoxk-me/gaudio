@@ -5,7 +5,7 @@
 	xsi:schemaLocation="urn:mpeg:DASH:schema:MPD:2011 http://standards.iso.org/ittf/PubliclyAvailableStandards/MPEG-DASH_schema_files/DASH-MPD.xsd"
 	profiles="urn:mpeg:dash:profile:isoff-live:2011"
 	type="static"
-	mediaPresentationDuration="PT18.0S"
+	mediaPresentationDuration="PT8.0S"
 	maxSegmentDuration="PT4.0S"
 	minBufferTime="PT8.0S">
 	<ProgramInformation>
@@ -19,8 +19,7 @@
 				<SegmentTemplate timescale="44100" initialization="warm-current-init-$RepresentationID$.m4s" media="warm-current-segment-$RepresentationID$-$Number%05d$.m4s" startNumber="1">
 					<SegmentTimeline>
 						<S t="0" d="176128" />
-						<S d="177152" r="2" />
-						<S d="86216" />
+						<S d="176672" />
 					</SegmentTimeline>
 				</SegmentTemplate>
 			</Representation>
@@ -29,8 +28,7 @@
 				<SegmentTemplate timescale="44100" initialization="warm-current-init-$RepresentationID$.m4s" media="warm-current-segment-$RepresentationID$-$Number%05d$.m4s" startNumber="1">
 					<SegmentTimeline>
 						<S t="0" d="176128" />
-						<S d="177152" r="2" />
-						<S d="86216" />
+						<S d="176672" />
 					</SegmentTimeline>
 				</SegmentTemplate>
 			</Representation>
@@ -39,8 +37,7 @@
 				<SegmentTemplate timescale="44100" initialization="warm-current-init-$RepresentationID$.m4s" media="warm-current-segment-$RepresentationID$-$Number%05d$.m4s" startNumber="1">
 					<SegmentTimeline>
 						<S t="0" d="176128" />
-						<S d="177152" r="2" />
-						<S d="86216" />
+						<S d="176672" />
 					</SegmentTimeline>
 				</SegmentTemplate>
 			</Representation>
