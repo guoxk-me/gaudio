@@ -33,11 +33,21 @@ export interface AudioSource {
   /**
    * Opens the source for playback.
    *
+   * A matching {@link close} may be requested before this promise settles. A late
+   * completion must not make a cancelled operation usable again.
+   *
    * @returns A handle containing the URL to load.
    */
   open: () => Promise<AudioStreamHandle>
   /**
-   * Releases resources associated with the current open operation.
+   * Cancels or releases resources associated with the current open operation.
+   *
+   * This method may run while {@link open} is pending and may be invoked more than
+   * once for the same operation, including after `open()` throws or rejects, or
+   * after an earlier `close()` rejects. Implementations must cancel or invalidate
+   * pending work, prevent late open completions from publishing resources, and
+   * make repeated calls safe. Keep cleanup state until this promise resolves so a
+   * later `load()`, `unload()`, or `dispose()` can retry a failed cleanup.
    *
    * @returns A promise that settles after cleanup completes.
    */

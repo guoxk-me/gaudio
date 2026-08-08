@@ -46,4 +46,29 @@ describe('blobAudioSource', () => {
     expect(createObjectUrl).toHaveBeenCalledTimes(1)
     expect(revokeObjectUrl).toHaveBeenCalledTimes(1)
   })
+
+  it('exposes its owned object URL as a read-only lifecycle view', async () => {
+    const createObjectUrl = vi.fn(() => 'blob:https://example.com/owned')
+    const revokeObjectUrl = vi.fn()
+    URL.createObjectURL = createObjectUrl
+    URL.revokeObjectURL = revokeObjectUrl
+
+    const source = new BlobAudioSource(new Blob(['audio']))
+    if (false) {
+      // @ts-expect-error AI modified: callers cannot replace the object URL owned by a BlobAudioSource.
+      source.url = 'https://example.com/external.mp3'
+    }
+
+    expect(source.url).toBeUndefined()
+
+    await expect(source.open()).resolves.toEqual({
+      url: 'blob:https://example.com/owned',
+    })
+    expect(source.url).toBe('blob:https://example.com/owned')
+    await source.close()
+
+    expect(revokeObjectUrl).toHaveBeenCalledOnce()
+    expect(revokeObjectUrl).toHaveBeenCalledWith('blob:https://example.com/owned')
+    expect(source.url).toBeUndefined()
+  })
 })

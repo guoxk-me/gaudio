@@ -16,10 +16,14 @@ export class BlobAudioSource implements AudioSource {
   readonly protocol?: AudioProtocol
   /** MIME type hint used for routing and support checks. */
   readonly mimeType?: string
-  /** Active object URL after {@link open}, when one has been created. */
-  url?: string
+  readonly #blob: Blob
+  #objectUrl?: string
 
-  private readonly blob: Blob
+  /** Active object URL after {@link open}, when one has been created. */
+  get url(): string | undefined {
+    // AI modified: expose only the URL owned by this source so callers cannot redirect blob routing.
+    return this.#objectUrl
+  }
 
   /**
    * Creates a blob-backed source.
@@ -28,7 +32,7 @@ export class BlobAudioSource implements AudioSource {
    * @param options Protocol and MIME metadata used by the player.
    */
   constructor(blob: Blob, options: BlobAudioSourceOptions = {}) {
-    this.blob = blob
+    this.#blob = blob
     this.protocol = options.protocol
     this.mimeType = options.mimeType ?? (blob.type || undefined)
   }
@@ -39,23 +43,23 @@ export class BlobAudioSource implements AudioSource {
    * @returns A handle containing the object URL.
    */
   async open(): Promise<AudioStreamHandle> {
-    if (!this.url) {
+    if (!this.#objectUrl) {
       // AI modified: the source owns object URL creation so close() can reliably revoke it.
-      this.url = URL.createObjectURL(this.blob)
+      this.#objectUrl = URL.createObjectURL(this.#blob)
     }
 
     return {
-      url: this.url,
+      url: this.#objectUrl,
     }
   }
 
   /** Revokes the active object URL when one exists. */
   async close(): Promise<void> {
-    if (!this.url) {
+    if (!this.#objectUrl) {
       return
     }
 
-    URL.revokeObjectURL(this.url)
-    this.url = undefined
+    URL.revokeObjectURL(this.#objectUrl)
+    this.#objectUrl = undefined
   }
 }
