@@ -1,5 +1,7 @@
 // @env browser
 
+import { GAudioError } from '../errors/errors'
+
 /** Configures frequency-domain samples returned by {@link AudioAnalyzer.getFrequencyData}. */
 export interface FrequencyDataOptions {
   /** Number of frequency bins to return. Defaults to the analyzer node's `frequencyBinCount`. */
@@ -22,10 +24,16 @@ export interface AudioAnalyzerOptions {
   fftSize?: number
 }
 
-/** Provides byte-based frequency and waveform samples from a Web Audio graph. */
+/**
+ * Provides byte-based frequency and waveform samples from a Web Audio graph.
+ *
+ * Use this concrete utility directly or through composition. Subclassing is not a supported
+ * compatibility contract; provide a custom analyzer through `AudioPlayerOptions.analyzer` instead.
+ */
 export class AudioAnalyzer {
   private readonly analyserNode: AnalyserNode
   private readonly sourceNode: AudioNode
+  private isDisposed = false
 
   /**
    * Creates and connects an analyzer node to an existing source node.
@@ -49,6 +57,9 @@ export class AudioAnalyzer {
    * @param destinationNode Node that should receive the analyzer output.
    */
   connect(destinationNode: AudioNode): void {
+    if (this.isDisposed) {
+      throw new GAudioError('ENGINE_ERROR', 'AudioAnalyzer has been disposed')
+    }
     this.analyserNode.connect(destinationNode)
   }
 
@@ -80,8 +91,24 @@ export class AudioAnalyzer {
 
   /** Disconnects the source input and internal analyzer output destinations. */
   dispose(): void {
-    // AI modified: releasing player-owned analyzers must remove the source-to-analyzer edge as well.
-    this.sourceNode.disconnect(this.analyserNode)
-    this.analyserNode.disconnect()
+    if (this.isDisposed) {
+      return
+    }
+
+    // AI modified: disposal is terminal while both graph edges still get an independent cleanup attempt.
+    this.isDisposed = true
+    try {
+      this.sourceNode.disconnect(this.analyserNode)
+    }
+    catch {
+      // Web Audio cleanup is best-effort and must not block the remaining graph teardown.
+    }
+
+    try {
+      this.analyserNode.disconnect()
+    }
+    catch {
+      // Disposal remains complete even when the browser reports an already-removed output edge.
+    }
   }
 }

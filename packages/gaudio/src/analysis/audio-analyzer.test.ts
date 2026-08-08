@@ -5,6 +5,8 @@ class FakeAnalyserNode {
   fftSize = 2048
   readonly connectedNodes: AudioNode[] = []
   isDisconnected = false
+  disconnectCalls = 0
+  disconnectError?: Error
 
   get frequencyBinCount(): number {
     return this.fftSize / 2
@@ -16,6 +18,10 @@ class FakeAnalyserNode {
   }
 
   disconnect(): void {
+    this.disconnectCalls += 1
+    if (this.disconnectError) {
+      throw this.disconnectError
+    }
     this.isDisconnected = true
   }
 
@@ -43,6 +49,8 @@ class FakeAudioContext {
 class FakeAudioNode {
   readonly connectedNodes: AudioNode[] = []
   readonly disconnectedNodes: AudioNode[] = []
+  disconnectCalls = 0
+  disconnectError?: Error
 
   connect(destinationNode: AudioNode): AudioNode {
     this.connectedNodes.push(destinationNode)
@@ -50,6 +58,13 @@ class FakeAudioNode {
   }
 
   disconnect(destinationNode: AudioNode): void {
+    this.disconnectCalls += 1
+    if (this.disconnectError) {
+      throw this.disconnectError
+    }
+    if (this.disconnectedNodes.includes(destinationNode)) {
+      throw new DOMException('Connection is already disconnected', 'InvalidAccessError')
+    }
     this.disconnectedNodes.push(destinationNode)
   }
 }
@@ -94,11 +109,67 @@ describe('audioAnalyzer', () => {
 
     analyzer.connect(destinationNode as unknown as AudioNode)
     analyzer.dispose()
+    analyzer.dispose()
 
     expect([...analyzer.getFrequencyData({ binCount: 3 })]).toEqual([10, 11, 12])
     expect([...analyzer.getWaveformData({ sampleCount: 3 })]).toEqual([128, 129, 130])
     expect(analyserNode.connectedNodes).toEqual([destinationNode])
     expect(sourceNode.disconnectedNodes).toEqual([analyserNode])
     expect(analyserNode.isDisconnected).toBe(true)
+    expect(analyserNode.disconnectCalls).toBe(1)
+  })
+
+  it('finishes analyzer cleanup when the source disconnect fails and never retries disposal', () => {
+    const analyserNode = new FakeAnalyserNode()
+    const sourceNode = new FakeAudioNode()
+    const disconnectError = new DOMException('Source disconnect failed', 'InvalidAccessError')
+    sourceNode.disconnectError = disconnectError
+    const analyzer = new AudioAnalyzer(
+      new FakeAudioContext(analyserNode) as unknown as AudioContext,
+      sourceNode as unknown as AudioNode,
+    )
+
+    expect(() => analyzer.dispose()).not.toThrow()
+    expect(analyserNode.isDisconnected).toBe(true)
+    expect(sourceNode.disconnectCalls).toBe(1)
+    expect(analyserNode.disconnectCalls).toBe(1)
+
+    expect(() => analyzer.dispose()).not.toThrow()
+    expect(sourceNode.disconnectCalls).toBe(1)
+    expect(analyserNode.disconnectCalls).toBe(1)
+  })
+
+  it('keeps source cleanup complete when analyzer output disconnection fails', () => {
+    const analyserNode = new FakeAnalyserNode()
+    analyserNode.disconnectError = new DOMException('Analyzer disconnect failed', 'InvalidAccessError')
+    const sourceNode = new FakeAudioNode()
+    const analyzer = new AudioAnalyzer(
+      new FakeAudioContext(analyserNode) as unknown as AudioContext,
+      sourceNode as unknown as AudioNode,
+    )
+
+    expect(() => analyzer.dispose()).not.toThrow()
+    expect(sourceNode.disconnectedNodes).toEqual([analyserNode])
+    expect(sourceNode.disconnectCalls).toBe(1)
+    expect(analyserNode.disconnectCalls).toBe(1)
+  })
+
+  it('rejects new output connections after disposal with a stable engine error', () => {
+    const analyserNode = new FakeAnalyserNode()
+    const analyzer = new AudioAnalyzer(
+      new FakeAudioContext(analyserNode) as unknown as AudioContext,
+      new FakeAudioNode() as unknown as AudioNode,
+    )
+
+    analyzer.dispose()
+
+    let connectionError: unknown
+    try {
+      analyzer.connect(new FakeAudioNode() as unknown as AudioNode)
+    }
+    catch (error) {
+      connectionError = error
+    }
+    expect(connectionError).toMatchObject({ code: 'ENGINE_ERROR' })
   })
 })
