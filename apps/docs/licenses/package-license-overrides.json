@@ -1,0 +1,7 @@
+{
+  "@docsearch/css@3.8.2": {
+    "licenseExpression": "MIT",
+    "licenseFile": "docsearch-v3.8.2-license.txt",
+    "source": "https://github.com/algolia/docsearch/blob/v3.8.2/LICENSE"
+  }
+}
