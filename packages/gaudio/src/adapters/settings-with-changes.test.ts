@@ -45,22 +45,67 @@ describe('settingsWithChanges', () => {
     expect(mergedSettings.streaming?.retries).not.toBe(settingChanges.streaming.retries)
   })
 
-  it('replaces arrays, regular expressions, and class instances', () => {
+  it('isolates arrays and their plain entries while retaining opaque vendor values', () => {
     const replacementPattern = /stable/
     const replacementVendorSetting = new VendorSetting('replacement')
+    const replacementValues = [{ name: 'replacement' }]
 
     const mergedSettings = settingsWithChanges({
-      values: [1, 2],
+      values: [{ name: 'current' }],
       pattern: /balanced/,
       vendorSetting: new VendorSetting('current'),
     }, {
-      values: [3],
+      values: replacementValues,
       pattern: replacementPattern,
       vendorSetting: replacementVendorSetting,
     })
 
-    expect(mergedSettings.values).toEqual([3])
+    expect(mergedSettings.values).toEqual([{ name: 'replacement' }])
+    expect(mergedSettings.values).not.toBe(replacementValues)
+    expect(mergedSettings.values[0]).not.toBe(replacementValues[0])
     expect(mergedSettings.pattern).toBe(replacementPattern)
     expect(mergedSettings.vendorSetting).toBe(replacementVendorSetting)
+  })
+
+  it('isolates unchanged current arrays in the returned settings', () => {
+    const currentSettings = {
+      cmcd: {
+        includeKeys: ['br', { name: 'duration' }],
+      },
+    }
+
+    const mergedSettings = settingsWithChanges(currentSettings, {})
+    const mergedKeys = mergedSettings.cmcd.includeKeys
+
+    expect(mergedKeys).toEqual(['br', { name: 'duration' }])
+    expect(mergedKeys).not.toBe(currentSettings.cmcd.includeKeys)
+    expect(mergedKeys[1]).not.toBe(currentSettings.cmcd.includeKeys[1])
+  })
+
+  it.each(['__proto__', 'prototype', 'constructor'])(
+    'rejects the unsafe %s settings key at every depth',
+    (unsafeSettingName) => {
+      const topLevelChanges = JSON.parse(`{"${unsafeSettingName}":{"injected":true}}`) as object
+      const nestedChanges = {
+        streaming: JSON.parse(`{"${unsafeSettingName}":{"injected":true}}`) as object,
+      }
+
+      expect(() => settingsWithChanges({}, topLevelChanges)).toThrowError(
+        `Unsupported settings key "${unsafeSettingName}"`,
+      )
+      expect(() => settingsWithChanges({}, nestedChanges)).toThrowError(
+        `Unsupported settings key "${unsafeSettingName}"`,
+      )
+      expect(Object.prototype).not.toHaveProperty('injected')
+    },
+  )
+
+  it('rejects unsafe keys already present in current settings', () => {
+    const currentSettings = JSON.parse('{"__proto__":{"injected":true}}') as object
+
+    expect(() => settingsWithChanges(currentSettings, {})).toThrowError(
+      'Unsupported settings key "__proto__"',
+    )
+    expect(Object.prototype).not.toHaveProperty('injected')
   })
 })

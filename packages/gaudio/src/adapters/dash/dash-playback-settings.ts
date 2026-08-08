@@ -1,5 +1,5 @@
-import type { MediaPlayerSettingClass } from 'dashjs'
 import type { AdaptiveContentType, AdaptivePlaybackPreset } from '../adaptive-audio-types'
+import type { MediaPlayerSettingClass } from './dashjs-types'
 import { settingsWithChanges } from '../settings-with-changes'
 import { dashContentTypeSettings } from './dash-content-type-settings'
 import { dashPresetSettings } from './dash-playback-presets'

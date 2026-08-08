@@ -19,20 +19,29 @@ export type HlsPlaybackStrategy = 'native-first' | 'hls-first' | 'native-only' |
 export type HlsRetryConfigChanges = Partial<RetryConfig>
 /** Partial loader settings with independently mergeable retry branches. */
 export type HlsLoaderConfigChanges = Omit<Partial<LoaderConfig>, 'timeoutRetry' | 'errorRetry'> & {
+  /** Retry behavior applied after a request timeout. */
   timeoutRetry?: HlsRetryConfigChanges | null
+  /** Retry behavior applied after another request error. */
   errorRetry?: HlsRetryConfigChanges | null
 }
 /** Partial default loader policy for one HLS request category. */
-export interface HlsLoadPolicyChanges { default?: HlsLoaderConfigChanges }
+export interface HlsLoadPolicyChanges {
+  /** Overrides the retry and timeout policy shared by requests in this category. */
+  default?: HlsLoaderConfigChanges
+}
 
-/** HLS constructor settings with deep partial request policies. */
+/** HLS constructor settings whose manifest, playlist, fragment, and key policies accept nested partial overrides. */
 export type HlsAdapterConfig = Omit<
   Partial<HlsConfig>,
   'manifestLoadPolicy' | 'playlistLoadPolicy' | 'fragLoadPolicy' | 'keyLoadPolicy'
 > & {
+  /** Manifest request policy override. */
   manifestLoadPolicy?: HlsLoadPolicyChanges
+  /** Media-playlist request policy override. */
   playlistLoadPolicy?: HlsLoadPolicyChanges
+  /** Media-fragment request policy override. */
   fragLoadPolicy?: HlsLoadPolicyChanges
+  /** Encryption-key request policy override. */
   keyLoadPolicy?: HlsLoadPolicyChanges
 }
 
@@ -84,7 +93,11 @@ export interface HlsAudioAdapter extends AudioEngineAdapter {
   readonly hlsInstance: Hls | undefined
   /** Selected implementation for the active engine, or `undefined` when no engine is active. */
   readonly implementation: 'native' | 'hls.js' | undefined
-  /** @returns An isolated readonly copy of the configuration used for future `hls.js` engines. */
+  /**
+   * Inspects future-engine settings without exposing the adapter's mutable configuration.
+   *
+   * @returns An isolated readonly copy of the configuration used for future `hls.js` engines.
+   */
   getConfig: () => Readonly<Partial<HlsConfig>>
   /**
    * Updates configuration for future loads and optionally recreates the active `hls.js` engine.
@@ -106,6 +119,7 @@ interface HlsAdapterDependencies {
   audioElementFactory: () => HTMLAudioElement
   loadHlsRuntime: () => Promise<HlsAdapterRuntime>
   hasHlsRuntimeSupport: () => boolean
+  hasNativeHlsSupport: () => boolean
 }
 
 export class HlsAudioAdapterImpl implements HlsAudioAdapter {
@@ -192,13 +206,15 @@ export class HlsAudioAdapterImpl implements HlsAudioAdapter {
 
   async updateConfig(config: HlsAdapterConfig, options: HlsConfigUpdateOptions = {}): Promise<void> {
     this.config = settingsWithChanges(this.config, config)
+    const nextConfig = settingsWithChanges<Partial<HlsConfig>>({}, this.config)
+    this.activeEngine?.updateConfig(nextConfig)
 
     if (options.apply !== 'reload' || !this.activeEngine) {
       return
     }
 
     // AI modified: reload is explicit because many hls.js constructor options cannot change in place.
-    await this.activeEngine.reload(settingsWithChanges<Partial<HlsConfig>>({}, this.config), {
+    await this.activeEngine.reload(nextConfig, {
       restorePosition: options.restorePosition ?? true,
       resumePlayback: options.resumePlayback,
     })
@@ -232,8 +248,6 @@ export class HlsAudioAdapterImpl implements HlsAudioAdapter {
   }
 
   private supportsNativeHls(): boolean {
-    const audioElement = this.dependencies.audioElementFactory()
-    return audioElement.canPlayType('application/vnd.apple.mpegurl') !== ''
-      || audioElement.canPlayType('application/x-mpegurl') !== ''
+    return this.dependencies.hasNativeHlsSupport()
   }
 }

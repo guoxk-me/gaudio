@@ -1,9 +1,15 @@
 // @env browser
 
-import type { MediaPlayerClass, MediaPlayerEvents, MediaPlayerSettingClass } from 'dashjs'
 import type { AudioEngine } from '../../engine/audio-engine'
 import type { AudioEngineAdapter } from '../../engine/audio-engine-adapter'
 import type { AdaptiveContentType } from '../adaptive-audio-types'
+import type { DashErrorCodes } from './dash-audio-engine'
+import type {
+  DashSettingsChanges,
+  MediaPlayerClass,
+  MediaPlayerEvents,
+  MediaPlayerSettingClass,
+} from './dashjs-types'
 import { GAudioError } from '../../errors/errors'
 import { AdaptivePlaybackPreset } from '../adaptive-audio-types'
 import { settingsWithChanges } from '../settings-with-changes'
@@ -24,22 +30,26 @@ export interface DashAdapterOptions {
    * @defaultValue {@link AdaptivePlaybackPreset.Balanced}
    */
   preset?: AdaptivePlaybackPreset
-  /** Initial dash.js settings applied when a DASH engine is created. */
-  settings?: MediaPlayerSettingClass
+  /** Sparse initial dash.js settings applied when a DASH engine is created. */
+  settings?: DashSettingsChanges
 }
 
 /** DASH adapter with runtime settings and vendor-instance diagnostics. */
 export interface DashAudioAdapter extends AudioEngineAdapter {
   /** Active dash.js player instance, or `undefined` when no DASH engine is active. */
   readonly dashInstance: MediaPlayerClass | undefined
-  /** @returns A deep readonly copy of settings used for future DASH engines. */
+  /**
+   * Inspects future-engine settings without exposing the mutable object owned by dash.js.
+   *
+   * @returns An isolated deep copy of settings with top-level readonly typing.
+   */
   getSettings: () => Readonly<MediaPlayerSettingClass>
   /**
    * Deep-merges dash.js settings and applies the changed values to the active engine.
    *
-   * @param settings Settings to merge through the official dash.js runtime update API.
+   * @param settings Sparse settings to merge through the official dash.js runtime update API.
    */
-  updateSettings: (settings: MediaPlayerSettingClass) => void
+  updateSettings: (settings: DashSettingsChanges) => void
 }
 
 interface DashAdapterDependencies {
@@ -51,6 +61,7 @@ interface DashAdapterDependencies {
 interface DashRuntime {
   createDashPlayer: () => MediaPlayerClass
   events: MediaPlayerEvents
+  errorCodes: DashErrorCodes
 }
 
 export class DashAudioAdapterImpl implements DashAudioAdapter {
@@ -90,6 +101,7 @@ export class DashAudioAdapterImpl implements DashAudioAdapter {
       audioElement,
       createDashPlayer: dashRuntime.createDashPlayer,
       events: dashRuntime.events,
+      errorCodes: dashRuntime.errorCodes,
       onDashInstanceChange: (instance) => {
         if (this.activeEngine === engine) {
           this.dashInstance = instance
@@ -110,8 +122,9 @@ export class DashAudioAdapterImpl implements DashAudioAdapter {
     return structuredClone(this.settings)
   }
 
-  updateSettings(settings: MediaPlayerSettingClass): void {
+  updateSettings(settings: DashSettingsChanges): void {
     this.settings = settingsWithChanges(this.settings, settings)
-    this.activeEngine?.updateSettings(structuredClone(settings))
+    // AI modified: reused engines receive the complete merged settings used by their next dash.js player.
+    this.activeEngine?.updateSettings(structuredClone(this.settings))
   }
 }

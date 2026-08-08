@@ -12,8 +12,11 @@ export type AdaptiveContentType = 'vod' | 'long-form' | 'live'
 // AI modified: shared presets keep HLS and DASH playback profiles aligned.
 /** Selects a vendor-specific adaptive audio configuration profile. */
 export enum AdaptivePlaybackPreset {
+  /** Minimizes startup latency with smaller initial buffers and faster recovery decisions. */
   FastStart = 'fast-start',
+  /** Balances startup time and buffering resilience for typical on-demand audio. */
   Balanced = 'balanced',
+  /** Prioritizes uninterrupted playback through more conservative buffering behavior. */
   Stable = 'stable',
 }
 
@@ -27,7 +30,7 @@ export interface AdaptivePlaybackInfo {
 
 /** Describes a bitrate variant declared by an adaptive manifest. */
 export interface AdaptiveVariant {
-  /** Vendor-provided identifier for the variant. */
+  /** Stable public identifier; reserved vendor identifiers may receive a collision-safe suffix. */
   id: string
   /** Declared bitrate in bits per second. */
   bitrate: number

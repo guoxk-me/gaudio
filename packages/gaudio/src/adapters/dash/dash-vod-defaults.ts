@@ -1,4 +1,4 @@
-import type { MediaPlayerSettingClass } from 'dashjs'
+import type { MediaPlayerSettingClass } from './dashjs-types'
 
 export function dashVodDefaults(): MediaPlayerSettingClass {
   return {
