@@ -6,6 +6,9 @@ demo/dist
 # AI modified: keep local Playwright artifacts out of release commits.
 output
 test-results
+.playwright-cli
+# AI modified: coverage reports are reproducible CI artifacts, not source files.
+**/coverage/
 apps/docs/.vitepress/cache
 apps/docs/.vitepress/dist
 apps/docs/api

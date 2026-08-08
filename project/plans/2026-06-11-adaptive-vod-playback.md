@@ -1,5 +1,7 @@
 # GAudio 0.4.0 Adaptive VOD Playback Implementation Plan
 
+> **Status:** Historical implementation record. Unchecked boxes preserve the original planning state and are not current tasks; later plans and the shipped package define current behavior.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Add optional HLS and MPEG-DASH VOD adapters with automatic protocol routing, unified adaptive events, vendor configuration access, and same-player protocol switching.

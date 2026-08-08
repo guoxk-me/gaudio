@@ -1,5 +1,7 @@
 # Public API TSDoc Design
 
+> **Status:** Historical design record. Generated declarations and API pages are the current documentation contract.
+
 ## Goal
 
 Make gaudio's public API understandable from IDE hover and parameter hints without requiring consumers to read the implementation.
@@ -26,4 +28,3 @@ Make gaudio's public API understandable from IDE hover and parameter hints witho
 - Run ESLint and the full Vitest suite.
 - Build all package entry points.
 - Inspect emitted `.d.ts` files to confirm TSDoc is retained for IDE consumers.
-

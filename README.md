@@ -24,15 +24,17 @@ Use the core package for MP3, AAC, WAV, OGG, local files, podcast-style queues, 
 
 ## Install
 
+The commands below target npm's `next` dist-tag. Before the first registry release is visible, clone this repository and use its `gaudio` workspace package instead.
+
 ```bash
-pnpm add gaudio
+pnpm add gaudio@next
 ```
 
 Install only the adaptive dependency your application uses:
 
 ```bash
-pnpm add gaudio hls.js
-pnpm add gaudio dashjs
+pnpm add gaudio@next hls.js
+pnpm add gaudio@next dashjs
 ```
 
 ## Entry Points
@@ -41,9 +43,26 @@ pnpm add gaudio dashjs
 | --- | --- |
 | `gaudio` | `AudioPlayer`, source helpers, analyzer, event emitter, core types, and protocol-neutral adaptive APIs |
 | `gaudio/hls` | `createHlsAdapter`, HLS adapter types, and `HlsConfig` |
-| `gaudio/dash` | `createDashAdapter`, DASH adapter types, and dash.js type re-exports |
+| `gaudio/dash` | `createDashAdapter`, `DashSettingsChanges`, DASH adapter types, and dash.js type re-exports |
 
 The root entry does not import `hls.js` or `dashjs`.
+
+## Compatibility
+
+| Surface | Supported environment |
+| --- | --- |
+| `gaudio` core runtime and package imports | Node.js 18 or newer; playback APIs require browser media globals |
+| `gaudio/hls` | Browser-native HLS or Media Source Extensions with optional `hls.js ^1.6.16`; SSR import and capability checks are safe |
+| `gaudio/dash` | Media Source Extensions with optional `dashjs ^5.2.0`; dash.js tooling itself declares Node.js 20 or newer |
+| Type declarations | TypeScript 5.8 or newer; verified with TypeScript 5.8.3 and the current project compiler |
+
+Node.js 18 CI intentionally consumes the packed artifact without optional adaptive peers. This is an SSR/package-import compatibility floor only: Node.js 18 is EOL and is not recommended for new secure deployments. Maintained Node.js 24 is the development and release baseline. HLS and DASH playback are browser capabilities and are not advertised as server-side media engines.
+
+Browser support is capability-based. CI exercises the current Playwright-bundled Chromium, Firefox, and WebKit desktop engines plus a Pixel 5 Chromium emulation project; this is a tested-current matrix, not a minimum-version or real-device guarantee. Core playback requires `HTMLAudioElement`, and analysis requires Web Audio. HLS requires native HLS or Media Source Extensions compatible with hls.js. DASH requires Media Source Extensions compatible with dash.js and native `globalThis.structuredClone()`. GAudio does not ship browser polyfills.
+
+TypeScript consumers of `gaudio/dash` must use `node16`, `nodenext`, or `bundler` module resolution. Legacy `node10` resolution cannot resolve dash.js's transitive type packages.
+
+`MediaElementAudioEngine` is the only exported class with a supported inheritance contract; subclasses may rely on its public and protected members. Use `AudioPlayer`, `AudioAnalyzer`, and `EventEmitter` directly or through composition rather than subclassing them.
 
 ## Quick Start
 
@@ -67,8 +86,13 @@ await player.play()
 ## Documentation
 
 - Package README: [`packages/gaudio/README.md`](packages/gaudio/README.md)
+- Package changelog: [`packages/gaudio/CHANGELOG.md`](packages/gaudio/CHANGELOG.md)
 - English docs: [`apps/docs/index.md`](apps/docs/index.md)
 - Chinese docs: [`apps/docs/zh/index.md`](apps/docs/zh/index.md)
+- Contributing guide: [`CONTRIBUTING.md`](CONTRIBUTING.md)
+- Support policy: [`SUPPORT.md`](SUPPORT.md)
+- Security policy: [`SECURITY.md`](SECURITY.md)
+- Maintainer release runbook: [`RELEASING.md`](RELEASING.md)
 
 ## Development
 
@@ -77,5 +101,6 @@ pnpm install
 pnpm run typecheck
 pnpm run lint
 pnpm run test
+pnpm run coverage
 pnpm run build
 ```

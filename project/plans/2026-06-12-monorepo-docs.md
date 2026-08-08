@@ -1,5 +1,9 @@
 # Monorepo and Documentation Migration Implementation Plan
 
+> **Status:** Historical implementation record. Completion marks reflect that implementation session; current workspace files and verification are authoritative.
+>
+> **Superseded decision:** The planned `apps/docs/guide/migration.md` was intentionally omitted because GAudio remains pre-release and has no supported earlier documentation layout to migrate from. Current changes are recorded in the package changelog instead.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Convert gaudio into a pnpm/Turborepo workspace with one publishable library package and one VitePress documentation application containing generated API pages and the interactive demo.

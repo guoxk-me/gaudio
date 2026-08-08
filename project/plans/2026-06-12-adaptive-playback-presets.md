@@ -1,5 +1,7 @@
 # Comprehensive Adaptive Playback Presets Implementation Plan
 
+> **Status:** Historical implementation record. Completion marks reflect that implementation session; current source and tests are authoritative.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Expand the three adaptive playback profiles into complete, version-specific HLS and DASH configurations for cross-platform audio VOD.

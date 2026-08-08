@@ -1,5 +1,7 @@
 # Public API TSDoc Implementation Plan
 
+> **Status:** Historical implementation record. Completion marks reflect that implementation session; generated declarations and API pages are authoritative.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Add concise English TSDoc to every public GAudio API so npm consumers receive useful IDE hover and parameter documentation.

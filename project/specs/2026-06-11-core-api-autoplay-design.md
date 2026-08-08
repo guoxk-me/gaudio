@@ -1,5 +1,7 @@
 # GAudio 0.3.0 Core API and Autoplay Design
 
+> **Status:** Historical design record. This captures the 0.3.0 boundary; later package behavior and declarations are authoritative.
+
 ## Goal
 
 Complete the browser media APIs that are still missing from `AudioPlayer` and add predictable autoplay behavior without expanding into adaptive streaming or playlist management.

@@ -1,5 +1,7 @@
 # GAudio Extensibility Plan
 
+> **Status:** Historical roadmap snapshot. It records proposals as of 2026-06-18; later plans, source, tests, changelog, and public documentation are authoritative.
+
 > Date: 2026-06-18  
 > Scope: Future-facing product, API, architecture, documentation, testing, and release plan for an open-source browser audio library.
 

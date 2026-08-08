@@ -1,5 +1,7 @@
 # GAudio Next Iteration Implementation Plan
 
+> **Status:** Historical implementation record. Unchecked boxes preserve the original planning state and are not current tasks; source, tests, CI, and public documentation are authoritative.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Add release basics, richer public playback APIs, browser E2E coverage, source helpers, and a more convincing docs/demo experience.

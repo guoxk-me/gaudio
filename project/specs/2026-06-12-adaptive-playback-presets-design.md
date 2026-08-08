@@ -1,5 +1,7 @@
 # Adaptive Playback Presets Design
 
+> **Status:** Historical design record. It explains the original preset model; current adapter source, tests, and declarations are authoritative.
+
 ## Goal
 
 Provide three shared adaptive playback presets so HLS and DASH audio VOD playback works well without vendor-specific configuration. Applications can still override individual `hls.js` or `dash.js` settings.

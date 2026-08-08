@@ -1,22 +1,30 @@
 {
   "name": "gaudio-workspace",
   "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24.11.0 <25"
+  },
   "packageManager": "pnpm@10.28.0",
   "scripts": {
     "build": "turbo run build",
+    "coverage": "turbo run coverage",
     "dev": "turbo run dev",
     "docs:build": "turbo run build --filter=@gaudio/docs",
     "docs:dev": "turbo run dev --filter=@gaudio/docs...",
     "e2e": "turbo run e2e --filter=@gaudio/docs",
-    "lint": "pnpm run lint:workspace && eslint eslint.config.mjs",
+    "lint": "pnpm run lint:workspace && eslint --no-ignore eslint.config.mjs playwright.config.ts",
     "lint:workspace": "turbo run lint",
     "test": "turbo run test",
     "typecheck": "turbo run typecheck"
   },
   "devDependencies": {
-    "@antfu/eslint-config": "^9.1.0",
-    "@playwright/test": "^1.61.1",
-    "eslint": "^10.6.0",
-    "turbo": "^2.10.0"
+    "@antfu/eslint-config": "^9.2.0",
+    "@axe-core/playwright": "^4.12.1",
+    "@playwright/test": "^1.62.0",
+    "@types/node": "^24.13.3",
+    "@vitest/coverage-v8": "4.1.10",
+    "eslint": "^10.8.0",
+    "turbo": "^2.10.7"
   }
 }

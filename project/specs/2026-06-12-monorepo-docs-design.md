@@ -1,5 +1,7 @@
 # Monorepo and Documentation Architecture Design
 
+> **Status:** Historical design record. It explains the workspace migration; the current site intentionally omits a migration guide while GAudio remains pre-release.
+
 ## Goal
 
 Reorganize gaudio into a pnpm workspace managed by Turborepo, keep `gaudio` as the only published npm package, and replace the standalone demo with a VitePress documentation site containing guides, generated API reference pages, and interactive audio examples.

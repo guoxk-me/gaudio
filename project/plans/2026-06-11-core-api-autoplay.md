@@ -1,5 +1,7 @@
 # GAudio 0.3.0 Core API and Autoplay Implementation Plan
 
+> **Status:** Historical implementation record. Unchecked boxes preserve the original planning state and are not current tasks; later plans and the shipped package define current behavior.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Add autoplay, pitch preservation, fast seek, played ranges, and strict numeric input validation to the public player API.

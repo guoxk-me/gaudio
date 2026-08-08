@@ -3,15 +3,22 @@
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
+      "env": ["DOCS_BASE", "GITHUB_SHA"],
       "outputs": ["dist/**", ".vitepress/dist/**", "api/**"]
+    },
+    "coverage": {
+      "dependsOn": ["^build"],
+      "outputs": ["coverage/**"]
     },
     "dev": {
       "cache": false,
+      "passThroughEnv": ["DOCS_BASE"],
       "persistent": true
     },
     "e2e": {
       "cache": false,
-      "dependsOn": ["build"]
+      "dependsOn": ["build"],
+      "passThroughEnv": ["CI", "DOCS_BASE", "DOCS_E2E_USE_EXISTING_BUILD", "DOCS_PREVIEW_PORT"]
     },
     "lint": {
       "dependsOn": ["^lint"]

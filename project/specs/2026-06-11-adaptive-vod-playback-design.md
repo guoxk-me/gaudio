@@ -1,5 +1,7 @@
 # GAudio 0.4.0 Adaptive VOD Playback Design
 
+> **Status:** Historical design record. This captures the 0.4.0 boundary; later quality-selection, playlist, and live-playback work supersedes its exclusions.
+
 ## Goal
 
 Add complete HLS and MPEG-DASH video-on-demand playback through optional adapters while keeping the core `gaudio` entry free of third-party runtime dependencies.
