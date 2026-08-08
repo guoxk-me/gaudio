@@ -10,7 +10,7 @@ import { useHomeMiniPlayer } from '../composables/use-home-mini-player'
 
 const { lang } = useData()
 const text = computed(() => demoText[demoLocaleForLang(lang.value)].homeMini)
-const examplesHref = computed(() => withBase(lang.value === 'zh' ? '/zh/examples/' : '/examples/'))
+const examplesHref = computed(() => withBase(lang.value.startsWith('zh') ? '/zh/examples/' : '/examples/'))
 
 const {
   coverThumbUrl,
@@ -18,9 +18,28 @@ const {
   isBusy,
   isPaused,
   isReady,
+  playerErrorKind,
   playerState,
   togglePlayback,
 } = useHomeMiniPlayer()
+
+const playerStateLabel = computed(() => {
+  if (playerErrorKind.value === 'load') {
+    return text.value.loadError
+  }
+
+  if (playerErrorKind.value === 'playback') {
+    return text.value.playbackError
+  }
+
+  return (text.value.states as Record<string, string>)[playerState.value] ?? playerState.value
+})
+
+const primaryActionLabel = computed(() => (
+  playerErrorKind.value === 'load'
+    ? text.value.retryLoad
+    : isPaused.value ? text.value.play : text.value.pause
+))
 </script>
 
 <template>
@@ -28,9 +47,10 @@ const {
     <Card class="border-border bg-card shadow-md">
       <CardContent class="flex flex-col gap-4 p-5 md:flex-row md:items-center">
         <div class="flex min-w-0 flex-1 items-center gap-4">
+          <!-- AI modified: the adjacent heading already supplies the track name, so the cover is decorative. -->
           <img
             :src="coverThumbUrl"
-            :alt="`${defaultTrack.title} cover art`"
+            alt=""
             class="size-20 shrink-0 rounded-xl object-cover shadow-sm ring-1 ring-border md:size-24"
             width="512"
             height="512"
@@ -47,8 +67,8 @@ const {
             <p class="text-muted-foreground truncate text-sm">
               {{ defaultTrack.artist }}
             </p>
-            <Badge variant="secondary" class="mt-2">
-              {{ isReady ? playerState : text.loading }}
+            <Badge variant="secondary" class="mt-2" role="status" aria-live="polite">
+              {{ isReady || playerErrorKind ? playerStateLabel : text.loading }}
             </Badge>
           </div>
         </div>
@@ -56,14 +76,14 @@ const {
         <div class="flex flex-wrap items-center gap-3 md:justify-end">
           <Button
             size="lg"
-            class="rounded-full px-6"
-            :disabled="!isReady || isBusy"
-            :aria-label="isPaused ? 'Play' : 'Pause'"
+            class="home-mini-player__play rounded-full px-6"
+            :disabled="isBusy || (!isReady && playerErrorKind !== 'load')"
+            :aria-label="primaryActionLabel"
             @click="togglePlayback"
           >
-            <Play v-if="isPaused" />
+            <Play v-if="playerErrorKind === 'load' || isPaused" />
             <Pause v-else />
-            {{ isPaused ? 'Play' : 'Pause' }}
+            {{ primaryActionLabel }}
           </Button>
           <Button variant="outline" as="a" :href="examplesHref">
             {{ text.openFullDemo }}
@@ -75,6 +95,17 @@ const {
 </template>
 
 <style scoped>
+/* AI modified: VitePress's unlayered button reset otherwise overrides Tailwind utilities in WebKit. */
+.home-mini-player__play {
+  color: var(--primary-foreground);
+  background-color: var(--primary);
+}
+
+.home-mini-player__play:hover {
+  color: var(--primary-foreground);
+  background-color: var(--vp-c-brand-2);
+}
+
 .home-mini-player :deep(a) {
   text-decoration: none;
 }

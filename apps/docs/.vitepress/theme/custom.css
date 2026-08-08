@@ -11,6 +11,12 @@
   --vp-c-divider: rgba(0, 32, 64, 0.14);
   --vp-home-hero-name-color: #002040;
   --vp-home-hero-name-background: none;
+  /* AI modified: retain the cyan brand while meeting text and code-label contrast requirements. */
+  --vp-button-brand-bg: #006d97;
+  --vp-button-brand-hover-bg: #005578;
+  --vp-button-brand-active-bg: #005578;
+  --vp-code-block-bg: #f3f8fb;
+  --vp-code-lang-color: #426072;
 }
 
 .dark {
@@ -24,6 +30,8 @@
   --vp-c-text-2: #b8d4e3;
   --vp-c-divider: rgba(8, 176, 232, 0.18);
   --vp-home-hero-name-color: #27c9ff;
+  --vp-code-block-bg: #001a2f;
+  --vp-code-lang-color: #b8d4e3;
 }
 
 .VPNav {
@@ -103,4 +111,48 @@
 .gaudio-example-page .VPDoc .vp-doc > table th,
 .gaudio-example-page .VPDoc .vp-doc > table td {
   border-color: var(--vp-c-divider);
+}
+
+/* AI modified: keep the generated 404 useful when JavaScript cannot hydrate VitePress. */
+.no-script-not-found {
+  display: grid;
+  place-items: center;
+  align-content: center;
+  min-height: 100vh;
+  padding: 2rem;
+  text-align: center;
+}
+
+.no-script-not-found__code {
+  margin: 0;
+  color: var(--vp-c-text-2);
+  font-size: clamp(3rem, 12vw, 5rem);
+  font-weight: 700;
+  line-height: 1;
+}
+
+.no-script-not-found h1 {
+  margin: 1.5rem 0 1rem;
+  color: var(--vp-c-text-1);
+  font-size: clamp(1.75rem, 6vw, 3rem);
+}
+
+.no-script-not-found p {
+  margin: 0.35rem 0;
+  color: var(--vp-c-text-2);
+}
+
+.no-script-not-found__links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1.25rem;
+  justify-content: center;
+  margin-top: 1.5rem;
+}
+
+.no-script-not-found__links a {
+  color: var(--vp-c-brand-1);
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
 }

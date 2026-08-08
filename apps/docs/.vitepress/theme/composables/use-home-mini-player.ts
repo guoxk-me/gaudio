@@ -14,13 +14,13 @@ export function useHomeMiniPlayer() {
     source: defaultDemoSampleUrl,
     preload: 'metadata',
     mediaSession: true,
-    analyzer: { fftSize: 1024 },
   })
 
   const isReady = shallowRef(false)
   const isBusy = shallowRef(false)
   const isPaused = shallowRef(true)
   const playerState = shallowRef('idle')
+  const playerErrorKind = shallowRef<'load' | 'playback'>()
 
   const coverThumbUrl = computed(() => demoCoverThumbUrl(defaultTrack.coverThumb))
 
@@ -30,19 +30,33 @@ export function useHomeMiniPlayer() {
   }
 
   async function togglePlayback(): Promise<void> {
-    if (isBusy.value || !isReady.value) {
+    if (isBusy.value || (!isReady.value && playerErrorKind.value !== 'load')) {
       return
     }
 
     isBusy.value = true
 
     try {
+      if (!isReady.value) {
+        // AI modified: transient sample-load failures can retry without navigating away from the homepage.
+        await player.load()
+        isReady.value = true
+        playerErrorKind.value = undefined
+        return
+      }
+
       if (player.isPaused()) {
         await player.play()
       }
       else {
         player.pause()
       }
+
+      // AI modified: a successful retry clears only the recoverable playback failure.
+      playerErrorKind.value = undefined
+    }
+    catch {
+      playerErrorKind.value = isReady.value ? 'playback' : 'load'
     }
     finally {
       syncPlaybackFlags()
@@ -68,13 +82,27 @@ export function useHomeMiniPlayer() {
     player.on('pause', syncPlaybackFlags)
     player.on('play', syncPlaybackFlags)
 
-    await player.load()
-    syncPlaybackFlags()
-    isReady.value = true
+    // AI modified: loading failures now render an explicit state instead of leaving the control disabled forever.
+    try {
+      await player.load()
+      syncPlaybackFlags()
+      isReady.value = true
+      playerErrorKind.value = undefined
+    }
+    catch {
+      playerErrorKind.value = 'load'
+      playerState.value = 'error'
+    }
   })
 
   onUnmounted(() => {
-    player.dispose()
+    try {
+      player.dispose()
+    }
+    catch (error) {
+      // AI modified: cleanup failures must not abort VitePress route navigation.
+      console.warn('GAudio homepage player cleanup failed', error)
+    }
   })
 
   return {
@@ -84,6 +112,7 @@ export function useHomeMiniPlayer() {
     isBusy,
     isPaused,
     playerState,
+    playerErrorKind,
     togglePlayback,
   }
 }
