@@ -5,50 +5,141 @@ on:
   push:
     branches:
       - main
+      # AI modified: the shared integration branch receives the same verification as release-bound main.
+      - dev
 
 permissions:
   contents: read
 
-jobs:
-  node-compatibility:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          fetch-depth: 0
-      # AI modified: keep pnpm version sourced only from packageManager.
-      - uses: pnpm/action-setup@v6
-        with:
-          run_install: false
-      - uses: actions/setup-node@v6
-        with:
-          node-version: 18
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      # AI modified: verify the published package against the declared minimum Node runtime.
-      - run: pnpm --filter gaudio run typecheck
-      - run: pnpm --filter gaudio run test
-      - run: pnpm --filter gaudio run build
-      - run: pnpm --filter gaudio run pack:dry-run
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+jobs:
   verify:
+    name: Verify Node 24 and package artifact
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          # AI modified: verification never performs authenticated Git operations.
+          persist-credentials: false
       # AI modified: keep pnpm version sourced only from packageManager.
-      - uses: pnpm/action-setup@v6
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
         with:
           run_install: false
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      # AI modified: fail pull requests that introduce high-severity dependency advisories.
+      - run: pnpm audit --audit-level high
       - run: pnpm run typecheck
       - run: pnpm run lint
       - run: pnpm run test
+      - run: pnpm run coverage
       - run: pnpm run build
-      - run: pnpm exec playwright install --with-deps chromium
+      # AI modified: exercise every configured browser project before accepting a package artifact.
+      - run: pnpm exec playwright install --with-deps chromium firefox webkit
       - run: pnpm run e2e
+        env:
+          DOCS_E2E_USE_EXISTING_BUILD: "true"
+      # AI modified: preserve reports and failed-attempt traces, including tests that pass on their CI retry.
+      - name: Upload Playwright diagnostics
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ci-playwright
+          path: |
+            output/playwright/report
+            output/playwright/results
+          if-no-files-found: ignore
+          retention-days: 7
+      - run: pnpm --filter gaudio run pack:dry-run
+      # AI modified: downstream compatibility checks consume the same tarball shape that can be published.
+      - name: Pack package artifact
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          pnpm --filter gaudio pack --pack-destination "$GITHUB_WORKSPACE/artifacts"
+      # AI modified: exercise installed peers and both TypeScript module conditions at the supported compiler floor and current version.
+      - name: Verify complete package consumption
+        run: | # zizmor: ignore[adhoc-packages] A clean external consumer must install the packed artifact outside the workspace lockfile.
+          set -euo pipefail
+          consumer_directory=$(mktemp -d)
+          package_archives=("$GITHUB_WORKSPACE"/artifacts/gaudio-*.tgz)
+          if [ "${#package_archives[@]}" -ne 1 ] || [ ! -f "${package_archives[0]}" ]; then
+            echo "Expected exactly one packed gaudio archive." >&2
+            exit 1
+          fi
+          package_archive="${package_archives[0]}"
+          hls_peer=$(node -p "require('./packages/gaudio/package.json').peerDependencies['hls.js']")
+          dash_peer=$(node -p "require('./packages/gaudio/package.json').peerDependencies.dashjs")
+          typescript_current_version=$(node -p "require('./packages/gaudio/node_modules/typescript/package.json').version")
+
+          cd "$consumer_directory"
+          npm init --yes
+          npm install "$package_archive" "hls.js@${hls_peer}" "dashjs@${dash_peer}" \
+            "typescript-minimum@npm:typescript@5.8.3" \
+            "typescript-current@npm:typescript@${typescript_current_version}" \
+            --ignore-scripts --no-audit --no-fund
+          cp "$GITHUB_WORKSPACE/packages/gaudio/scripts/verify-package-consumer.mjs" .
+          cp "$GITHUB_WORKSPACE/packages/gaudio/scripts/verify-package-consumer-types.mts" .
+          cp "$GITHUB_WORKSPACE/packages/gaudio/scripts/verify-package-consumer-types.cts" .
+          GAUDIO_EXPECT_OPTIONAL_PEERS=true node verify-package-consumer.mjs
+          for typescript_package in typescript-minimum typescript-current; do
+            typescript_compiler="./node_modules/${typescript_package}/bin/tsc"
+            # AI modified: compile every documented resolver so CJS-only declaration failures cannot hide behind NodeNext.
+            node "$typescript_compiler" --noEmit --strict --skipLibCheck false \
+              --target ES2022 --lib ES2022,DOM,DOM.Iterable \
+              --module Node16 --moduleResolution Node16 \
+              verify-package-consumer-types.mts verify-package-consumer-types.cts
+            node "./node_modules/${typescript_package}/bin/tsc" --noEmit --strict --skipLibCheck false \
+              --target ES2022 --lib ES2022,DOM,DOM.Iterable \
+              --module NodeNext --moduleResolution NodeNext \
+              verify-package-consumer-types.mts verify-package-consumer-types.cts
+            node "$typescript_compiler" --noEmit --strict --skipLibCheck false \
+              --target ES2022 --lib ES2022,DOM,DOM.Iterable \
+              --module ESNext --moduleResolution Bundler \
+              verify-package-consumer-types.mts verify-package-consumer-types.cts
+          done
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: gaudio-package
+          path: artifacts/gaudio-*.tgz
+          if-no-files-found: error
+
+  node-compatibility:
+    name: Verify Node 18 package consumption
+    runs-on: ubuntu-latest
+    needs: verify
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # AI modified: package consumption only needs repository files, not the Actions token.
+          persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: gaudio-package
+          path: artifacts
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 18
+      # AI modified: Node 18 validates the final artifact, while modern Node owns the incompatible build toolchain.
+      - name: Verify Node 18 package consumption
+        run: | # zizmor: ignore[adhoc-packages] A clean external consumer must install the packed artifact outside the workspace lockfile.
+          set -euo pipefail
+          consumer_directory=$(mktemp -d)
+          package_archives=("$GITHUB_WORKSPACE"/artifacts/gaudio-*.tgz)
+          if [ "${#package_archives[@]}" -ne 1 ] || [ ! -f "${package_archives[0]}" ]; then
+            echo "Expected exactly one packed gaudio archive." >&2
+            exit 1
+          fi
+          package_archive="${package_archives[0]}"
+          cd "$consumer_directory"
+          npm init --yes
+          npm install "$package_archive" --omit=optional --ignore-scripts --no-audit --no-fund
+          cp "$GITHUB_WORKSPACE/packages/gaudio/scripts/verify-package-consumer.mjs" .
+          node verify-package-consumer.mjs

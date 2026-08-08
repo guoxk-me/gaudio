@@ -1,0 +1,33 @@
+name: Usage question
+description: Ask for help integrating or configuring GAudio.
+title: "[Question]: "
+labels:
+  - question
+body:
+  - type: input
+    id: goal
+    attributes:
+      label: What are you trying to accomplish?
+    validations:
+      required: true
+  - type: input
+    id: versions
+    attributes:
+      label: Versions and environment
+      description: Include GAudio, browser, Node.js, framework, and optional adapter versions as relevant.
+    validations:
+      required: true
+  - type: textarea
+    id: current-code
+    attributes:
+      label: Current approach
+      description: Share a minimal sanitized code sample and what you have already tried.
+    validations:
+      required: true
+  - type: checkboxes
+    id: conduct
+    attributes:
+      label: Code of Conduct
+      options:
+        - label: I agree to follow the project Code of Conduct.
+          required: true

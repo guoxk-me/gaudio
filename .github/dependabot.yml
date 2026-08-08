@@ -1,0 +1,32 @@
+version: 2
+updates:
+  # AI modified: keep JavaScript tooling patches reviewed and grouped instead of accumulating silently.
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    # AI modified: give new releases a stabilization window without delaying security updates.
+    cooldown:
+      default-days: 7
+    groups:
+      javascript-tooling:
+        applies-to: version-updates
+        dependency-type: development
+        patterns:
+          - "*"
+        update-types:
+          - patch
+    open-pull-requests-limit: 5
+  # AI modified: keep pinned workflow actions on supported releases.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    # AI modified: avoid adopting newly tagged workflow code before its first review window.
+    cooldown:
+      default-days: 7
+    groups:
+      workflow-actions:
+        patterns:
+          - "*"
+    open-pull-requests-limit: 3

@@ -1,0 +1,70 @@
+name: Bug report
+description: Report reproducible incorrect behavior in GAudio or its documentation.
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: Thanks for helping improve GAudio. Do not include credentials, signed URLs, private media, or undisclosed vulnerabilities.
+  - type: input
+    id: version
+    attributes:
+      label: GAudio version
+      description: Include the exact package version or commit.
+      placeholder: gaudio@0.x.x or commit SHA
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: Include browser, operating system, Node.js, TypeScript, and optional adapter versions as relevant.
+    validations:
+      required: true
+  - type: dropdown
+    id: protocol
+    attributes:
+      label: Source protocol
+      options:
+        - Native media file
+        - HLS
+        - MPEG-DASH
+        - Custom AudioSource or engine
+        - Documentation or tooling
+        - Not sure
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Minimal reproduction
+      description: Provide a repository, code sample, or numbered steps using public media where possible.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior and diagnostics
+      description: Include the emitted GAudioError code and sanitized console output.
+    validations:
+      required: true
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I reproduced this with the newest gaudio@next release or the current main branch.
+          required: true
+        - label: I removed private credentials, signed URLs, and media from this report.
+          required: true
+        - label: This is not an undisclosed security vulnerability.
+          required: true
+        - label: I agree to follow the project Code of Conduct.
+          required: true
