@@ -1,5 +1,8 @@
 ---
 layout: home
+title: GAudio — Browser-first TypeScript audio streaming library
+titleTemplate: false
+description: Typed browser audio player for native media, playlists, Web Audio analysis, Media Session, and optional HLS/DASH streaming.
 
 hero:
   name: GAudio
@@ -27,6 +30,13 @@ features:
   - title: Browser integration
     details: Connect browser, keyboard, headset, and operating-system media controls through Media Session while keeping typed events and stable GAudioError codes for telemetry.
 ---
+
+<script setup lang="ts">
+import { defineAsyncComponent } from 'vue'
+
+// AI modified: keep the audio player out of every non-home documentation entry.
+const HomeMiniPlayer = defineAsyncComponent(() => import('./.vitepress/theme/components/HomeMiniPlayer.vue'))
+</script>
 
 <ClientOnly>
   <HomeMiniPlayer />

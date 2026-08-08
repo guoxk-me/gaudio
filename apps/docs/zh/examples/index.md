@@ -26,4 +26,4 @@ const AudioPlayerDemo = defineClientComponent(() => import('../../examples/Audio
 | 分析 | Player 持有的 `AudioAnalyzer` canvas 可视化与样本采集 |
 | 工具能力 | 类型化 `EventEmitter`、`GAudioError`、浏览器 `canPlayType`、实时事件日志 |
 
-叙事文档请看[快速开始](/zh/guide/getting-started)、[配置总览](/zh/guide/configuration)和[场景示例](/zh/guide/recipes)。精确签名请看 [API 参考](/api/)。
+叙事文档请看[快速开始](/zh/guide/getting-started)、[配置总览](/zh/guide/configuration)和[场景示例](/zh/guide/recipes)。精确签名请看 [API 参考](/zh/api/)。

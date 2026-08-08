@@ -1,6 +1,6 @@
 # API 参考
 
-本页列出用户可以 import 的公共 API，以及集成 GAudio 时常用的类型。[TypeDoc 参考](/api/)提供声明级细节。
+本页列出用户可以 import 的公共 API，以及集成 GAudio 时常用的类型。[TypeDoc 参考](/zh/api/)提供声明级细节。
 
 ## 导入入口
 
@@ -29,10 +29,10 @@ Source API：
 
 | API | 返回 | 说明 |
 | --- | --- | --- |
-| `setSource(source)` | `void` | 接收 `AudioSourceInput`，卸载 active engine，并把状态重置为 `idle`。 |
-| `load()` | `Promise<void>` | 打开当前 source，并在 metadata 可用后 resolve。 |
+| `setSource(source)` | `void` | 接收 `AudioSourceInput`，卸载 active engine，并把状态重置为 `idle`。Analyzer dispose 和 engine unload 错误会保留原始对象。 |
+| `load()` | `Promise<void>` | 打开当前 source，并在 metadata 可用后 resolve。Adapter/analyzer 创建阶段的非 `GAudioError` 失败会包装为 `ENGINE_ERROR` 并保留原始 `cause`；加载前 analyzer 清理错误保持原样。 |
 | `play()` | `Promise<void>` | 开始或恢复播放；`idle` 时会先加载。 |
-| `dispose()` | `void` | 释放 source 生命周期、engine、analyzer、vendor instance 和监听器。 |
+| `dispose()` | `void` | 永久禁用 player 并开始清理。清理可在返回后继续；首个清理错误可能抛出，重复 `dispose()` 会重试保留的未完成工作。 |
 
 播放列表 API：
 
@@ -47,6 +47,8 @@ Source API：
 | `getAudioTracks()` | `readonly AudioTrack[]` | 当前 playlist track 可选的多语言或备用音轨。 |
 | `getSelectedAudioTrack()` | `AudioTrack \| undefined` | 当前选中的备用音轨。 |
 | `selectAudioTrack(audioTrackId, options?)` | `Promise<void>` | 切换语言或备用音轨，默认保留当前时间。 |
+
+`setPlaylist()`、`selectPlaylistTrack()`、`next()`、`previous()` 和 `selectAudioTrack()` 在选择 track 时会替换 active source。替换期间 analyzer dispose 或 engine unload 失败会以原始错误对象 throw 或 reject。
 
 ```ts
 player.setPlaylist([
@@ -126,7 +128,7 @@ await player.selectAudioTrack('en')
 | `getBufferedRanges()` | `readonly TimeRange[]` | 已缓冲区间，单位秒。 |
 | `getSeekableRanges()` | `readonly TimeRange[]` | 可跳转区间，单位秒。 |
 | `getPlayedRanges()` | `readonly TimeRange[]` | 已播放区间，单位秒。 |
-| `canPlayType(mimeType)` | `AudioFormatSupport` | 原生媒体支持加已注册 HLS/DASH adapter 支持：`''`、`'maybe'` 或 `'probably'`。 |
+| `canPlayType(mimeType)` | `AudioFormatSupport` | 原生媒体支持加已注册 HLS/DASH 的浏览器能力探测：`''`、`'maybe'` 或 `'probably'`。自适应结果不会预检可选 peer import。 |
 | `getAnalyzer()` | `AudioAnalyzer \| undefined` | 配置并支持 analyzer 时，在 `load()` 后返回 analyzer。 |
 | `getMediaSessionMetadata()` | `AudioMediaSessionMetadata \| undefined` | direct source 和没有 metadata 的 playlist track 使用的默认 Media Session metadata。 |
 | `setMediaSessionMetadata(metadata)` | `void` | 更新浏览器/系统媒体面板显示的 direct source 或 playlist fallback metadata。 |
@@ -152,8 +154,16 @@ await player.selectAudioTrack('en')
 ```ts
 const variants = player.getAdaptiveVariants()
 await player.setAdaptiveQuality('auto')
-await player.setAdaptiveQuality(variants[0].id)
+
+// AI modified: adapter variant 顺序不代表音质排名。
+const highestBitrateVariant = [...variants]
+  .sort((leftVariant, rightVariant) => rightVariant.bitrate - leftVariant.bitrate)[0]
+if (highestBitrateVariant) {
+  await player.setAdaptiveQuality(highestBitrateVariant.id)
+}
 ```
+
+Variant 顺序由 implementation 决定。按音质排名选择前，应先按 `bitrate` 排序。
 
 ## AudioPlayerOptions
 
@@ -234,6 +244,7 @@ const analyzer = new AudioAnalyzer(audioContext, sourceNode, fftSize)
 | --- | --- |
 | `HttpAudioSource` | URL-backed source class，字符串和 source description 会走这个包装。 |
 | `BlobAudioSource` | Blob/File-backed source，会持有并释放自己的 object URL。 |
+| `BlobAudioSourceOptions` | 为 Blob/File 路由提供可选 `protocol` 和 `mimeType` hint。 |
 | `new HttpAudioSource(source)` | 接收 `string \| AudioSourceDescription`。 |
 | `HttpAudioSource.open()` | 不发起网络请求，resolve `{ url }`。 |
 | `HttpAudioSource.close()` | 普通 URL 的 no-op cleanup。 |
@@ -246,11 +257,13 @@ const analyzer = new AudioAnalyzer(audioContext, sourceNode, fftSize)
 
 `HttpAudioSource` 不管理 headers、credentials、签名 URL 刷新或 token 过期。需要加载前刷新 URL 时使用自定义 `AudioSource`；manifest 或 segment 请求在播放开始后仍需要鉴权时，使用 HLS/DASH vendor 的请求 hook。
 
+对于自定义 `AudioSource`，`close()` 可能在 `open()` settle 前执行，也可能在同步或异步失败后重试。它必须取消或失效化 pending work、让迟到的 open 结果不可用、保留失败的清理状态，并保证重复调用安全。
+
 播放列表类型：
 
 | 类型 | 字段 |
 | --- | --- |
-| `AudioPlaylistTrack` | `source`, `fallbackSources?`, `metadata?` |
+| `AudioPlaylistTrack` | `source`, `fallbackSources?`, `metadata?`, `audioTracks?`, `defaultAudioTrackId?` |
 | `AudioPlaylistOptions` | `startIndex?` |
 | `AudioPlaylistNavigationOptions` | `autoplay?` |
 | `AudioTrack` | `id`, `label?`, `language?`, `source`, `fallbackSources?` |
@@ -265,6 +278,21 @@ const analyzer = new AudioAnalyzer(audioContext, sourceNode, fftSize)
 | `PlaybackState` | `'idle'`、`'loading'`、`'ready'`、`'playing'`、`'paused'`、`'buffering'`、`'ended'` 或 `'error'`。 |
 | `GAudioError` | 带稳定 `code`、message 和可选 `cause` 的错误类。 |
 | `GAudioErrorCode` | 机器可读错误码 union。 |
+
+在 `AudioPlayer` 边界，adapter `createEngine()` 和 analyzer factory 抛出的非 `GAudioError` 失败会包装为 `ENGINE_ERROR`；原始值保存在 `cause` 中，player 还会通过 `error` 事件发布同一个包装对象。直接调用 adapter `createEngine()` 或 `MediaElementAudioEngine` 扩展 hook 时，仍可能原样收到扩展自己的错误。Source replacement 清理和显式加载前的 analyzer 清理也会保留原始错误。
+
+直接委托给注入式自定义 `AudioEngine` 的构造设置与订阅、`pause()`、`stop()`、由 engine 支撑的设置和查询，以及 `canPlayType()`，都会保留原始抛出值。上述直接调用的失败不会自动发布 player `error` 事件。
+
+<!-- AI modified: 记录生命周期竞态，保证注入式 engine 的异步操作都能终止。 -->
+对于 player 管理的异步操作，engine 结果与生命周期结果中先发生的一方生效。当前 `load()` 或 `play()` 会发布其保留或包装后的 engine 失败；`seek()`、`fastSeek()` 和 `setAdaptiveQuality()` 的普通 engine rejection 则仍只由委托调用返回。Dispose 会立即以 `ENGINE_ERROR` 和 `Audio operation was interrupted by player disposal` 拒绝所有进行中的操作；dispose 与取消本身不会新增 player `error`。Terminal engine `error` 会使用向 listener 仅发布一次的同一个 `GAudioError` 实例拒绝操作（`load()` 仅在 source fallback 耗尽后如此）。
+
+| 操作 | Engine 结果 | 抢占结果 |
+| --- | --- | --- |
+| `load()` | 无 source 时以 `SOURCE_UNAVAILABLE` 和 `Audio source is required before loading` 拒绝。Engine 的 `GAudioError` 原样保留；其他 rejection 会包装为 `ENGINE_ERROR`，消息为 `Audio source could not be loaded`。 | `setSource()` 以 `LOAD_ABORTED` 和 `Audio operation was superseded by a replacement source` 拒绝；更新的 `load()` 使用 `Audio operation was superseded by a newer load`。 |
+| `play()` | Engine 的 `GAudioError` 原样保留；其他 rejection 会包装为 `ENGINE_ERROR`，消息为 `Audio playback failed`。Fatal engine `error` 会立即以已发布的同一个实例拒绝。 | `engine.play()` 已开始后，`pause()`、`stop()`、`setSource()` 或更新的 `load()` 会静默抢占，公开 promise resolve。迟到的 settlement 仍会被观察，迟到的成功还会重新落实最新的 pause/stop 意图。仍在等待前置 load 的 play 则继承该 load 的 `LOAD_ABORTED`。 |
+| `seek()` / `fastSeek()` | 注入式 engine 自身的 rejection 原样保留。 | 更新的 seek 以 `LOAD_ABORTED` 和 `Audio seek was superseded by a newer seek` 拒绝；`stop()` 使用 `Audio seek was superseded by stop`；source replacement 与更新的 load 使用上面的通用消息。 |
+| `setAdaptiveQuality()` | 能力缺失时以 `PROTOCOL_UNSUPPORTED` 拒绝；否则注入式 engine 自身的 rejection 原样保留。 | 更新的 selection 以 `LOAD_ABORTED` 和 `Adaptive quality selection was superseded by a newer selection` 拒绝；source replacement 与更新的 load 使用上面的通用消息。 |
+| Playlist 与 audio-track 导航 | `next()`、`previous()`、`selectPlaylistTrack()` 和 `selectAudioTrack()` 继承其 `load()`、`seek()` 或 `play()` 阶段的结果。 | 采用当前阶段对应的规则。 |
 
 Payload 类型：
 
@@ -285,14 +313,14 @@ Payload 类型：
 
 | 类型或值 | 用途 |
 | --- | --- |
-| `AdaptivePlaybackPreset` | `FastStart`、`Balanced`、`Stable` 三种音频 VOD profile。 |
+| `AdaptivePlaybackPreset` | `FastStart`、`Balanced`、`Stable` 三种音频缓冲 profile。 |
 | `AdaptiveContentType` | 自适应 adapter 的 `'vod'`、`'long-form'` 或 `'live'` 内容类型调优。 |
 | `AdaptiveAudioProtocol` | `'hls' \| 'dash'`。 |
 | `AdaptivePlaybackImplementation` | `'native' \| 'hls.js' \| 'dash.js'`。 |
 | `AdaptivePlaybackInfo` | 当前自适应协议和实现。 |
 | `AdaptiveManifestUpdate` | Manifest URL 和发现的 variants。 |
 | `AdaptiveVariant` | Variant id、bitrate 和可选 codecs。 |
-| `AdaptiveVariantUpdate` | 初始或自动自适应 variant 选择。 |
+| `AdaptiveVariantUpdate` | 初始、自动或手动自适应 variant 选择，并包含对应 `reason`。 |
 | `AdaptiveQualitySelection` | `'auto'` 或手动 variant id。 |
 | `AdaptiveSegmentUpdate` | 可用时包含 segment request URL、variant 和 duration。 |
 | `AdaptiveStreamError` | 可恢复或 fatal 自适应失败信息。 |
@@ -303,7 +331,9 @@ Adapter contract：
 | --- | --- |
 | `AudioEngineAdapter` | 为 HLS、DASH 或未来协议创建 `AudioEngine` 的 adapter contract。 |
 | `AudioEngine` | `AudioPlayer` 和 adapters 使用的低阶 engine contract。 |
-| `MediaElementAudioEngine` | 内置 `HTMLAudioElement` engine。大多数应用应直接使用 `AudioPlayer`。 |
+| `MediaElementAudioEngine` | 内置 `HTMLAudioElement` engine，也是唯一保证继承兼容性的导出类；子类可以依赖其 public 和 protected 成员。 |
+
+`AudioPlayer`、`AudioAnalyzer` 和 `EventEmitter` 是供直接使用或组合的具体工具类，不承诺子类兼容性。扩展 GAudio 时应优先使用 `AudioEngine`、`AudioEngineAdapter`、`AudioSource`、analyzer factory 和事件 API。
 
 ## HLS 入口
 
@@ -315,7 +345,7 @@ Adapter contract：
 | `HlsAudioAdapter` | Adapter instance，包含 `hlsInstance`、`implementation`、`getConfig()`、`updateConfig()` 和 adapter 方法。 |
 | `HlsAdapterOptions` | `contentType`、`preset`、`playbackStrategy` 和初始 `config`。 |
 | `HlsPlaybackStrategy` | `'native-first' \| 'hls-first' \| 'native-only' \| 'hls-only'`。 |
-| `HlsAdapterConfig` | 深度 partial `hls.js` 构造配置，带可合并 load policies。 |
+| `HlsAdapterConfig` | Partial `hls.js` 构造配置；只有 manifest、playlist、fragment 与 key load policy 接受嵌套 partial 覆盖。 |
 | `HlsConfigUpdateOptions` | `apply`、`restorePosition` 和 `resumePlayback`。 |
 | `HlsLoadPolicyChanges` | 部分请求策略覆盖。 |
 | `HlsLoaderConfigChanges` | 部分 loader 设置和 retry 分支。 |
@@ -331,6 +361,7 @@ Adapter contract：
 | `createDashAdapter(options?)` | 创建用于 `AudioPlayerOptions.adapters` 的 DASH adapter。 |
 | `DashAudioAdapter` | Adapter instance，包含 `dashInstance`、`getSettings()`、`updateSettings()` 和 adapter 方法。 |
 | `DashAdapterOptions` | `contentType`、`preset` 和初始 dash.js `settings`。 |
+| `DashSettingsChanges` | `DashAdapterOptions.settings` 和 `updateSettings()` 接受的递归稀疏 dash.js settings。 |
 | `MediaPlayerClass` | 从 `dashjs` re-export。 |
 | `MediaPlayerSettingClass` | 从 `dashjs` re-export。 |
 

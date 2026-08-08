@@ -29,10 +29,10 @@ Source APIs:
 
 | API | Returns | Notes |
 | --- | --- | --- |
-| `setSource(source)` | `void` | Accepts `AudioSourceInput`, unloads the active engine, and resets state to `idle`. |
-| `load()` | `Promise<void>` | Opens the current source and resolves after metadata is available. |
+| `setSource(source)` | `void` | Accepts `AudioSourceInput`, unloads the active engine, and resets state to `idle`. Analyzer-disposal and engine-unload errors retain their original identity. |
+| `load()` | `Promise<void>` | Opens the current source and resolves after metadata is available. Non-`GAudioError` adapter/analyzer creation failures become `ENGINE_ERROR` with the original `cause`; pre-load analyzer cleanup retains its original error. |
 | `play()` | `Promise<void>` | Starts or resumes playback; loads first when state is `idle`. |
-| `dispose()` | `void` | Releases source lifecycle, engine, analyzer, vendor instances, and listeners. |
+| `dispose()` | `void` | Permanently disables the player and starts cleanup. Cleanup may continue after return; the first cleanup error can throw, and repeated `dispose()` retries retained work. |
 
 Playlist APIs:
 
@@ -47,6 +47,8 @@ Playlist APIs:
 | `getAudioTracks()` | `readonly AudioTrack[]` | Alternate audio tracks for the selected playlist track. |
 | `getSelectedAudioTrack()` | `AudioTrack \| undefined` | Current alternate audio track. |
 | `selectAudioTrack(audioTrackId, options?)` | `Promise<void>` | Switches language or alternate audio while preserving time by default. |
+
+`setPlaylist()`, `selectPlaylistTrack()`, `next()`, `previous()`, and `selectAudioTrack()` replace the active source when they select a track. Analyzer-disposal or engine-unload failures during that replacement reject or throw with the original error object.
 
 ```ts
 player.setPlaylist([
@@ -126,7 +128,7 @@ State and capability APIs:
 | `getBufferedRanges()` | `readonly TimeRange[]` | Buffered ranges in seconds. |
 | `getSeekableRanges()` | `readonly TimeRange[]` | Seekable ranges in seconds. |
 | `getPlayedRanges()` | `readonly TimeRange[]` | Played ranges in seconds. |
-| `canPlayType(mimeType)` | `AudioFormatSupport` | Native media support plus registered HLS/DASH adapter support: `''`, `'maybe'`, or `'probably'`. |
+| `canPlayType(mimeType)` | `AudioFormatSupport` | Native media support plus registered HLS/DASH browser-capability probes: `''`, `'maybe'`, or `'probably'`. Adaptive results do not preflight optional peer imports. |
 | `getAnalyzer()` | `AudioAnalyzer \| undefined` | Analyzer created after `load()` when configured and supported. |
 | `getMediaSessionMetadata()` | `AudioMediaSessionMetadata \| undefined` | Default Media Session metadata for direct sources and playlist tracks without metadata. |
 | `setMediaSessionMetadata(metadata)` | `void` | Updates browser/system media metadata for direct sources or playlist fallback metadata. |
@@ -152,8 +154,16 @@ Adaptive quality:
 ```ts
 const variants = player.getAdaptiveVariants()
 await player.setAdaptiveQuality('auto')
-await player.setAdaptiveQuality(variants[0].id)
+
+// AI modified: adapter variant order is not a quality ranking.
+const highestBitrateVariant = [...variants]
+  .sort((leftVariant, rightVariant) => rightVariant.bitrate - leftVariant.bitrate)[0]
+if (highestBitrateVariant) {
+  await player.setAdaptiveQuality(highestBitrateVariant.id)
+}
 ```
+
+Variant order is implementation-owned. Sort by `bitrate` before selecting a quality by rank.
 
 ## AudioPlayerOptions
 
@@ -234,6 +244,7 @@ const analyzer = new AudioAnalyzer(audioContext, sourceNode, fftSize)
 | --- | --- |
 | `HttpAudioSource` | URL-backed source class used internally for strings and source descriptions. |
 | `BlobAudioSource` | Blob/File-backed source that owns and revokes its object URL. |
+| `BlobAudioSourceOptions` | Optional `protocol` and `mimeType` hints for Blob/File-backed routing. |
 | `new HttpAudioSource(source)` | Accepts `string \| AudioSourceDescription`. |
 | `HttpAudioSource.open()` | Resolves `{ url }` without making a network request. |
 | `HttpAudioSource.close()` | No-op cleanup for plain URLs. |
@@ -246,11 +257,13 @@ const analyzer = new AudioAnalyzer(audioContext, sourceNode, fftSize)
 
 `HttpAudioSource` does not manage headers, credentials, signed URL refresh, or token expiry. Use a custom `AudioSource` for load-time URL refresh, and use HLS/DASH vendor request hooks when manifest or segment requests need authentication after playback starts.
 
+For a custom `AudioSource`, `close()` may run before `open()` settles and may be retried after a synchronous or asynchronous failure. It must cancel or invalidate pending work, make late open results unusable, retain failed cleanup state, and be safe to call repeatedly.
+
 Playlist types:
 
 | Type | Fields |
 | --- | --- |
-| `AudioPlaylistTrack` | `source`, `fallbackSources?`, `metadata?` |
+| `AudioPlaylistTrack` | `source`, `fallbackSources?`, `metadata?`, `audioTracks?`, `defaultAudioTrackId?` |
 | `AudioPlaylistOptions` | `startIndex?` |
 | `AudioPlaylistNavigationOptions` | `autoplay?` |
 | `AudioTrack` | `id`, `label?`, `language?`, `source`, `fallbackSources?` |
@@ -265,6 +278,21 @@ Playlist types:
 | `PlaybackState` | `'idle'`, `'loading'`, `'ready'`, `'playing'`, `'paused'`, `'buffering'`, `'ended'`, or `'error'`. |
 | `GAudioError` | Error class with stable `code`, message, and optional `cause`. |
 | `GAudioErrorCode` | Machine-readable failure code union. |
+
+At the `AudioPlayer` boundary, non-`GAudioError` adapter `createEngine()` and analyzer-factory failures are wrapped as `ENGINE_ERROR`; the original value is available as `cause`, and the player publishes the same wrapper through its `error` event. Direct adapter `createEngine()` calls and direct `MediaElementAudioEngine` extension hooks can expose their own errors unchanged. Source-replacement cleanup and explicit pre-load analyzer cleanup also preserve their original errors.
+
+Direct calls into an injected custom `AudioEngine` preserve original thrown values for constructor setup and subscriptions, `pause()`, `stop()`, engine-backed settings and queries, and `canPlayType()`. Failures from those listed direct calls are not automatically player `error` events.
+
+<!-- AI modified: document the lifecycle race that guarantees injected-engine operations always terminate. -->
+For player-owned asynchronous operations, the first engine or lifecycle outcome wins. A current `load()` or `play()` publishes its preserved or wrapped engine failure, while `seek()`, `fastSeek()`, and `setAdaptiveQuality()` keep ordinary engine rejections delegated-only. Disposal rejects every in-flight operation immediately with `ENGINE_ERROR` and `Audio operation was interrupted by player disposal`; disposal and cancellation do not publish a new player `error`. A terminal engine `error` rejects with the exact `GAudioError` instance published once to listeners (for `load()`, only after source fallbacks are exhausted).
+
+| Operation | Engine result | Supersession result |
+| --- | --- | --- |
+| `load()` | No source rejects with `SOURCE_UNAVAILABLE` and `Audio source is required before loading`. An engine `GAudioError` is preserved; another rejection becomes `ENGINE_ERROR` with `Audio source could not be loaded`. | `setSource()` rejects with `LOAD_ABORTED` and `Audio operation was superseded by a replacement source`; a newer `load()` uses `Audio operation was superseded by a newer load`. |
+| `play()` | An engine `GAudioError` is preserved; another rejection becomes `ENGINE_ERROR` with `Audio playback failed`. A fatal engine `error` rejects immediately with the published instance. | After `engine.play()` starts, `pause()`, `stop()`, `setSource()`, or a newer `load()` silently supersedes the attempt and the public promise resolves. Late settlement is still observed, and late success reapplies the latest pause/stop intent. A play still awaiting its prerequisite load inherits that load's `LOAD_ABORTED`. |
+| `seek()` / `fastSeek()` | The injected engine's own rejection is preserved. | A newer seek rejects with `LOAD_ABORTED` and `Audio seek was superseded by a newer seek`; `stop()` uses `Audio seek was superseded by stop`; source replacement and a newer load use the general messages above. |
+| `setAdaptiveQuality()` | A missing capability rejects with `PROTOCOL_UNSUPPORTED`; otherwise the injected engine's own rejection is preserved. | A newer selection rejects with `LOAD_ABORTED` and `Adaptive quality selection was superseded by a newer selection`; source replacement and a newer load use the general messages above. |
+| Playlist and audio-track navigation | `next()`, `previous()`, `selectPlaylistTrack()`, and `selectAudioTrack()` inherit the result of their `load()`, `seek()`, or `play()` stage. | The active stage's rule applies. |
 
 Payload types:
 
@@ -285,14 +313,14 @@ Shared adaptive exports from `gaudio`:
 
 | Type or value | Purpose |
 | --- | --- |
-| `AdaptivePlaybackPreset` | `FastStart`, `Balanced`, and `Stable` audio VOD profiles. |
+| `AdaptivePlaybackPreset` | `FastStart`, `Balanced`, and `Stable` audio buffering profiles. |
 | `AdaptiveContentType` | `'vod'`, `'long-form'`, or `'live'` content tuning for adaptive adapters. |
 | `AdaptiveAudioProtocol` | `'hls' \| 'dash'`. |
 | `AdaptivePlaybackImplementation` | `'native' \| 'hls.js' \| 'dash.js'`. |
 | `AdaptivePlaybackInfo` | Active adaptive protocol and implementation. |
 | `AdaptiveManifestUpdate` | Manifest URL and discovered variants. |
 | `AdaptiveVariant` | Variant id, bitrate, and optional codecs. |
-| `AdaptiveVariantUpdate` | Initial or automatic adaptive variant selection. |
+| `AdaptiveVariantUpdate` | Initial, automatic, or manual adaptive variant selection, including its `reason`. |
 | `AdaptiveQualitySelection` | `'auto'` or a manual variant id. |
 | `AdaptiveSegmentUpdate` | Segment request URL, variant, and duration when available. |
 | `AdaptiveStreamError` | Recoverable or fatal adaptive failure information. |
@@ -303,7 +331,9 @@ Adapter contract:
 | --- | --- |
 | `AudioEngineAdapter` | Adapter contract for creating an `AudioEngine` for HLS, DASH, or future protocols. |
 | `AudioEngine` | Low-level engine contract used by `AudioPlayer` and adapters. |
-| `MediaElementAudioEngine` | Built-in `HTMLAudioElement` engine. Most apps should use `AudioPlayer` instead. |
+| `MediaElementAudioEngine` | Built-in `HTMLAudioElement` engine and the only exported class with a supported inheritance contract. Subclasses may rely on public and protected members. |
+
+`AudioPlayer`, `AudioAnalyzer`, and `EventEmitter` are concrete utilities intended for direct use or composition; subclassing them is not a compatibility contract. Extend GAudio through `AudioEngine`, `AudioEngineAdapter`, `AudioSource`, analyzer factories, and event APIs.
 
 ## HLS Entry
 
@@ -315,7 +345,7 @@ Import from `gaudio/hls`.
 | `HlsAudioAdapter` | Adapter instance with `hlsInstance`, `implementation`, `getConfig()`, `updateConfig()`, and adapter methods. |
 | `HlsAdapterOptions` | `contentType`, `preset`, `playbackStrategy`, and initial `config`. |
 | `HlsPlaybackStrategy` | `'native-first' \| 'hls-first' \| 'native-only' \| 'hls-only'`. |
-| `HlsAdapterConfig` | Deep partial `hls.js` constructor configuration with mergeable load policies. |
+| `HlsAdapterConfig` | Partial `hls.js` constructor configuration; only manifest, playlist, fragment, and key load policies accept nested partial overrides. |
 | `HlsConfigUpdateOptions` | `apply`, `restorePosition`, and `resumePlayback`. |
 | `HlsLoadPolicyChanges` | Partial request policy override. |
 | `HlsLoaderConfigChanges` | Partial loader settings and retry branches. |
@@ -331,6 +361,7 @@ Import from `gaudio/dash`.
 | `createDashAdapter(options?)` | Creates a DASH adapter for `AudioPlayerOptions.adapters`. |
 | `DashAudioAdapter` | Adapter instance with `dashInstance`, `getSettings()`, `updateSettings()`, and adapter methods. |
 | `DashAdapterOptions` | `contentType`, `preset`, and initial dash.js `settings`. |
+| `DashSettingsChanges` | Recursively sparse dash.js settings accepted by `DashAdapterOptions.settings` and `updateSettings()`. |
 | `MediaPlayerClass` | Re-export from `dashjs`. |
 | `MediaPlayerSettingClass` | Re-export from `dashjs`. |
 

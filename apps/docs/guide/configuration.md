@@ -4,15 +4,17 @@ This page collects the configuration surface in one place. Use it as a checklist
 
 ## Install only what you use
 
+The commands below target npm's `next` dist-tag. Before the first registry release is visible, clone this repository and use its `gaudio` workspace package instead.
+
 ```bash
-pnpm add gaudio
+pnpm add gaudio@next
 ```
 
 Add adaptive vendors only when the application imports the matching adapter:
 
 ```bash
-pnpm add gaudio hls.js
-pnpm add gaudio dashjs
+pnpm add gaudio@next hls.js
+pnpm add gaudio@next dashjs
 ```
 
 | Entry point | Dependency loaded | Use it for |
@@ -87,14 +89,15 @@ const player = new AudioPlayer({
 
 ## Source configuration
 
-GAudio accepts four source shapes:
+GAudio accepts five source shapes:
 
 | Shape | Example | Best for |
 | --- | --- | --- |
-| URL string | `'https://example.com/audio.mp3'` | Ordinary files where extension or MIME inference is enough. |
+| URL string | `'https://example.com/audio.mp3'` | Ordinary files with a recognized URL pathname extension. |
 | Source description | `{ url, protocol: 'hls', mimeType }` | Signed, extensionless, or gateway URLs that need explicit routing. |
 | `HttpAudioSource` | `new HttpAudioSource({ url, protocol })` | Reusable URL-backed source objects. |
-| Custom `AudioSource` | `{ kind: 'url', open, close }` | Load-time signed URLs, object URL cleanup, app-owned leases, or local resources. |
+| `BlobAudioSource` | `new BlobAudioSource(file)` | Local `Blob` or `File` playback with owned object URL cleanup. |
+| Custom `AudioSource` | `{ kind: 'url', open, close }` | Load-time signed URLs or app-owned resource leases. |
 
 ```ts
 import { BlobAudioSource, HttpAudioSource } from 'gaudio'
@@ -118,34 +121,7 @@ player.setSource(new BlobAudioSource(file))
 
 `HttpAudioSource` does not attach headers, set credentials, refresh tokens, or retry expired URLs. Use a custom source for a fresh URL before each `load()`, and use HLS/DASH vendor hooks when manifest or segment requests need authentication after playback starts.
 
-```ts
-interface SignedAudioUrl {
-  url: string
-  expiresAt: number
-}
-
-const signedProgramSource = {
-  kind: 'url' as const,
-  protocol: 'hls' as const,
-  mimeType: 'application/vnd.apple.mpegurl',
-  async open() {
-    const signedAudioUrl = await fetch('/api/audio-url', {
-      credentials: 'include',
-    }).then(async (response) => {
-      if (!response.ok) {
-        throw new Error('Failed to refresh audio URL')
-      }
-
-      return await response.json() as SignedAudioUrl
-    })
-
-    return { url: signedAudioUrl.url }
-  },
-  async close() {
-    // Release app-owned leases or object URLs here.
-  },
-}
-```
+GAudio can call `close()` while `open()` is still pending and can retry failed cleanup during a later lifecycle operation. Custom sources must invalidate late open results, retain cleanup ownership until it succeeds, and make repeated `close()` calls safe. For a complete signed-URL lease implementation, see the [signed URL recipe](/guide/recipes#signed-url-source).
 
 ## Playlist configuration
 
@@ -181,7 +157,7 @@ player.setPlaylist(
 | `audioTracks` | `readonly AudioTrack[]` | `undefined` | Alternate language or companion audio sources. |
 | `defaultAudioTrackId` | `string` | first audio track | Initial alternate audio track when present. |
 | `AudioPlaylistOptions.startIndex` | `number` | `0` | Zero-based track selected when the playlist is assigned. |
-| `AudioPlaylistNavigationOptions.autoplay` | `boolean` | `false` | Whether `next()`, `previous()`, or `selectPlaylistTrack()` starts playback after loading. |
+| `AudioPlaylistNavigationOptions.autoplay` | `boolean` | Player `autoplay` | Whether `next()`, `previous()`, or `selectPlaylistTrack()` starts playback after loading. An explicit value overrides the player setting. |
 | `AudioTrackSelectionOptions.preserveTime` | `boolean` | `true` | Keeps the same program position when switching alternate audio. |
 | `AudioTrackSelectionOptions.autoplay` | `boolean \| 'preserve'` | `'preserve'` | Preserves previous paused/playing state unless explicitly set. |
 
@@ -218,6 +194,8 @@ const player = new AudioPlayer({
 | `seekOffset` | `10` | Seconds moved by system seek-forward and seek-backward actions. |
 
 Supported browsers route system actions through `play()`, `pause()`, `stop()`, `previous()`, `next()`, `seek()`, and `fastSeek()`. Unsupported browsers ignore the integration.
+
+Media Session actions do not have a promise caller. GAudio-owned loading or playback failures remain observable through the player's `error` event and are not reported twice. Expected `LOAD_ABORTED` cancellations caused by newer source or lifecycle operations are ignored. Other synchronous and asynchronous action failures are contained and forwarded to the host's global error reporting (`globalThis.reportError`, with an uncaught microtask fallback).
 
 ## Analyzer configuration
 
@@ -271,7 +249,7 @@ const hlsAdapter = createHlsAdapter({
 | `contentType` | `'vod'` | `'vod'`, `'long-form'`, or `'live'` content tuning. |
 | `preset` | `AdaptivePlaybackPreset.Balanced` | `FastStart`, `Balanced`, or `Stable` audio profile. |
 | `playbackStrategy` | `'native-first'` | `'native-first'`, `'hls-first'`, `'native-only'`, or `'hls-only'`. |
-| `config` | `{}` | Deep partial `hls.js` constructor settings. Ignored by native HLS playback. |
+| `config` | `{}` | Partial `hls.js` constructor settings. Only manifest, playlist, fragment, and key load policies accept nested partial overrides. Ignored by native HLS playback. |
 
 ```ts
 import { AdaptivePlaybackPreset } from 'gaudio'
@@ -299,7 +277,7 @@ const dashAdapter = createDashAdapter({
 | --- | --- | --- |
 | `contentType` | `'vod'` | `'vod'`, `'long-form'`, or `'live'` content tuning. |
 | `preset` | `AdaptivePlaybackPreset.Balanced` | `FastStart`, `Balanced`, or `Stable` audio profile. |
-| `settings` | `{}` | Deep partial dash.js settings applied when a DASH engine is created. |
+| `settings` | `{}` | Recursively sparse `DashSettingsChanges`, applied when a DASH engine is created. |
 
 Use [Adaptive Playback](./adaptive-playback.md) for preset values, content-type behavior, quality selection, and diagnostics.
 
@@ -328,7 +306,7 @@ dashAdapter.updateSettings({
 })
 ```
 
-HLS updates apply on the next load unless `apply: 'reload'` is set. Reloading interrupts playback and loses buffered segments, retry state, and bandwidth estimates. DASH updates use dash.js runtime settings and can apply while active.
+HLS updates apply on the next load unless `apply: 'reload'` is set. Reloading interrupts playback and loses buffered segments, retry state, and bandwidth estimates. DASH `settings` and `updateSettings()` accept `DashSettingsChanges`, so one nested setting can change without supplying its siblings; runtime updates can apply while DASH playback is active.
 
 ## Recommended starting profiles
 
@@ -339,4 +317,3 @@ HLS updates apply on the next load unless `apply: 'reload'` is set. Reloading in
 | Podcast or audiobook | `preload: 'metadata'`, Media Session metadata, playlist fallback | `contentType: 'long-form'`, `preset: Stable` on weak networks |
 | Live radio or live event | `autoplay: false`, user gesture before `play()` | `contentType: 'live'`, strategy that enforces the vendor settings you need |
 | Visualizer | `analyzer: { fftSize: 1024 }`, CORS-enabled media | Any adaptive profile, verified in target browsers |
-

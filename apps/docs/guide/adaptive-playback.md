@@ -4,11 +4,13 @@ GAudio keeps adaptive streaming optional. Importing the root `gaudio` entry neve
 
 ## Install
 
+The commands below target npm's `next` dist-tag. Before the first registry release is visible, clone this repository and use its `gaudio` workspace package instead.
+
 Install only the protocol dependency you use:
 
 ```bash
-pnpm add gaudio hls.js
-pnpm add gaudio dashjs
+pnpm add gaudio@next hls.js
+pnpm add gaudio@next dashjs
 ```
 
 ## Register adapters
@@ -46,8 +48,8 @@ GAudio selects an engine in this order:
 | Priority | Source metadata | Result |
 | --- | --- | --- |
 | 1 | Explicit `protocol` on `AudioSourceDescription` or custom `AudioSource` | Uses `media`, `hls`, or `dash` exactly as requested. |
-| 2 | Known MIME type | HLS MIME types select `hls`; `application/dash+xml` selects `dash`. |
-| 3 | URL pathname extension | `.m3u8` selects `hls`; `.mpd` selects `dash`; query strings and fragments are ignored. |
+| 2 | Known MIME type | `application/vnd.apple.mpegurl`, `application/x-mpegurl`, `application/mpegurl`, `audio/mpegurl`, and `audio/x-mpegurl` select `hls`; `application/dash+xml` selects `dash`. Matching is case-insensitive and ignores MIME parameters. |
+| 3 | URL pathname extension | `.m3u8` or legacy `.m3u` selects `hls`; `.mpd` selects `dash`; query strings and fragments are ignored. |
 | 4 | No match | Falls back to the built-in media element engine. |
 
 Use explicit metadata for signed URLs, CDN routing URLs, or extensionless endpoints:
@@ -85,7 +87,7 @@ const hlsAdapter = createHlsAdapter({
 | `contentType` | `AdaptiveContentType` | `'vod'` | Tunes buffer, latency, and retry behavior for `'vod'`, `'long-form'`, or `'live'` sources. |
 | `preset` | `AdaptivePlaybackPreset` | `Balanced` | Applies an audio configuration profile before content-type tuning and explicit `config` overrides. |
 | `playbackStrategy` | `'native-first' \| 'hls-first' \| 'native-only' \| 'hls-only'` | `'native-first'` | Chooses whether browser-native HLS or `hls.js` is preferred. |
-| `config` | `HlsAdapterConfig` | `{}` | Deep partial `hls.js` constructor configuration. Explicit fields override the selected preset and content type. |
+| `config` | `HlsAdapterConfig` | `{}` | Partial `hls.js` constructor configuration. Only manifest, playlist, fragment, and key load policies accept nested partial overrides. Explicit fields override the selected preset and content type. |
 
 Strategies are deterministic:
 
@@ -125,9 +127,9 @@ const dashAdapter = createDashAdapter({
 | --- | --- | --- | --- |
 | `contentType` | `AdaptiveContentType` | `'vod'` | Tunes buffer, latency, and retry behavior for `'vod'`, `'long-form'`, or `'live'` sources. |
 | `preset` | `AdaptivePlaybackPreset` | `Balanced` | Applies an audio dash.js settings profile before content-type tuning and explicit `settings` overrides. |
-| `settings` | `MediaPlayerSettingClass` | `{}` | Deep partial dash.js settings applied when a DASH engine is created. Explicit fields override the selected preset and content type. |
+| `settings` | `DashSettingsChanges` | `{}` | Recursively sparse dash.js settings applied when a DASH engine is created. Explicit fields override the selected preset and content type. |
 
-DASH settings are merged recursively and passed through dash.js `updateSettings()` while active.
+DASH settings use the exported `DashSettingsChanges` type, are merged recursively, and pass through dash.js `updateSettings()` while active. `getSettings()` returns a complete `MediaPlayerSettingClass` snapshot.
 
 ## Playback presets
 
@@ -214,7 +216,9 @@ Use the player-level API after an HLS or DASH manifest loads:
 
 ```ts
 player.on('manifestloaded', async ({ variants }) => {
-  const preferredVariant = variants.at(-1)
+  // AI modified: manifest order is vendor-owned, so select quality by bitrate.
+  const preferredVariant = [...variants]
+    .sort((leftVariant, rightVariant) => rightVariant.bitrate - leftVariant.bitrate)[0]
   if (!preferredVariant) {
     return
   }
@@ -225,6 +229,8 @@ player.on('manifestloaded', async ({ variants }) => {
 // Return to automatic ABR.
 await player.setAdaptiveQuality('auto')
 ```
+
+Variant order is implementation-owned and is not a quality ranking. Select or sort variants by `bitrate` when quality order matters.
 
 Manual quality selection emits `variantchange` with `reason: 'manual'` when the vendor accepts the selected variant. Native HLS does not expose equivalent level controls, so manual selection can reject with `PROTOCOL_UNSUPPORTED` when the active implementation is browser-native.
 
@@ -291,8 +297,10 @@ dashAdapter.dashInstance
 dashAdapter.getSettings()
 ```
 
-One adapter instance should be owned by one active player router at a time.
+`isSupported()` is a synchronous browser-capability probe. It does not load the optional `hls.js` or `dashjs` peer, so `true` is not a dependency preflight: engine creation can still reject with `ADAPTER_UNAVAILABLE` if the selected peer cannot be imported, or `PROTOCOL_UNSUPPORTED` if its runtime check fails.
+
+An adapter instance has exclusive ownership by one player router until that router's cleanup has completely finished. `dispose()` makes the player unusable immediately, but source and vendor cleanup can continue asynchronously after the `void` call returns. Registering the same adapter with another player while cleanup is pending throws `TypeError`; create fresh adapter instances for a replacement player.
 
 ## Scope
 
-Adaptive playback targets audio VOD, long-form audio, and HLS/DASH live tuning. DRM, transcoding, offline media, playlist management, Icecast/Shoutcast metadata handling, and video-only tuning are outside the current package scope.
+Adaptive playback targets audio VOD, long-form audio, and HLS/DASH live tuning. GAudio playlists can contain adaptive sources, but manifest authoring, DRM, transcoding, offline media, Icecast/Shoutcast metadata handling, and video-only tuning are outside the current package scope.

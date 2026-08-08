@@ -4,17 +4,19 @@ GAudio is currently pre-release. The public API is typed and documented, but int
 
 ## Install
 
+The commands below target npm's `next` dist-tag. Before the first registry release is visible, clone this repository and use its `gaudio` workspace package instead.
+
 Install the core package for ordinary browser audio:
 
 ```bash
-pnpm add gaudio
+pnpm add gaudio@next
 ```
 
 Install only the adaptive dependency your application actually imports:
 
 ```bash
-pnpm add gaudio hls.js
-pnpm add gaudio dashjs
+pnpm add gaudio@next hls.js
+pnpm add gaudio@next dashjs
 ```
 
 ## Import paths
@@ -27,6 +29,16 @@ pnpm add gaudio dashjs
 
 The root entry does not import `hls.js` or `dashjs`. Applications that only play MP3, AAC, WAV, or OGG do not need adaptive vendors.
 
+## Compatibility
+
+The built core and HLS entry points can be imported by Node.js 18 or newer; `dashjs@5` requires Node.js 20 or newer when evaluated in Node.js. Browser playback still requires DOM media APIs, so create players and adapters after client mount in SSR applications. Published declarations support TypeScript 5.8 or newer and are verified with TypeScript 5.8.3 plus the current project compiler.
+
+Browser support is capability-based. CI exercises the current Playwright-bundled Chromium, Firefox, and WebKit desktop engines plus a Pixel 5 Chromium emulation project; this is a tested-current matrix, not a minimum-version or real-device guarantee. Core playback requires `HTMLAudioElement`, and analysis requires Web Audio. HLS requires native HLS or Media Source Extensions compatible with hls.js. DASH requires Media Source Extensions compatible with dash.js and native `globalThis.structuredClone()`. GAudio does not ship browser polyfills.
+
+TypeScript consumers of `gaudio/dash` must use `node16`, `nodenext`, or `bundler` module resolution. Legacy `node10` resolution cannot resolve dash.js's transitive type packages.
+
+Node.js 18 and 20 are end-of-life. They remain package-compatibility floors only; use a maintained release for SSR deployments and tooling. GAudio development and releases use Node.js 24 LTS.
+
 ## Create a player
 
 ```ts
@@ -38,6 +50,7 @@ const player = new AudioPlayer({
   volume: 0.8,
   playbackRate: 1,
   preservesPitch: true,
+  mediaSession: true,
   analyzer: true,
 })
 
@@ -55,9 +68,10 @@ await player.play()
 
 | Option | Type | Default | Description |
 | --- | --- | --- | --- |
-| `source` | `AudioSourceInput` | `undefined` | URL string, source description, `HttpAudioSource`, or custom `AudioSource`. Not loaded until `load()` or idle `play()`. |
+| `source` | `AudioSourceInput` | `undefined` | URL string, source description, `HttpAudioSource`, `BlobAudioSource`, or custom `AudioSource`. Not loaded until `load()` or idle `play()`. |
 | `adapters` | `readonly AudioEngineAdapter[]` | `[]` | Optional protocol adapters used by the internal engine router for HLS and DASH. Do not pass when injecting a custom engine. |
 | `analyzer` | `boolean \| AudioPlayerAnalyzerOptions` | `undefined` | Enables player-owned Web Audio analysis after `load()`. Use `true` for defaults or pass `fftSize` and `createAnalyzer`. |
+| `mediaSession` | `boolean \| AudioMediaSessionOptions` | `undefined` | Enables browser and operating-system media controls; pass metadata and seek-offset options when needed. |
 | `preload` | `'none' \| 'metadata' \| 'auto'` | `'metadata'` | Browser preload hint applied to current and future sources. |
 | `autoplay` | `boolean` | `false` | Makes `load()` attempt `play()` after the source is ready. Browser policy rejection becomes `PLAYBACK_BLOCKED`. |
 | `muted` | `boolean` | `false` | Starts with muted output. |
@@ -70,13 +84,19 @@ await player.play()
 
 | API | Description |
 | --- | --- |
-| `load()` | Opens the configured source and resolves after metadata is available. Rejects with `GAudioError` for source, network, decode, adaptive, or autoplay failures. |
+| `load()` | Opens the configured source and resolves after metadata is available. GAudio-owned source, network, decode, adaptive, and autoplay failures reject with `GAudioError`. |
 | `play()` | Starts or resumes playback. If the player is `idle`, it loads first. |
 | `pause()` | Pauses while retaining the current position and loaded source. |
 | `stop()` | Pauses and returns to `0` seconds while retaining the loaded source. The next `play()` reuses it. |
 | `seek(seconds)` | Seeks to a non-negative exact position. Invalid values throw `RangeError`. |
 | `fastSeek(seconds)` | Uses the browser optimized seek path when available, otherwise falls back to `seek()`. |
-| `dispose()` | Releases the active engine, source lifecycle, vendor instances, and event listeners. Create a new player after disposal. |
+| `dispose()` | Permanently disables the player and starts cleanup. Cleanup may continue after return; a cleanup error can throw, and a repeated call retries retained work. Create a new player and fresh adapters after disposal. |
+
+Extension callbacks remain an exception boundary. `AudioPlayer.load()` wraps non-`GAudioError` failures from adapter `createEngine()` calls and analyzer factories as `ENGINE_ERROR`, keeps the original error in `cause`, and publishes the same wrapper through the player `error` event. Calling a custom adapter's `createEngine()` directly can still reject with that adapter's own error.
+
+An injected custom `AudioEngine` is also a direct extension boundary. Constructor setup and subscriptions, `pause()`, `stop()`, `seek()`, `fastSeek()`, engine-backed settings, `canPlayType()`, state and range queries, and adaptive-quality operations preserve the engine's original thrown or rejected value. A delegated failure alone is not automatically published through the player `error` event. `load()` and `play()` remain player-owned boundaries; they use the documented `GAudioError` contract, and a fatal engine `error` rejects an in-flight play or autoplay load.
+
+Cleanup remains a separate extension boundary. `setSource()`, `setPlaylist()`, `selectPlaylistTrack()`, `next()`, `previous()`, and `selectAudioTrack()` preserve the original analyzer-disposal or engine-unload error from source replacement. An explicit `AudioPlayer.load()` also preserves an error thrown while disposing a caller-provided analyzer before the new load starts. At the lower `MediaElementAudioEngine` layer, custom `AudioSource.open()` / `close()` methods and underlying media-element or subclass hooks preserve their original error identity. Catch these extension failures as `unknown`; stable `GAudioError.code` values describe failures owned by the player boundary and built-in adapters.
 
 ## Playback settings
 
@@ -127,17 +147,18 @@ interface TimeRange {
 
 ## Source inputs
 
-`AudioPlayer` accepts four source shapes:
+`AudioPlayer` accepts five source shapes:
 
 | Shape | Example | Use it when |
 | --- | --- | --- |
-| URL string | `'https://example.com/audio.mp3'` | The URL extension or MIME sniffing is enough for routing. |
+| URL string | `'https://example.com/audio.mp3'` | The URL pathname extension is enough for routing. |
 | `AudioSourceDescription` | `{ url, protocol: 'hls', mimeType }` | Signed, extensionless, or routed URLs need explicit protocol metadata. |
 | `HttpAudioSource` | `new HttpAudioSource({ url, protocol })` | You want a reusable URL-backed source object. |
-| Custom `AudioSource` | `{ kind: 'url', open, close }` | You need signed URL refresh, object URL cleanup, local blobs, or application-owned resource lifecycle. |
+| `BlobAudioSource` | `new BlobAudioSource(file)` | You need a local `Blob` or `File` with object URL ownership and cleanup. |
+| Custom `AudioSource` | `{ kind: 'url', open, close }` | You need signed URL refresh or application-owned resource lifecycle. |
 
 ```ts
-import { AudioPlayer, HttpAudioSource } from 'gaudio'
+import { AudioPlayer, BlobAudioSource, HttpAudioSource } from 'gaudio'
 
 player.setSource('https://example.com/audio.mp3')
 
@@ -152,66 +173,19 @@ player.setSource(new HttpAudioSource({
   protocol: 'dash',
   mimeType: 'application/dash+xml',
 }))
+
+player.setSource(new BlobAudioSource(file))
 ```
 
-Custom sources are lazy. `open()` runs during `load()`, and `close()` runs when a newer source replaces it, loading is cancelled, or the player is disposed:
+Custom sources are lazy. `open()` runs during `load()`, and `close()` runs when a newer source replaces it, loading is cancelled, or the player is disposed.
 
-```ts
-const signedSource = {
-  kind: 'url' as const,
-  protocol: 'media' as const,
-  mimeType: 'audio/mpeg',
-  async open() {
-    const url = await fetch('/api/audio-url').then(response => response.text())
-
-    return { url }
-  },
-  async close() {
-    // Release object URLs or server-side leases here.
-  },
-}
-
-player.setSource(signedSource)
-await player.load()
-```
+GAudio treats each `open()` call and its matching cleanup as one source operation. `close()` can run before `open()` settles, including after a synchronous throw or rejected promise, and GAudio can retry failed cleanup during a later `load()`, `unload()`, or `dispose()`. A custom source must therefore cancel or invalidate pending work, prevent a late `open()` result from becoming usable, and make repeated `close()` calls safe. Do not discard cleanup state until `close()` resolves. See the [signed URL recipe](/guide/recipes#signed-url-source) for a complete cancellation-safe lease implementation.
 
 ## Source cookbook
 
 `HttpAudioSource` is intentionally a URL wrapper. It does not fetch media itself, attach custom request headers, set `credentials`, refresh signed URLs, or retry expired tokens. The selected browser or adaptive engine owns the actual media requests after `open()` returns `{ url }`.
 
-Use a custom `AudioSource` when your app needs a fresh URL for every load:
-
-```ts
-interface SignedAudioUrl {
-  url: string
-  expiresAt: number
-}
-
-const signedProgramSource = {
-  kind: 'url' as const,
-  protocol: 'hls' as const,
-  mimeType: 'application/vnd.apple.mpegurl',
-  async open() {
-    const signedAudioUrl = await fetch('/api/audio-url', {
-      credentials: 'include',
-    }).then(async (response) => {
-      if (!response.ok) {
-        throw new Error('Failed to refresh audio URL')
-      }
-
-      return await response.json() as SignedAudioUrl
-    })
-
-    return { url: signedAudioUrl.url }
-  },
-  async close() {
-    // Release app-owned leases or object URLs here.
-  },
-}
-
-player.setSource(signedProgramSource)
-await player.load()
-```
+Use a custom `AudioSource` when your app needs a fresh URL for every load. The [signed URL recipe](/guide/recipes#signed-url-source) shows client cancellation, idempotent server release, late-open invalidation, and cleanup retry without hiding failures.
 
 For bearer tokens or custom headers, prefer returning a short-lived signed URL from your application backend. Native media elements do not expose per-request header hooks for ordinary MP3/AAC/WAV/OGG playback. If a token can expire during active HLS or DASH playback, refresh it before calling `load()` or use the selected vendor's request hooks through `createHlsAdapter({ config })` or `createDashAdapter({ settings })`, because manifest and segment requests happen after the source URL is attached.
 

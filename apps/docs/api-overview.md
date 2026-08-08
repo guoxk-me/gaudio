@@ -10,11 +10,11 @@ For narrative guidance and longer examples, start with the hand-written [API gui
 
 | API | When to open it |
 | --- | --- |
-| [`AudioPlayer`](/api/index/classes/AudioPlayer) | Main class for loading sources, controlling playback, observing events, handling playlists, and switching adaptive quality. |
-| [`AudioPlayerOptions`](/api/index/interfaces/AudioPlayerOptions) | Constructor options for sources, adapters, analyzer setup, Media Session integration, and playback defaults. |
-| [`AudioPlayerEvents`](/api/index/interfaces/AudioPlayerEvents) | Event names and payloads emitted by `AudioPlayer.on()` and `AudioPlayer.once()`. |
-| [`PlaybackState`](/api/index/type-aliases/PlaybackState) | Public lifecycle states for UI rendering and integration logic. |
-| [`GAudioError`](/api/index/classes/GAudioError) | Stable error class and machine-readable error codes. |
+| [`AudioPlayer`](/api/core/classes/AudioPlayer) | Main class for loading sources, controlling playback, observing events, handling playlists, and switching adaptive quality. |
+| [`AudioPlayerOptions`](/api/core/interfaces/AudioPlayerOptions) | Constructor options for sources, adapters, analyzer setup, Media Session integration, and playback defaults. |
+| [`AudioPlayerEvents`](/api/core/interfaces/AudioPlayerEvents) | Event names and payloads emitted by `AudioPlayer.on()` and `AudioPlayer.once()`. |
+| [`PlaybackState`](/api/core/type-aliases/PlaybackState) | Public lifecycle states for UI rendering and integration logic. |
+| [`GAudioError`](/api/core/classes/GAudioError) | Stable error class and machine-readable error codes. |
 
 ## Core Player
 
@@ -22,10 +22,10 @@ For narrative guidance and longer examples, start with the hand-written [API gui
 
 Useful references:
 
-- [`AudioPlayer`](/api/index/classes/AudioPlayer) for playback, seeking, volume, playlist, analyzer, and adaptive-quality methods.
-- [`AudioPlayerOptions`](/api/index/interfaces/AudioPlayerOptions) for constructor configuration.
-- [`AudioPlaylistTrack`](/api/index/interfaces/AudioPlaylistTrack), [`AudioTrack`](/api/index/interfaces/AudioTrack), and [`AudioTrackSelectionOptions`](/api/index/interfaces/AudioTrackSelectionOptions) for playlist and alternate-audio integrations.
-- [`AudioMediaSessionOptions`](/api/index/interfaces/AudioMediaSessionOptions) and [`AudioMediaSessionMetadata`](/api/index/interfaces/AudioMediaSessionMetadata) for browser and operating-system media controls.
+- [`AudioPlayer`](/api/core/classes/AudioPlayer) for playback, seeking, volume, playlist, analyzer, and adaptive-quality methods.
+- [`AudioPlayerOptions`](/api/core/interfaces/AudioPlayerOptions) for constructor configuration.
+- [`AudioPlaylistTrack`](/api/core/interfaces/AudioPlaylistTrack), [`AudioTrack`](/api/core/interfaces/AudioTrack), and [`AudioTrackSelectionOptions`](/api/core/interfaces/AudioTrackSelectionOptions) for playlist and alternate-audio integrations.
+- [`AudioMediaSessionOptions`](/api/core/interfaces/AudioMediaSessionOptions) and [`AudioMediaSessionMetadata`](/api/core/interfaces/AudioMediaSessionMetadata) for browser and operating-system media controls.
 
 ## Sources
 
@@ -33,10 +33,10 @@ Sources describe where audio comes from and when the final playable URL is opene
 
 Useful references:
 
-- [`AudioSourceInput`](/api/index/type-aliases/AudioSourceInput) for accepted player source values.
-- [`AudioSource`](/api/index/interfaces/AudioSource) for custom lazy source implementations.
-- [`AudioSourceDescription`](/api/index/interfaces/AudioSourceDescription) for URL, protocol, and MIME metadata.
-- [`HttpAudioSource`](/api/index/classes/HttpAudioSource) and [`BlobAudioSource`](/api/index/classes/BlobAudioSource) for built-in source wrappers.
+- [`AudioSourceInput`](/api/core/type-aliases/AudioSourceInput) for accepted player source values.
+- [`AudioSource`](/api/core/interfaces/AudioSource) for custom lazy source implementations.
+- [`AudioSourceDescription`](/api/core/interfaces/AudioSourceDescription) for URL, protocol, and MIME metadata.
+- [`HttpAudioSource`](/api/core/classes/HttpAudioSource) and [`BlobAudioSource`](/api/core/classes/BlobAudioSource) for built-in source wrappers.
 
 ## Events And State
 
@@ -44,10 +44,10 @@ Use player events for UI updates, telemetry, playlist transitions, load failures
 
 Useful references:
 
-- [`AudioPlayerEvents`](/api/index/interfaces/AudioPlayerEvents) for player event names and payloads.
-- [`TimeUpdate`](/api/index/interfaces/TimeUpdate), [`BufferUpdate`](/api/index/interfaces/BufferUpdate), [`VolumeUpdate`](/api/index/interfaces/VolumeUpdate), and [`PlaybackRateUpdate`](/api/index/interfaces/PlaybackRateUpdate) for common UI payloads.
-- [`AdaptiveManifestUpdate`](/api/index/interfaces/AdaptiveManifestUpdate), [`AdaptiveVariantUpdate`](/api/index/interfaces/AdaptiveVariantUpdate), [`AdaptiveSegmentUpdate`](/api/index/interfaces/AdaptiveSegmentUpdate), and [`AdaptiveStreamError`](/api/index/interfaces/AdaptiveStreamError) for HLS/DASH diagnostics.
-- [`EventEmitter`](/api/index/classes/EventEmitter) when an application needs a small typed event channel of its own.
+- [`AudioPlayerEvents`](/api/core/interfaces/AudioPlayerEvents) for player event names and payloads.
+- [`TimeUpdate`](/api/core/interfaces/TimeUpdate), [`BufferUpdate`](/api/core/interfaces/BufferUpdate), [`VolumeUpdate`](/api/core/interfaces/VolumeUpdate), and [`PlaybackRateUpdate`](/api/core/interfaces/PlaybackRateUpdate) for common UI payloads.
+- [`AdaptiveManifestUpdate`](/api/core/interfaces/AdaptiveManifestUpdate), [`AdaptiveVariantUpdate`](/api/core/interfaces/AdaptiveVariantUpdate), [`AdaptiveSegmentUpdate`](/api/core/interfaces/AdaptiveSegmentUpdate), and [`AdaptiveStreamError`](/api/core/interfaces/AdaptiveStreamError) for HLS/DASH diagnostics.
+- [`EventEmitter`](/api/core/classes/EventEmitter) when an application needs a small typed event channel of its own.
 
 ## Analysis
 
@@ -55,9 +55,9 @@ GAudio can expose Web Audio analyzer data after a source loads. Use it for wavef
 
 Useful references:
 
-- [`AudioAnalyzer`](/api/index/classes/AudioAnalyzer) for frequency and waveform reads.
-- [`AudioPlayerAnalyzerOptions`](/api/index/interfaces/AudioPlayerAnalyzerOptions) for player-owned analyzer configuration.
-- [`FrequencyDataOptions`](/api/index/interfaces/FrequencyDataOptions) and [`WaveformDataOptions`](/api/index/interfaces/WaveformDataOptions) for sample sizing.
+- [`AudioAnalyzer`](/api/core/classes/AudioAnalyzer) for frequency and waveform reads.
+- [`AudioPlayerAnalyzerOptions`](/api/core/interfaces/AudioPlayerAnalyzerOptions) for player-owned analyzer configuration.
+- [`FrequencyDataOptions`](/api/core/interfaces/FrequencyDataOptions) and [`WaveformDataOptions`](/api/core/interfaces/WaveformDataOptions) for sample sizing.
 
 ## Adaptive Playback
 
@@ -65,10 +65,10 @@ Adaptive playback is split between shared player-level types and optional protoc
 
 Shared references:
 
-- [`AdaptivePlaybackPreset`](/api/index/enumerations/AdaptivePlaybackPreset) for fast-start, balanced, and stable tuning profiles.
-- [`AdaptiveContentType`](/api/index/type-aliases/AdaptiveContentType) for VOD, long-form, and live tuning.
-- [`AdaptivePlaybackInfo`](/api/index/interfaces/AdaptivePlaybackInfo), [`AdaptiveVariant`](/api/index/interfaces/AdaptiveVariant), and [`AdaptiveQualitySelection`](/api/index/type-aliases/AdaptiveQualitySelection) for active stream and quality state.
-- [`AudioEngineAdapter`](/api/index/interfaces/AudioEngineAdapter) for extension points that add protocol engines.
+- [`AdaptivePlaybackPreset`](/api/core/enumerations/AdaptivePlaybackPreset) for fast-start, balanced, and stable tuning profiles.
+- [`AdaptiveContentType`](/api/core/type-aliases/AdaptiveContentType) for VOD, long-form, and live tuning.
+- [`AdaptivePlaybackInfo`](/api/core/interfaces/AdaptivePlaybackInfo), [`AdaptiveVariant`](/api/core/interfaces/AdaptiveVariant), and [`AdaptiveQualitySelection`](/api/core/type-aliases/AdaptiveQualitySelection) for active stream and quality state.
+- [`AudioEngineAdapter`](/api/core/interfaces/AudioEngineAdapter) for extension points that add protocol engines.
 
 Adapter entry points:
 
@@ -81,10 +81,10 @@ Most applications should stay at the `AudioPlayer` layer. The lower-level engine
 
 Useful references:
 
-- [`AudioEngine`](/api/index/interfaces/AudioEngine) for the low-level playback contract.
-- [`AudioEngineEvents`](/api/index/interfaces/AudioEngineEvents) for engine lifecycle payloads.
-- [`MediaElementAudioEngine`](/api/index/classes/MediaElementAudioEngine) for the built-in `HTMLAudioElement` implementation.
-- [`AudioEngineAdapter`](/api/index/interfaces/AudioEngineAdapter) for routing a source protocol to a custom engine.
+- [`AudioEngine`](/api/core/interfaces/AudioEngine) for the low-level playback contract.
+- [`AudioEngineEvents`](/api/core/interfaces/AudioEngineEvents) for engine lifecycle payloads.
+- [`MediaElementAudioEngine`](/api/core/classes/MediaElementAudioEngine) for the built-in `HTMLAudioElement` implementation.
+- [`AudioEngineAdapter`](/api/core/interfaces/AudioEngineAdapter) for routing a source protocol to a custom engine.
 
 ## Import Map
 

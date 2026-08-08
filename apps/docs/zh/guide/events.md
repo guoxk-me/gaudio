@@ -100,7 +100,7 @@ player.on('ratechange', ({ playbackRate }) => {
 | --- | --- | --- |
 | `adaptivechange` | `AdaptivePlaybackInfo` | Source 激活 HLS 或 DASH，并选择 `native`、`hls.js` 或 `dash.js`。 |
 | `manifestloaded` | `AdaptiveManifestUpdate` | Vendor manifest 加载完成并暴露 variants。 |
-| `variantchange` | `AdaptiveVariantUpdate` | 初始选择或自动 ABR 选择切换 variant。 |
+| `variantchange` | `AdaptiveVariantUpdate` | 初始选择、自动 ABR 切换或已确认的手动音质请求切换 variant。 |
 | `segmentloadstart` | `AdaptiveSegmentUpdate` | Vendor 暴露的媒体分段请求开始。 |
 | `segmentloaded` | `AdaptiveSegmentUpdate` | Vendor 暴露的媒体分段请求完成。 |
 | `streamerror` | `AdaptiveStreamError` | Vendor 报告可恢复或 fatal 的自适应流错误。 |
@@ -118,11 +118,11 @@ player.on('streamerror', update => console.log(update.category, update.isFatal, 
 
 | 字段 | 类型 | 描述 |
 | --- | --- | --- |
-| `id` | `string` | Vendor 提供的 variant 或 representation id。 |
+| `id` | `string` | 在当前 manifest 生命周期内保持稳定的、不透明公共选择 ID；请原样传给 `setAdaptiveQuality()`。 |
 | `bitrate` | `number` | Manifest 声明的码率，单位 bits per second。 |
 | `codecs` | `string \| undefined` | Manifest 暴露 codec 声明时提供。 |
 
-`AdaptiveVariantUpdate.reason` 在首次选择时为 `'initial'`，之后自动 ABR 切换时为 `'automatic'`，通过 `setAdaptiveQuality()` 选择指定 variant 时为 `'manual'`。
+`AdaptiveVariantUpdate.reason` 在首次 vendor 选择且该选择并非由显式手动请求触发时为 `'initial'`，之后自动 ABR 切换时为 `'automatic'`。当 vendor 确认通过 `setAdaptiveQuality()` 请求的指定 variant 时为 `'manual'`；这也包括手动请求早于首次 vendor 选择的情况。
 
 原生 HLS 通常只发出 `adaptivechange`；浏览器原生播放不会暴露与 `hls.js` 等价的 manifest、variant、segment 或可恢复错误细节。
 
@@ -150,5 +150,7 @@ player.on('error', (error) => {
 | `ENGINE_ERROR` | 底层 engine 错误无法更具体分类。 |
 
 可恢复的 adaptive vendor 错误会在 vendor 重试期间发出 `streamerror`。Fatal adaptive 错误还会发出 `error`，将状态切到 `error`，并 reject active `load()` 或 `play()` 操作。
+
+自动续播 playlist 不会返回可供调用方等待的 Promise，因此此前未上报的 source-replacement 清理失败会包装为 `ENGINE_ERROR` 并只发出一次；若下一首加载失败已由 `load()` 发布，则不会重复发出。
 
 交互 demo 会记录状态变化、媒体生命周期事件、时间 ranges、自适应 manifest 和音质事件、分段活动、工具预览和类型化错误码。

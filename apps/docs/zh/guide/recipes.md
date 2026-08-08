@@ -105,11 +105,51 @@ await player.selectAudioTrack('en', {
 ## 签名 URL source
 
 ```ts
+import type { AudioSource } from 'gaudio'
 import { AudioPlayer } from 'gaudio'
+import { createHlsAdapter } from 'gaudio/hls'
 
-interface SignedAudioUrl {
+interface SignedAudioLease {
   url: string
   expiresAt: number
+}
+
+interface SignedOpenOperation {
+  requestId: string
+  controller: AbortController
+  isCancelled: boolean
+  isReleased: boolean
+  releaseCompletion?: Promise<void>
+}
+
+let activeOperation: SignedOpenOperation | undefined
+
+async function releaseSignedOperation(operation: SignedOpenOperation): Promise<void> {
+  if (operation.isReleased) {
+    return
+  }
+
+  operation.releaseCompletion ??= fetch('/api/audio-url/release', {
+    method: 'POST',
+    credentials: 'include',
+    keepalive: true,
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ requestId: operation.requestId }),
+  }).then((response) => {
+    if (!response.ok) {
+      throw new Error(`Failed to release audio URL: HTTP ${response.status}`)
+    }
+
+    operation.isReleased = true
+  }).finally(() => {
+    // 清理失败时保留 operation，供下一次 close() 重试。
+    operation.releaseCompletion = undefined
+  })
+
+  await operation.releaseCompletion
+  if (activeOperation === operation && operation.isReleased) {
+    activeOperation = undefined
+  }
 }
 
 const signedSource = {
@@ -117,29 +157,60 @@ const signedSource = {
   protocol: 'hls' as const,
   mimeType: 'application/vnd.apple.mpegurl',
   async open() {
-    const signedAudioUrl = await fetch('/api/audio-url', {
-      credentials: 'include',
-    }).then(async (response) => {
-      if (!response.ok) {
-        throw new Error('Failed to create signed audio URL')
-      }
+    if (activeOperation && !activeOperation.isReleased) {
+      throw new Error('The previous signed URL operation has not closed')
+    }
 
-      return await response.json() as SignedAudioUrl
+    const operation: SignedOpenOperation = {
+      requestId: crypto.randomUUID(),
+      controller: new AbortController(),
+      isCancelled: false,
+      isReleased: false,
+    }
+    activeOperation = operation
+
+    const response = await fetch('/api/audio-url/open', {
+      method: 'POST',
+      credentials: 'include',
+      signal: operation.controller.signal,
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ requestId: operation.requestId }),
     })
 
-    return { url: signedAudioUrl.url }
+    if (!response.ok) {
+      throw new Error(`Failed to create signed audio URL: HTTP ${response.status}`)
+    }
+
+    const signedAudioLease = await response.json() as SignedAudioLease
+    if (operation.isCancelled || activeOperation !== operation) {
+      await releaseSignedOperation(operation)
+      throw new DOMException('Audio source open was cancelled', 'AbortError')
+    }
+
+    return { url: signedAudioLease.url }
   },
   async close() {
-    await fetch('/api/audio-url/release', { method: 'POST' }).catch(() => {})
+    const operation = activeOperation
+    if (!operation) {
+      return
+    }
+
+    // 先标记取消，避免被忽略或迟到的 fetch 发布 URL。
+    operation.isCancelled = true
+    operation.controller.abort()
+    await releaseSignedOperation(operation)
   },
-}
+} satisfies AudioSource
 
 const player = new AudioPlayer({
   source: signedSource,
+  adapters: [createHlsAdapter()],
 })
 ```
 
-这个 source 会在每次 load 前刷新顶层 URL。如果 HLS 或 DASH manifest 内部的 segment 请求也需要鉴权，需要通过 `createHlsAdapter({ config })` 或 `createDashAdapter({ settings })` 配置所选 vendor。
+`AbortController` 只能让浏览器停止等待，不能证明服务端没有创建租约。应把 `requestId` 当作幂等键：open endpoint 先以 `opening` 状态预留该 key，创建租约后，仅当记录仍是 `opening` 时才原子更新为 `active`；release endpoint 先原子 upsert 持久化的 `released` tombstone，再撤销已有租约，并对重复请求返回成功。如果 release 在 open commit 前获胜，open 必须撤销已经创建的资源，且不能返回可用 URL。
+
+tombstone 的保留时间至少要覆盖租约或签名 URL 的最长有效期；每次请求都必须按当前用户校验权限；只有撤销已完成或已可靠写入可重试队列后，release 才能返回成功。如果 HLS 或 DASH manifest 内部的 segment 请求也需要鉴权，需要通过 `createHlsAdapter({ config })` 或 `createDashAdapter({ settings })` 配置所选 vendor。
 
 ## 本地文件预览
 
@@ -202,14 +273,18 @@ player.setSource({
 await player.load()
 
 const variants = player.getAdaptiveVariants()
-const highestVariant = variants.at(-1)
+// AI modified: adapter variant 顺序不代表音质排名。
+const highestBitrateVariant = [...variants]
+  .sort((leftVariant, rightVariant) => rightVariant.bitrate - leftVariant.bitrate)[0]
 
-if (highestVariant) {
-  await player.setAdaptiveQuality(highestVariant.id)
+if (highestBitrateVariant) {
+  await player.setAdaptiveQuality(highestBitrateVariant.id)
 }
 
 await player.setAdaptiveQuality('auto')
 ```
+
+Variant 顺序由 implementation 决定。按音质排名选择前，应先按 `bitrate` 排序。
 
 当前 vendor 暴露音质控制时可以手动选择。浏览器原生 HLS 可能以 `PROTOCOL_UNSUPPORTED` 拒绝手动选择。
 
@@ -346,4 +421,3 @@ paintSpectrum()
 ```
 
 远程媒体需要在目标浏览器验证 CORS。文件可能能正常播放，但 Web Audio 分析仍返回静音样本。
-

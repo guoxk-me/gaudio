@@ -1,5 +1,8 @@
 ---
 layout: home
+title: GAudio — 浏览器优先的 TypeScript 音频流播放库
+titleTemplate: false
+description: 面向浏览器的类型化音频播放器，覆盖原生媒体、播放列表、Web Audio 分析、Media Session，以及可选的 HLS/DASH 自适应流。
 
 hero:
   name: GAudio
@@ -27,6 +30,13 @@ features:
   - title: 浏览器集成
     details: 通过 Media Session 连接浏览器、键盘、耳机和操作系统媒体控制，同时保留类型化事件与稳定的 GAudioError code 供 telemetry 使用。
 ---
+
+<script setup lang="ts">
+import { defineAsyncComponent } from 'vue'
+
+// AI modified: keep the audio player out of every non-home documentation entry.
+const HomeMiniPlayer = defineAsyncComponent(() => import('../.vitepress/theme/components/HomeMiniPlayer.vue'))
+</script>
 
 <ClientOnly>
   <HomeMiniPlayer />

@@ -4,11 +4,13 @@ GAudio 把自适应流作为可选能力。导入根入口 `gaudio` 不会加载
 
 ## 安装
 
+以下命令使用 npm registry 的 `next` dist-tag。在首次 registry release 可见之前，请 clone 本仓库并使用其中的 `gaudio` workspace package。
+
 只安装实际使用的协议依赖：
 
 ```bash
-pnpm add gaudio hls.js
-pnpm add gaudio dashjs
+pnpm add gaudio@next hls.js
+pnpm add gaudio@next dashjs
 ```
 
 ## 注册适配器
@@ -46,8 +48,8 @@ GAudio 按下面顺序选择 engine：
 | 优先级 | Source metadata | 结果 |
 | --- | --- | --- |
 | 1 | `AudioSourceDescription` 或自定义 `AudioSource` 上的显式 `protocol` | 严格使用指定的 `media`、`hls` 或 `dash`。 |
-| 2 | 已知 MIME type | HLS MIME type 选择 `hls`；`application/dash+xml` 选择 `dash`。 |
-| 3 | URL pathname 后缀 | `.m3u8` 选择 `hls`；`.mpd` 选择 `dash`；query string 和 fragment 会被忽略。 |
+| 2 | 已知 MIME type | `application/vnd.apple.mpegurl`、`application/x-mpegurl`、`application/mpegurl`、`audio/mpegurl` 和 `audio/x-mpegurl` 选择 `hls`；`application/dash+xml` 选择 `dash`。匹配不区分大小写，并忽略 MIME 参数。 |
+| 3 | URL pathname 后缀 | `.m3u8` 或旧式 `.m3u` 选择 `hls`；`.mpd` 选择 `dash`；query string 和 fragment 会被忽略。 |
 | 4 | 没有匹配 | 回退到内置 media element engine。 |
 
 签名 URL、CDN 网关 URL 或无后缀 endpoint 应使用显式 metadata：
@@ -85,7 +87,7 @@ const hlsAdapter = createHlsAdapter({
 | `contentType` | `AdaptiveContentType` | `'vod'` | 按 `'vod'`、`'long-form'` 或 `'live'` 调整缓冲、直播延迟和重试策略。 |
 | `preset` | `AdaptivePlaybackPreset` | `Balanced` | 在 content type 调优和显式 `config` 覆盖前应用音频配置 profile。 |
 | `playbackStrategy` | `'native-first' \| 'hls-first' \| 'native-only' \| 'hls-only'` | `'native-first'` | 决定优先使用浏览器原生 HLS 还是 `hls.js`。 |
-| `config` | `HlsAdapterConfig` | `{}` | 深度 partial 的 `hls.js` 构造配置。显式字段会覆盖 preset 和 content type。 |
+| `config` | `HlsAdapterConfig` | `{}` | Partial `hls.js` 构造配置。只有 manifest、playlist、fragment 与 key load policy 接受嵌套 partial 覆盖。显式字段会覆盖 preset 和 content type。 |
 
 Strategy 行为是确定性的：
 
@@ -125,9 +127,9 @@ const dashAdapter = createDashAdapter({
 | --- | --- | --- | --- |
 | `contentType` | `AdaptiveContentType` | `'vod'` | 按 `'vod'`、`'long-form'` 或 `'live'` 调整缓冲、直播延迟和重试策略。 |
 | `preset` | `AdaptivePlaybackPreset` | `Balanced` | 在 content type 调优和显式 `settings` 覆盖前应用音频 dash.js settings profile。 |
-| `settings` | `MediaPlayerSettingClass` | `{}` | 深度 partial 的 dash.js settings，在创建 DASH engine 时应用。显式字段会覆盖 preset 和 content type。 |
+| `settings` | `DashSettingsChanges` | `{}` | 创建 DASH engine 时应用的递归稀疏 dash.js settings。显式字段会覆盖 preset 和 content type。 |
 
-DASH settings 会递归合并，active 状态下通过 dash.js `updateSettings()` 应用。
+DASH settings 使用导出的 `DashSettingsChanges` 类型并递归合并，active 状态下通过 dash.js `updateSettings()` 应用；`getSettings()` 返回完整的 `MediaPlayerSettingClass` snapshot。
 
 ## 播放预设
 
@@ -214,7 +216,9 @@ HLS 或 DASH manifest 加载后，可以使用 player 级 API：
 
 ```ts
 player.on('manifestloaded', async ({ variants }) => {
-  const preferredVariant = variants.at(-1)
+  // AI modified: manifest 顺序由 vendor 决定，因此按 bitrate 选择音质。
+  const preferredVariant = [...variants]
+    .sort((leftVariant, rightVariant) => rightVariant.bitrate - leftVariant.bitrate)[0]
   if (!preferredVariant) {
     return
   }
@@ -225,6 +229,8 @@ player.on('manifestloaded', async ({ variants }) => {
 // 回到自动 ABR。
 await player.setAdaptiveQuality('auto')
 ```
+
+Variant 顺序由 implementation 决定，不代表音质排名。音质顺序有意义时，应按 `bitrate` 选择或排序。
 
 Vendor 接受指定 variant 后，手动音质选择会发出 `reason: 'manual'` 的 `variantchange`。原生 HLS 不暴露等价 level 控制，因此 active implementation 是浏览器原生 HLS 时，手动选择可能以 `PROTOCOL_UNSUPPORTED` 拒绝。
 
@@ -291,8 +297,10 @@ dashAdapter.dashInstance
 dashAdapter.getSettings()
 ```
 
-一个 adapter instance 应只被一个 active player router 持有。
+`isSupported()` 是同步的浏览器能力探测，不会加载可选的 `hls.js` 或 `dashjs` peer。因此，返回 `true` 并不等于依赖预检通过：如果所选 peer 无法 import，创建 engine 仍会以 `ADAPTER_UNAVAILABLE` reject；如果 vendor runtime 检查失败，则会以 `PROTOCOL_UNSUPPORTED` reject。
+
+一个 adapter instance 由一个 player router 独占，直到该 router 的清理全部完成。`dispose()` 会立即让 player 不再可用，但 source 与 vendor 清理可能在这个 `void` 调用返回后继续异步执行。清理仍 pending 时，把同一个 adapter 注册给另一个 player 会抛出 `TypeError`；替换 player 时请创建新的 adapter instance。
 
 ## 范围
 
-自适应播放当前面向音频 VOD、长音频和 HLS/DASH 直播调优。DRM、转码、离线媒体、播放列表管理、Icecast/Shoutcast metadata 处理，以及只对视频有意义的调优项不在当前包范围内。
+自适应播放当前面向音频 VOD、长音频和 HLS/DASH 直播调优。GAudio playlist 可以包含自适应 source；manifest 制作、DRM、转码、离线媒体、Icecast/Shoutcast metadata 处理，以及只对视频有意义的调优项不在当前包范围内。

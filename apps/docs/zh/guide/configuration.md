@@ -4,15 +4,17 @@
 
 ## 只安装实际使用的能力
 
+以下命令使用 npm registry 的 `next` dist-tag。在首次 registry release 可见之前，请 clone 本仓库并使用其中的 `gaudio` workspace package。
+
 ```bash
-pnpm add gaudio
+pnpm add gaudio@next
 ```
 
 只有应用导入对应 adapter 时才安装自适应 vendor：
 
 ```bash
-pnpm add gaudio hls.js
-pnpm add gaudio dashjs
+pnpm add gaudio@next hls.js
+pnpm add gaudio@next dashjs
 ```
 
 | 入口 | 加载的依赖 | 适用场景 |
@@ -87,14 +89,15 @@ const player = new AudioPlayer({
 
 ## Source 配置
 
-GAudio 支持四种 source 形态：
+GAudio 支持五种 source 形态：
 
 | 形态 | 示例 | 适合场景 |
 | --- | --- | --- |
-| URL 字符串 | `'https://example.com/audio.mp3'` | 普通文件，URL 后缀或 MIME 推断已经足够。 |
+| URL 字符串 | `'https://example.com/audio.mp3'` | 带有已识别 URL pathname 后缀的普通文件。 |
 | Source description | `{ url, protocol: 'hls', mimeType }` | 签名、无后缀或网关 URL 需要显式路由。 |
 | `HttpAudioSource` | `new HttpAudioSource({ url, protocol })` | 可复用的 URL-backed source 对象。 |
-| 自定义 `AudioSource` | `{ kind: 'url', open, close }` | load 时刷新签名 URL、清理 object URL、应用持有租约或本地资源。 |
+| `BlobAudioSource` | `new BlobAudioSource(file)` | 本地 `Blob` 或 `File` 播放，并由 source 管理 object URL 清理。 |
+| 自定义 `AudioSource` | `{ kind: 'url', open, close }` | load 时刷新签名 URL 或管理应用持有的资源租约。 |
 
 ```ts
 import { BlobAudioSource, HttpAudioSource } from 'gaudio'
@@ -118,34 +121,7 @@ player.setSource(new BlobAudioSource(file))
 
 `HttpAudioSource` 不会附加 headers、设置 credentials、刷新 token 或重试过期 URL。每次 `load()` 前需要新 URL 时使用自定义 source；manifest 或 segment 请求在播放过程中需要鉴权时，使用 HLS/DASH vendor hook。
 
-```ts
-interface SignedAudioUrl {
-  url: string
-  expiresAt: number
-}
-
-const signedProgramSource = {
-  kind: 'url' as const,
-  protocol: 'hls' as const,
-  mimeType: 'application/vnd.apple.mpegurl',
-  async open() {
-    const signedAudioUrl = await fetch('/api/audio-url', {
-      credentials: 'include',
-    }).then(async (response) => {
-      if (!response.ok) {
-        throw new Error('Failed to refresh audio URL')
-      }
-
-      return await response.json() as SignedAudioUrl
-    })
-
-    return { url: signedAudioUrl.url }
-  },
-  async close() {
-    // 在这里释放应用持有的租约或 object URL。
-  },
-}
-```
+GAudio 可能在 `open()` 仍 pending 时调用 `close()`，也可能在后续生命周期操作中重试失败的清理。自定义 source 必须失效化迟到的 open 结果、在清理成功前保留资源所有权，并保证重复调用 `close()` 安全。完整的签名 URL 租约实现见[签名 URL source](/zh/guide/recipes#签名-url-source)。
 
 ## 播放列表配置
 
@@ -181,7 +157,7 @@ player.setPlaylist(
 | `audioTracks` | `readonly AudioTrack[]` | `undefined` | 语言、配音或 companion audio source。 |
 | `defaultAudioTrackId` | `string` | 第一个 audio track | 存在 alternate audio track 时的初始选择。 |
 | `AudioPlaylistOptions.startIndex` | `number` | `0` | 赋值 playlist 时选择的零基曲目索引。 |
-| `AudioPlaylistNavigationOptions.autoplay` | `boolean` | `false` | `next()`、`previous()` 或 `selectPlaylistTrack()` 加载后是否开始播放。 |
+| `AudioPlaylistNavigationOptions.autoplay` | `boolean` | 播放器 `autoplay` | `next()`、`previous()` 或 `selectPlaylistTrack()` 加载后是否开始播放；显式传值会覆盖播放器设置。 |
 | `AudioTrackSelectionOptions.preserveTime` | `boolean` | `true` | 切换 alternate audio 时保持节目位置。 |
 | `AudioTrackSelectionOptions.autoplay` | `boolean \| 'preserve'` | `'preserve'` | 除非显式设置，否则沿用切换前暂停/播放状态。 |
 
@@ -218,6 +194,8 @@ const player = new AudioPlayer({
 | `seekOffset` | `10` | 系统快进/快退动作移动的秒数。 |
 
 支持的浏览器会把系统动作路由到 `play()`、`pause()`、`stop()`、`previous()`、`next()`、`seek()` 和 `fastSeek()`。不支持的浏览器会忽略这项集成。
+
+Media Session 动作没有可接收 Promise 的调用方。GAudio 自身的加载或播放失败仍通过播放器的 `error` 事件暴露，且不会重复报告；由新 source 或生命周期操作触发的预期 `LOAD_ABORTED` 取消会被忽略。其他同步与异步动作异常会被拦截，并转发到宿主的全局错误报告通道（`globalThis.reportError`；若不可用，则通过未捕获的微任务异常报告）。
 
 ## Analyzer 配置
 
@@ -271,7 +249,7 @@ const hlsAdapter = createHlsAdapter({
 | `contentType` | `'vod'` | `'vod'`、`'long-form'` 或 `'live'` 内容调优。 |
 | `preset` | `AdaptivePlaybackPreset.Balanced` | `FastStart`、`Balanced` 或 `Stable` 音频 profile。 |
 | `playbackStrategy` | `'native-first'` | `'native-first'`、`'hls-first'`、`'native-only'` 或 `'hls-only'`。 |
-| `config` | `{}` | 深度 partial 的 `hls.js` 构造配置。原生 HLS 播放会忽略它。 |
+| `config` | `{}` | Partial `hls.js` 构造配置。只有 manifest、playlist、fragment 与 key load policy 接受嵌套 partial 覆盖。原生 HLS 播放会忽略它。 |
 
 ```ts
 import { AdaptivePlaybackPreset } from 'gaudio'
@@ -299,7 +277,7 @@ const dashAdapter = createDashAdapter({
 | --- | --- | --- |
 | `contentType` | `'vod'` | `'vod'`、`'long-form'` 或 `'live'` 内容调优。 |
 | `preset` | `AdaptivePlaybackPreset.Balanced` | `FastStart`、`Balanced` 或 `Stable` 音频 profile。 |
-| `settings` | `{}` | 创建 DASH engine 时应用的深度 partial dash.js settings。 |
+| `settings` | `{}` | 创建 DASH engine 时应用的递归稀疏 `DashSettingsChanges`。 |
 
 Preset 数值、内容类型行为、音质选择和诊断见[自适应播放](./adaptive-playback.md)。
 
@@ -328,7 +306,7 @@ dashAdapter.updateSettings({
 })
 ```
 
-HLS update 默认在下一次 load 生效，除非设置 `apply: 'reload'`。Reload 会中断播放，并丢失 buffered segments、retry state 和带宽估计。DASH update 走 dash.js runtime settings，可以在 active 状态下应用。
+HLS update 默认在下一次 load 生效，除非设置 `apply: 'reload'`。Reload 会中断播放，并丢失 buffered segments、retry state 和带宽估计。DASH 的 `settings` 与 `updateSettings()` 接受 `DashSettingsChanges`，因此只需提供要修改的嵌套字段；runtime update 可在 active 状态下应用。
 
 ## 推荐起始 profile
 
@@ -339,4 +317,3 @@ HLS update 默认在下一次 load 生效，除非设置 `apply: 'reload'`。Rel
 | 播客或有声书 | `preload: 'metadata'`、Media Session metadata、playlist fallback | `contentType: 'long-form'`，弱网使用 `preset: Stable` |
 | 直播电台或活动 | `autoplay: false`、用户手势后 `play()` | `contentType: 'live'`，使用能强制目标 vendor 设置的 strategy |
 | 可视化播放器 | `analyzer: { fftSize: 1024 }`、媒体开启 CORS | 任意自适应 profile，但要在目标浏览器验证 |
-

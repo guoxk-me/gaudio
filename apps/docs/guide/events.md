@@ -100,7 +100,7 @@ Adaptive events use protocol-neutral payloads for HLS and DASH.
 | --- | --- | --- |
 | `adaptivechange` | `AdaptivePlaybackInfo` | A source activates HLS or DASH and selects `native`, `hls.js`, or `dash.js`. |
 | `manifestloaded` | `AdaptiveManifestUpdate` | A vendor manifest loads and exposes variants. |
-| `variantchange` | `AdaptiveVariantUpdate` | Initial or automatic ABR selection changes variant. |
+| `variantchange` | `AdaptiveVariantUpdate` | An initial selection, automatic ABR switch, or confirmed manual quality request changes variant. |
 | `segmentloadstart` | `AdaptiveSegmentUpdate` | A media segment request starts, when the vendor exposes it. |
 | `segmentloaded` | `AdaptiveSegmentUpdate` | A media segment request completes, when the vendor exposes it. |
 | `streamerror` | `AdaptiveStreamError` | A recoverable or fatal adaptive-stream failure is reported by the vendor. |
@@ -118,11 +118,11 @@ player.on('streamerror', update => console.log(update.category, update.isFatal, 
 
 | Field | Type | Description |
 | --- | --- | --- |
-| `id` | `string` | Vendor-provided variant or representation id. |
+| `id` | `string` | Opaque public selection ID that stays stable for the active manifest; pass it unchanged to `setAdaptiveQuality()`. |
 | `bitrate` | `number` | Declared bitrate in bits per second. |
 | `codecs` | `string \| undefined` | Codec declaration when the manifest exposes it. |
 
-`AdaptiveVariantUpdate.reason` is `'initial'` for the first selection, `'automatic'` for later ABR changes, and `'manual'` when `setAdaptiveQuality()` selects a specific variant.
+`AdaptiveVariantUpdate.reason` is `'initial'` for the first vendor selection not triggered by an explicit manual request and `'automatic'` for later ABR changes. It is `'manual'` once the vendor confirms a specific variant requested through `setAdaptiveQuality()`, including when that request precedes the first vendor selection.
 
 Native HLS usually emits only `adaptivechange`; browser-native playback does not expose the same manifest, variant, segment, or recoverable-error details as `hls.js`.
 
@@ -150,5 +150,7 @@ player.on('error', (error) => {
 | `ENGINE_ERROR` | A lower-level engine error could not be classified more specifically. |
 
 Recoverable adaptive vendor failures emit `streamerror` while the vendor retries. Fatal adaptive failures also emit `error`, move state to `error`, and reject the active `load()` or `play()` operation.
+
+Automatic playlist continuation has no returned promise, so an otherwise unreported source-replacement cleanup failure is wrapped as `ENGINE_ERROR` and emitted once. A next-track load failure already published by `load()` is not emitted again.
 
 The interactive demo logs state changes, media lifecycle events, time ranges, adaptive manifest and quality events, segment activity, utility previews, and typed error codes.

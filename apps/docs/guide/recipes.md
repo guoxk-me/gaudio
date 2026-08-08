@@ -105,11 +105,51 @@ Use alternate audio tracks when each language or companion track shares the same
 ## Signed URL source
 
 ```ts
+import type { AudioSource } from 'gaudio'
 import { AudioPlayer } from 'gaudio'
+import { createHlsAdapter } from 'gaudio/hls'
 
-interface SignedAudioUrl {
+interface SignedAudioLease {
   url: string
   expiresAt: number
+}
+
+interface SignedOpenOperation {
+  requestId: string
+  controller: AbortController
+  isCancelled: boolean
+  isReleased: boolean
+  releaseCompletion?: Promise<void>
+}
+
+let activeOperation: SignedOpenOperation | undefined
+
+async function releaseSignedOperation(operation: SignedOpenOperation): Promise<void> {
+  if (operation.isReleased) {
+    return
+  }
+
+  operation.releaseCompletion ??= fetch('/api/audio-url/release', {
+    method: 'POST',
+    credentials: 'include',
+    keepalive: true,
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ requestId: operation.requestId }),
+  }).then((response) => {
+    if (!response.ok) {
+      throw new Error(`Failed to release audio URL: HTTP ${response.status}`)
+    }
+
+    operation.isReleased = true
+  }).finally(() => {
+    // A rejected cleanup stays retryable by the next close() call.
+    operation.releaseCompletion = undefined
+  })
+
+  await operation.releaseCompletion
+  if (activeOperation === operation && operation.isReleased) {
+    activeOperation = undefined
+  }
 }
 
 const signedSource = {
@@ -117,29 +157,60 @@ const signedSource = {
   protocol: 'hls' as const,
   mimeType: 'application/vnd.apple.mpegurl',
   async open() {
-    const signedAudioUrl = await fetch('/api/audio-url', {
-      credentials: 'include',
-    }).then(async (response) => {
-      if (!response.ok) {
-        throw new Error('Failed to create signed audio URL')
-      }
+    if (activeOperation && !activeOperation.isReleased) {
+      throw new Error('The previous signed URL operation has not closed')
+    }
 
-      return await response.json() as SignedAudioUrl
+    const operation: SignedOpenOperation = {
+      requestId: crypto.randomUUID(),
+      controller: new AbortController(),
+      isCancelled: false,
+      isReleased: false,
+    }
+    activeOperation = operation
+
+    const response = await fetch('/api/audio-url/open', {
+      method: 'POST',
+      credentials: 'include',
+      signal: operation.controller.signal,
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ requestId: operation.requestId }),
     })
 
-    return { url: signedAudioUrl.url }
+    if (!response.ok) {
+      throw new Error(`Failed to create signed audio URL: HTTP ${response.status}`)
+    }
+
+    const signedAudioLease = await response.json() as SignedAudioLease
+    if (operation.isCancelled || activeOperation !== operation) {
+      await releaseSignedOperation(operation)
+      throw new DOMException('Audio source open was cancelled', 'AbortError')
+    }
+
+    return { url: signedAudioLease.url }
   },
   async close() {
-    await fetch('/api/audio-url/release', { method: 'POST' }).catch(() => {})
+    const operation = activeOperation
+    if (!operation) {
+      return
+    }
+
+    // Mark cancellation first so an ignored or late fetch cannot publish its URL.
+    operation.isCancelled = true
+    operation.controller.abort()
+    await releaseSignedOperation(operation)
   },
-}
+} satisfies AudioSource
 
 const player = new AudioPlayer({
   source: signedSource,
+  adapters: [createHlsAdapter()],
 })
 ```
 
-This refreshes the top-level URL before each load. For HLS or DASH manifests whose segment requests also need authentication, configure the selected vendor through `createHlsAdapter({ config })` or `createDashAdapter({ settings })`.
+`AbortController` only stops the browser from waiting; it cannot prove that the server did not create a lease. Treat `requestId` as an idempotency key. The open endpoint first reserves that key as `opening`, creates the lease, then atomically changes it to `active` only if the row is still `opening`. The release endpoint atomically upserts a durable `released` tombstone before revoking any active lease and returns success for repeated requests. If release wins before open commits, open must revoke any resource it created and must not return a usable URL.
+
+Keep tombstones at least as long as a lease or signed URL can remain valid, authorize every request against the current user, and return success only after revocation is complete or durably queued for retry. For HLS or DASH manifests whose segment requests also need authentication, configure the selected vendor through `createHlsAdapter({ config })` or `createDashAdapter({ settings })`.
 
 ## Local file preview
 
@@ -202,14 +273,18 @@ player.setSource({
 await player.load()
 
 const variants = player.getAdaptiveVariants()
-const highestVariant = variants.at(-1)
+// AI modified: adapter variant order is not a quality ranking.
+const highestBitrateVariant = [...variants]
+  .sort((leftVariant, rightVariant) => rightVariant.bitrate - leftVariant.bitrate)[0]
 
-if (highestVariant) {
-  await player.setAdaptiveQuality(highestVariant.id)
+if (highestBitrateVariant) {
+  await player.setAdaptiveQuality(highestBitrateVariant.id)
 }
 
 await player.setAdaptiveQuality('auto')
 ```
+
+Variant order is implementation-owned. Sort by `bitrate` before selecting a quality by rank.
 
 Manual selection works when the active vendor exposes quality controls. Browser-native HLS can reject manual selection with `PROTOCOL_UNSUPPORTED`.
 
@@ -346,4 +421,3 @@ paintSpectrum()
 ```
 
 For remote media, verify CORS in target browsers. A file can play normally while Web Audio analysis still returns silent samples.
-
