@@ -1,7 +1,12 @@
 import type { AdaptiveAudioProtocol } from '../adapters/adaptive-audio-types'
 import type { AudioEngine } from './audio-engine'
 
-/** Creates an engine for one adaptive streaming protocol. */
+/**
+ * Creates an engine for one adaptive streaming protocol.
+ *
+ * An adapter instance can belong to only one live or still-cleaning-up router.
+ * Registering it elsewhere before the owning router finishes cleanup throws `TypeError`.
+ */
 export interface AudioEngineAdapter {
   /** Adaptive protocol handled by this adapter. */
   readonly protocol: AdaptiveAudioProtocol
@@ -9,13 +14,17 @@ export interface AudioEngineAdapter {
    * Creates a new engine for the adapter protocol.
    *
    * @returns An engine owned by the caller.
-   * @throws `GAudioError` when the required playback implementation is unavailable.
+   * @throws Built-in adapters use `GAudioError` when the required playback implementation is unavailable. Custom adapters can propagate their own errors.
    */
   createEngine: () => AudioEngine | Promise<AudioEngine>
   /**
-   * Checks whether the current browser supports this adapter.
+   * Checks the current browser capabilities required by this adapter.
    *
-   * @returns `true` when {@link createEngine} can create a usable engine.
+   * This synchronous probe does not load an optional vendor peer. A later
+   * {@link createEngine} call can still fail if that peer cannot be imported
+   * or its runtime support check rejects the environment.
+   *
+   * @returns `true` when the browser exposes a potential native or vendor-backed playback path.
    */
   isSupported: () => boolean
 }

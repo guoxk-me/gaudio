@@ -1,7 +1,7 @@
 // @env browser
 
 import type { AudioAnalyzerOptions } from '../analysis/audio-analyzer'
-import type { AudioSource } from '../source/audio-source'
+import type { AudioSource, AudioStreamHandle } from '../source/audio-source'
 import type { AudioEngine, AudioEngineEvents } from './audio-engine'
 import type {
   AudioFormatSupport,
@@ -17,9 +17,47 @@ import { mediaTimeRanges } from './media-element-ranges'
 interface ActiveSourceSession {
   source: AudioSource
   isClosed: boolean
-  hasOpenCompleted: boolean
+  attachedUrl?: string
+  closePromise?: Promise<SourceCloseOutcome>
   abortController?: AbortController
+  metadataEventStartTime?: number
+  resolve?: () => void
   reject?: (error: GAudioError) => void
+}
+
+type SourceCloseOutcome
+  = { isSuccessful: true }
+    | { isSuccessful: false, error: unknown }
+
+interface ActiveSeekRequest {
+  abortController: AbortController
+  eventStartTime: number
+  loadGeneration: number
+  publishedError?: GAudioError
+  reject: (error: GAudioError) => void
+}
+
+interface ObservedNativeSeek {
+  eventStartTime: number
+  loadGeneration: number
+}
+
+export interface MediaElementCleanupStatus {
+  readonly state: 'pending' | 'failed'
+  readonly completion: Promise<void>
+  readonly error?: unknown
+}
+
+interface MediaElementCleanupAttempt {
+  state: 'pending' | 'failed'
+  completion: Promise<void>
+  error?: unknown
+  resolve: () => void
+}
+
+interface MediaElementCleanupController {
+  fail: (error: unknown) => void
+  succeed: () => void
 }
 
 type AudioContextConstructor = typeof AudioContext
@@ -29,17 +67,110 @@ interface WebAudioGlobal {
   webkitAudioContext?: AudioContextConstructor
 }
 
-/** {@link AudioEngine} implementation backed by an [HTMLAudioElement](https://developer.mozilla.org/docs/Web/API/HTMLAudioElement). */
+const mediaElementCleanupAttempts = new WeakMap<object, Map<object, MediaElementCleanupAttempt>>()
+
+// AI modified: Router-only cleanup state stays outside the public AudioEngine contract.
+export function mediaElementCleanupStatus(engine: AudioEngine): MediaElementCleanupStatus | undefined {
+  const cleanupAttempts = mediaElementCleanupAttempts.get(engine)
+  if (!cleanupAttempts || cleanupAttempts.size === 0) {
+    return undefined
+  }
+
+  const currentAttempts = [...cleanupAttempts.values()]
+  const firstFailedAttempt = currentAttempts.find(attempt => attempt.state === 'failed')
+  const completion = Promise.allSettled(currentAttempts.map(attempt => attempt.completion)).then(() => {
+    const failedAttempt = currentAttempts.find(attempt => attempt.state === 'failed')
+    if (failedAttempt) {
+      throw failedAttempt.error
+    }
+  })
+  void completion.catch(() => {})
+
+  return {
+    state: firstFailedAttempt ? 'failed' : 'pending',
+    completion,
+    error: firstFailedAttempt?.error,
+  }
+}
+
+function startMediaElementCleanup(engine: AudioEngine, resource: object): MediaElementCleanupController {
+  let resolveCleanup: () => void = () => {}
+  let rejectCleanup: (error: unknown) => void = () => {}
+  const cleanupAttempt: MediaElementCleanupAttempt = {
+    state: 'pending',
+    completion: new Promise<void>((resolve, reject) => {
+      resolveCleanup = resolve
+      rejectCleanup = reject
+    }),
+    resolve: () => resolveCleanup(),
+  }
+  void cleanupAttempt.completion.catch(() => {})
+  const cleanupAttempts = mediaElementCleanupAttempts.get(engine) ?? new Map()
+  cleanupAttempts.set(resource, cleanupAttempt)
+  mediaElementCleanupAttempts.set(engine, cleanupAttempts)
+
+  return {
+    fail: (error): void => {
+      if (cleanupAttempts.get(resource) !== cleanupAttempt || cleanupAttempt.state === 'failed') {
+        return
+      }
+      cleanupAttempt.state = 'failed'
+      cleanupAttempt.error = error
+      rejectCleanup(error)
+    },
+    succeed: (): void => {
+      finishMediaElementCleanup(engine, resource, cleanupAttempt)
+    },
+  }
+}
+
+function finishMediaElementCleanup(
+  engine: AudioEngine,
+  resource: object,
+  expectedAttempt?: MediaElementCleanupAttempt,
+): void {
+  const cleanupAttempts = mediaElementCleanupAttempts.get(engine)
+  const cleanupAttempt = cleanupAttempts?.get(resource)
+  if (!cleanupAttempt || (expectedAttempt && cleanupAttempt !== expectedAttempt)) {
+    return
+  }
+  cleanupAttempts?.delete(resource)
+  cleanupAttempt.resolve()
+}
+
+/**
+ * {@link AudioEngine} implementation backed by an [HTMLAudioElement](https://developer.mozilla.org/docs/Web/API/HTMLAudioElement).
+ *
+ * This is GAudio's only supported class-inheritance surface. Subclasses may depend on documented
+ * public and protected members only; implementation state remains ECMAScript-private.
+ */
 export class MediaElementAudioEngine implements AudioEngine {
   /** Media element used for native loading and playback. */
   protected readonly audioElement: HTMLAudioElement
   /** Event channel used to publish browser media lifecycle updates. */
   protected readonly events = new EventEmitter<AudioEngineEvents>()
-  private activeSourceSession?: ActiveSourceSession
-  private audioContext?: AudioContext
-  private mediaElementSource?: MediaElementAudioSourceNode
-  private isMediaElementSourceAudible = false
-  private shouldSuppressPause = false
+  // AI modified: native private names keep internal state outside the supported subclass namespace.
+  #activeSourceSession?: ActiveSourceSession
+  #audioContext?: AudioContext
+  #pendingAudioContextCleanup?: AudioContext
+  #audioContextClosePromise?: Promise<SourceCloseOutcome>
+  #mediaElementSource?: MediaElementAudioSourceNode
+  #isMediaElementSourceAudible = false
+  readonly #detachedMediaErrors = new WeakSet<MediaError>()
+  #shouldSuppressPause = false
+  #pendingSourceCleanup?: ActiveSourceSession
+  #activeSeekRequest?: ActiveSeekRequest
+  #observedNativeSeek?: ObservedNativeSeek
+  #activeLoadAbortController?: AbortController
+  readonly #activePlayAbortControllers = new Set<AbortController>()
+  #playbackIntentId = 0
+  #requestedMediaPlayback: 'play' | 'pause' = 'pause'
+  #loadGeneration = 0
+  #hasAttachedSource = false
+  #hasRemovedMediaEventListeners = false
+  #pendingMediaEventListenerRemovals?: Array<() => void>
+  // AI modified: a permanent guard prevents disposed engines from recreating browser resources.
+  #isDisposed = false
 
   /**
    * Creates a media-element engine.
@@ -48,107 +179,289 @@ export class MediaElementAudioEngine implements AudioEngine {
    */
   constructor(audioElement: HTMLAudioElement = new Audio()) {
     this.audioElement = audioElement
-    this.addMediaEventListeners()
+    // AI modified: a caller-supplied element with existing media joins the same replacement teardown lifecycle.
+    this.#hasAttachedSource = ('srcObject' in audioElement && audioElement.srcObject !== null)
+      || Boolean(audioElement.currentSrc)
+      || (
+        typeof audioElement.getAttribute === 'function'
+        && audioElement.getAttribute('src') !== null
+      )
+    this.#addMediaEventListeners()
   }
 
   /**
    * Opens and loads a source until metadata is available.
    *
+   * Reported `MediaError` events and superseded operations use stable {@link GAudioError} codes.
+   * Errors thrown by custom source lifecycle methods or underlying media-element and subclass hooks are preserved.
+   *
    * @param source Source to attach to the media element.
-   * @throws {@link GAudioError} When loading fails or is superseded by another load.
+   * @throws {@link GAudioError} When the media element reports a load failure or a newer operation supersedes this load.
+   * @throws The original error when custom source lifecycle or media-element and subclass hook code fails.
    */
   async load(source: AudioSource): Promise<void> {
-    this.cancelActiveSourceSession()
-
-    const activeSourceSession: ActiveSourceSession = {
-      source,
-      isClosed: false,
-      hasOpenCompleted: false,
-    }
-    this.activeSourceSession = activeSourceSession
-
-    let streamHandle
+    this.#assertUsable()
+    this.#activeLoadAbortController?.abort()
+    const loadAbortController = new AbortController()
+    this.#activeLoadAbortController = loadAbortController
+    const loadGeneration = ++this.#loadGeneration
     try {
-      streamHandle = await source.open()
-      activeSourceSession.hasOpenCompleted = true
-    }
-    catch (error) {
-      if (this.activeSourceSession === activeSourceSession) {
-        // AI modified: failed source opens must not leave stale sessions or leaked source resources.
-        this.activeSourceSession = undefined
-        this.closeSourceSession(activeSourceSession)
+      const cancelledSourceSession = this.#cancelActiveSourceSession()
+      this.cancelActiveSeek()
+      // AI modified: detach playback before awaiting source cleanup so replacement loads cannot overlap old media or vendors.
+      let sourceDetachError: unknown
+      let hasSourceDetachError = false
+      const shouldPausePreviousPlayback = this.#hasAttachedSource
+        || this.#activePlayAbortControllers.size > 0
+        || !this.audioElement.paused
+      if (shouldPausePreviousPlayback) {
+        try {
+          // AI modified: loading also cancels playback requested before any source URL was attached.
+          this.pauseWithoutEvent()
+        }
+        catch (error) {
+          hasSourceDetachError = true
+          sourceDetachError = error
+        }
       }
-      throw error
-    }
-
-    if (this.activeSourceSession !== activeSourceSession) {
-      this.closeSourceSession(activeSourceSession)
-      throw this.loadAbortedError()
-    }
-
-    this.attachSourceUrl(streamHandle.url)
-
-    await new Promise<void>((resolve, reject) => {
-      const abortController = new AbortController()
-      activeSourceSession.abortController = abortController
-      activeSourceSession.reject = reject
-
-      const handleReady = (): void => {
-        abortController.abort()
-        activeSourceSession.abortController = undefined
-        activeSourceSession.reject = undefined
-        resolve()
+      if (this.#hasAttachedSource) {
+        try {
+          // AI modified: a pause failure cannot leave the superseded URL attached to the media element.
+          this.#detachActiveSourceUrl()
+        }
+        catch (error) {
+          if (!hasSourceDetachError) {
+            hasSourceDetachError = true
+            sourceDetachError = error
+          }
+        }
+      }
+      const previousSourceCleanup = this.#closeCancelledSourceSession(cancelledSourceSession)
+      let previousSourceCloseOutcome: SourceCloseOutcome | undefined
+      if (previousSourceCleanup) {
+        // AI modified: cancellation can promptly supersede a load without bypassing the shared cleanup barrier.
+        previousSourceCloseOutcome = await this.#waitForLoadOperation(previousSourceCleanup, loadAbortController)
+      }
+      if (loadGeneration !== this.#loadGeneration) {
+        throw this.#loadAbortedError()
+      }
+      if (hasSourceDetachError) {
+        throw sourceDetachError
+      }
+      if (previousSourceCloseOutcome && !previousSourceCloseOutcome.isSuccessful) {
+        // AI modified: replacement never overlaps a source whose cleanup still needs a later retry.
+        throw previousSourceCloseOutcome.error
       }
 
-      const handleLoadError = (): void => {
-        const error = mediaElementError(this.audioElement)
-        abortController.abort()
-        activeSourceSession.abortController = undefined
-        activeSourceSession.reject = undefined
-        reject(error)
+      const activeSourceSession: ActiveSourceSession = {
+        source,
+        isClosed: false,
+      }
+      this.#activeSourceSession = activeSourceSession
+
+      let streamHandle
+      try {
+        streamHandle = await this.#waitForSourceOpen(activeSourceSession)
+      }
+      catch (error) {
+        if (this.#activeSourceSession === activeSourceSession) {
+          this.#activeSourceSession = undefined
+        }
+        if (loadGeneration !== this.#loadGeneration) {
+          // AI modified: the cancelling lifecycle operation already owns cleanup, avoiding an immediate duplicate retry.
+          throw this.#loadAbortedError()
+        }
+        // AI modified: an open failure can allocate resources before rejecting, so its source is always closed.
+        const sourceCleanup = this.#closeSourceSession(activeSourceSession)
+        await this.#waitForLoadOperation(sourceCleanup, loadAbortController)
+        throw error
       }
 
-      this.audioElement.addEventListener('loadedmetadata', handleReady, {
-        once: true,
-        signal: abortController.signal,
-      })
-      this.audioElement.addEventListener('error', handleLoadError, {
-        once: true,
-        signal: abortController.signal,
-      })
-    })
+      if (this.#activeSourceSession !== activeSourceSession) {
+        // AI modified: a source that settles alongside cancellation cannot delay the superseded load result.
+        void this.#closeSourceSession(activeSourceSession)
+        throw this.#loadAbortedError()
+      }
+
+      // AI modified: install the load waiter before vendor attachment so synchronous failures cannot be lost.
+      let metadataReady: Promise<void>
+      try {
+        activeSourceSession.attachedUrl = streamHandle.url
+        metadataReady = this.#waitForSourceMetadata(activeSourceSession, streamHandle.url)
+      }
+      catch (error) {
+        if (this.#activeSourceSession === activeSourceSession) {
+          this.#activeSourceSession = undefined
+        }
+        // AI modified: listener setup failures release the opened source before the load rejects.
+        await this.#waitForLoadOperation(this.#closeSourceSession(activeSourceSession), loadAbortController)
+        throw error
+      }
+      if (
+        this.#isDisposed
+        || loadGeneration !== this.#loadGeneration
+        || this.#activeSourceSession !== activeSourceSession
+      ) {
+        this.#finishSourceMetadataWait(activeSourceSession)
+        void metadataReady.catch(() => {})
+        // AI modified: registration reentrancy cannot attach after a newer lifecycle operation closed the source.
+        void this.#closeSourceSession(activeSourceSession)
+        throw this.#loadAbortedError()
+      }
+      try {
+        // AI modified: mark ownership before attachment so synchronous vendor callbacks cannot revive a detached source.
+        this.#hasAttachedSource = true
+        activeSourceSession.metadataEventStartTime = new Event('gaudio-source-attachment').timeStamp
+        this.attachSourceUrl(streamHandle.url)
+      }
+      catch (error) {
+        this.#finishSourceMetadataWait(activeSourceSession)
+        void metadataReady.catch(() => {})
+        if (this.#activeSourceSession === activeSourceSession) {
+          this.#activeSourceSession = undefined
+        }
+        try {
+          this.pauseWithoutEvent()
+        }
+        catch {
+          // The original attach error remains the actionable failure.
+        }
+        try {
+          // AI modified: a failed pause cannot leave a synchronously rejected attachment active.
+          this.#detachActiveSourceUrl()
+        }
+        catch {
+          // The original attach error remains the actionable failure.
+        }
+        // AI modified: synchronous native or adapter attachment failures release the opened source before rejecting.
+        await this.#waitForLoadOperation(this.#closeSourceSession(activeSourceSession), loadAbortController)
+        throw error
+      }
+
+      await this.#waitForLoadOperation(metadataReady, loadAbortController)
+
+      if (this.#isDisposed || this.#activeSourceSession !== activeSourceSession) {
+        // AI modified: the winning lifecycle operation owns cleanup while this superseded load rejects promptly.
+        void this.#closeSourceSession(activeSourceSession)
+        throw this.#isDisposed ? this.#disposedError() : this.#loadAbortedError()
+      }
+    }
+    finally {
+      if (this.#activeLoadAbortController === loadAbortController) {
+        this.#activeLoadAbortController = undefined
+      }
+    }
   }
 
   /** Cancels loading, pauses playback, and detaches the current source. */
   unload(): void {
-    this.cancelActiveSourceSession()
-    this.pauseWithoutEvent()
-    this.detachSourceUrl()
+    this.#assertUsable()
+    this.#releaseMediaResources()
+  }
+
+  #releaseMediaResources(): void {
+    this.#activeLoadAbortController?.abort()
+    this.#activeLoadAbortController = undefined
+    this.#loadGeneration += 1
+    const cancelledSourceSession = this.#cancelActiveSourceSession()
+    this.cancelActiveSeek()
+    let firstReleaseError: unknown
+    let hasReleaseError = false
+    try {
+      this.pauseWithoutEvent()
+    }
+    catch (error) {
+      hasReleaseError = true
+      firstReleaseError = error
+    }
+    if (this.#hasAttachedSource) {
+      try {
+        this.#detachActiveSourceUrl()
+      }
+      catch (error) {
+        if (!hasReleaseError) {
+          hasReleaseError = true
+          firstReleaseError = error
+        }
+      }
+    }
+    // AI modified: pause, detachment, and source cleanup are independent teardown obligations.
+    void this.#closeCancelledSourceSession(cancelledSourceSession)
+    if (hasReleaseError) {
+      throw firstReleaseError
+    }
   }
 
   /**
    * Starts or resumes playback.
    *
-   * @throws {@link GAudioError} With code `PLAYBACK_BLOCKED` when the browser rejects playback.
+   * @throws {@link GAudioError} With a stable code describing the browser playback rejection.
    */
   async play(): Promise<void> {
+    this.#assertUsable()
     try {
-      await this.audioElement.play()
-      // AI modified: Web Audio analysis contexts may need the same user gesture as media playback.
-      await this.audioContext?.resume()
+      await this.#waitForPlaybackOperation(() => this.audioElement.play())
     }
     catch (error) {
-      throw new GAudioError('PLAYBACK_BLOCKED', 'Browser blocked audio playback', error)
+      if (error instanceof GAudioError) {
+        throw error
+      }
+      if (this.#isDisposed) {
+        throw this.#disposedError()
+      }
+      // AI modified: inspect the standard name structurally because iframe DOMExceptions cross realm boundaries.
+      const playbackErrorName = typeof error === 'object'
+        && error !== null
+        && 'name' in error
+        && typeof error.name === 'string'
+        ? error.name
+        : undefined
+      switch (playbackErrorName) {
+        case 'NotAllowedError':
+          throw new GAudioError('PLAYBACK_BLOCKED', 'Browser blocked audio playback', error)
+        case 'NotSupportedError':
+          throw new GAudioError('UNSUPPORTED_FORMAT', 'Browser does not support the active audio source', error)
+        case 'AbortError':
+          throw new GAudioError('LOAD_ABORTED', 'Audio playback was interrupted by a newer media operation', error)
+      }
+      throw new GAudioError('ENGINE_ERROR', 'Audio playback failed', error)
+    }
+
+    // AI modified: successful playback invalidates suppression left by an older internal pause task.
+    this.#shouldSuppressPause = false
+    if (this.#isDisposed) {
+      this.pauseWithoutEvent()
+      throw this.#disposedError()
+    }
+
+    const audioContext = this.#audioContext
+    if (audioContext) {
+      try {
+        // AI modified: best-effort analyzer activation cannot keep successful media playback pending.
+        void audioContext.resume().catch(() => {})
+      }
+      catch {
+        // Analysis failure must not report successful audible playback as blocked.
+      }
+    }
+
+    if (this.#isDisposed) {
+      this.pauseWithoutEvent()
+      throw this.#disposedError()
     }
   }
 
   /** Pauses playback without changing the current position. */
   pause(): void {
+    this.#assertUsable()
+    // AI modified: explicit playback interruption settles browser play requests that never complete themselves.
+    this.#cancelActivePlayRequests()
     this.audioElement.pause()
   }
 
   /** Pauses playback and returns to `0` seconds while retaining the source. */
   stop(): void {
+    this.#assertUsable()
     // AI modified: suppress the native pause event because stop has a distinct ready state.
     this.pauseWithoutEvent()
     this.audioElement.currentTime = 0
@@ -160,7 +473,8 @@ export class MediaElementAudioEngine implements AudioEngine {
    * @param seconds Target position in seconds. Negative values are clamped to `0`.
    */
   async seek(seconds: number): Promise<void> {
-    await this.seekMediaElement(Math.max(0, seconds), (targetTime) => {
+    this.#assertUsable()
+    await this.#seekMediaElement(Math.max(0, seconds), (targetTime) => {
       this.audioElement.currentTime = targetTime
     })
   }
@@ -171,16 +485,22 @@ export class MediaElementAudioEngine implements AudioEngine {
    * @param seconds Target position in seconds.
    */
   async fastSeek(seconds: number): Promise<void> {
+    this.#assertUsable()
     // AI modified: prefer optimized browser seeking while retaining a standard seek fallback.
     if (typeof this.audioElement.fastSeek === 'function') {
-      await this.seekMediaElement(Math.max(0, seconds), targetTime => this.audioElement.fastSeek?.(targetTime))
+      await this.#seekMediaElement(Math.max(0, seconds), targetTime => this.audioElement.fastSeek?.(targetTime))
       return
     }
     await this.seek(seconds)
   }
 
-  /** @param preload Browser preload hint applied to the media element. */
+  /**
+   * Applies the fetch hint that the browser uses for the attached media element.
+   *
+   * @param preload Browser preload hint applied to the media element.
+   */
   setPreload(preload: PreloadMode): void {
+    this.#assertUsable()
     this.audioElement.preload = preload
   }
 
@@ -190,8 +510,13 @@ export class MediaElementAudioEngine implements AudioEngine {
     return preload === 'none' || preload === 'auto' ? preload : 'metadata'
   }
 
-  /** @param shouldAutoplay Whether the media element should use native autoplay. */
+  /**
+   * Delegates automatic playback after loading to the media element.
+   *
+   * @param shouldAutoplay Whether the media element should use native autoplay.
+   */
   setAutoplay(shouldAutoplay: boolean): void {
+    this.#assertUsable()
     this.audioElement.autoplay = shouldAutoplay
   }
 
@@ -200,8 +525,13 @@ export class MediaElementAudioEngine implements AudioEngine {
     return this.audioElement.autoplay
   }
 
-  /** @param volume Linear volume clamped to the `0` through `1` range. */
+  /**
+   * Applies safe linear gain directly to the media element.
+   *
+   * @param volume Linear volume clamped to the `0` through `1` range.
+   */
   setVolume(volume: number): void {
+    this.#assertUsable()
     this.audioElement.volume = Math.min(1, Math.max(0, volume))
   }
 
@@ -210,8 +540,13 @@ export class MediaElementAudioEngine implements AudioEngine {
     return this.audioElement.volume
   }
 
-  /** @param isMuted Whether audio output should be muted. */
+  /**
+   * Silences output without discarding the media element's volume.
+   *
+   * @param isMuted Whether audio output should be muted.
+   */
   setMuted(isMuted: boolean): void {
+    this.#assertUsable()
     this.audioElement.muted = isMuted
   }
 
@@ -220,8 +555,13 @@ export class MediaElementAudioEngine implements AudioEngine {
     return this.audioElement.muted
   }
 
-  /** @param isLooping Whether playback should restart after reaching the end. */
+  /**
+   * Lets the media element restart the source automatically after it ends.
+   *
+   * @param isLooping Whether playback should restart after reaching the end.
+   */
   setLoop(isLooping: boolean): void {
+    this.#assertUsable()
     this.audioElement.loop = isLooping
   }
 
@@ -230,9 +570,15 @@ export class MediaElementAudioEngine implements AudioEngine {
     return this.audioElement.loop
   }
 
-  /** @param rate Playback speed multiplier, clamped to at least `0.25`. */
+  /**
+   * Applies the requested timeline speed to the media element.
+   *
+   * @param rate Positive playback speed multiplier.
+   */
   setPlaybackRate(rate: number): void {
-    this.audioElement.playbackRate = Math.max(0.25, rate)
+    this.#assertUsable()
+    // AI modified: preserve the public positive-rate contract instead of silently changing low values.
+    this.audioElement.playbackRate = rate
   }
 
   /** @returns The effective playback speed multiplier. */
@@ -240,8 +586,13 @@ export class MediaElementAudioEngine implements AudioEngine {
     return this.audioElement.playbackRate
   }
 
-  /** @param shouldPreservePitch Whether pitch should remain stable at non-default playback rates. */
+  /**
+   * Controls the browser's pitch correction during non-default playback rates.
+   *
+   * @param shouldPreservePitch Whether pitch should remain stable at non-default playback rates.
+   */
   setPreservesPitch(shouldPreservePitch: boolean): void {
+    this.#assertUsable()
     this.audioElement.preservesPitch = shouldPreservePitch
   }
 
@@ -308,8 +659,9 @@ export class MediaElementAudioEngine implements AudioEngine {
    * @param options Analyzer node configuration.
    */
   createAnalyzer(options: AudioAnalyzerOptions = {}): AudioAnalyzer {
-    const audioContext = this.mediaAudioContext()
-    const mediaElementSource = this.mediaSourceNode(audioContext)
+    this.#assertUsable()
+    const audioContext = this.#mediaAudioContext()
+    const mediaElementSource = this.#mediaSourceNode(audioContext)
 
     return new AudioAnalyzer(audioContext, mediaElementSource, options.fftSize)
   }
@@ -317,6 +669,7 @@ export class MediaElementAudioEngine implements AudioEngine {
   /**
    * Registers an engine event listener.
    *
+   * @typeParam EventName Event key whose payload type is delivered to the handler.
    * @param eventName Event to observe.
    * @param handler Listener invoked with the event payload.
    * @returns A function that removes this listener.
@@ -325,15 +678,40 @@ export class MediaElementAudioEngine implements AudioEngine {
     eventName: EventName,
     handler: (payload: AudioEngineEvents[EventName]) => void,
   ): () => void {
+    this.#assertUsable()
     return this.events.on(eventName, handler)
   }
 
   /** Removes browser listeners, unloads the source, and clears engine listeners. */
   dispose(): void {
-    this.removeMediaEventListeners()
-    this.unload()
-    this.closeAudioAnalysis()
-    this.events.clear()
+    const isRepeatedDisposal = this.#isDisposed
+    this.#isDisposed = true
+    let firstCleanupError: unknown
+    let hasCleanupError = false
+    try {
+      this.#removeMediaEventListeners()
+    }
+    catch (error) {
+      hasCleanupError = true
+      firstCleanupError = error
+    }
+    try {
+      // AI modified: repeated disposal retries detach and source cleanup while successful browser work stays skipped.
+      this.#releaseMediaResources()
+    }
+    catch (error) {
+      if (!hasCleanupError) {
+        hasCleanupError = true
+        firstCleanupError = error
+      }
+    }
+    this.#closeAudioAnalysis()
+    if (!isRepeatedDisposal) {
+      this.events.clear()
+    }
+    if (hasCleanupError) {
+      throw firstCleanupError
+    }
   }
 
   /**
@@ -348,8 +726,105 @@ export class MediaElementAudioEngine implements AudioEngine {
 
   /** Removes the current media URL and resets native media loading state. */
   protected detachSourceUrl(): void {
-    this.audioElement.removeAttribute('src')
-    this.audioElement.load()
+    let firstDetachError: unknown
+    let hasDetachError = false
+    try {
+      // AI modified: caller-owned stream objects must not remain selected ahead of a replacement URL.
+      this.audioElement.srcObject = null
+    }
+    catch (error) {
+      hasDetachError = true
+      firstDetachError = error
+    }
+    try {
+      this.audioElement.removeAttribute('src')
+    }
+    catch (error) {
+      if (!hasDetachError) {
+        hasDetachError = true
+        firstDetachError = error
+      }
+    }
+    try {
+      this.audioElement.load()
+    }
+    catch (error) {
+      if (!hasDetachError) {
+        hasDetachError = true
+        firstDetachError = error
+      }
+    }
+    if (hasDetachError) {
+      // AI modified: failed native detachment remains retryable by a later lifecycle operation.
+      throw firstDetachError
+    }
+    this.#hasAttachedSource = false
+  }
+
+  /**
+   * Checks whether a metadata event belongs to the source currently being loaded.
+   *
+   * @param event Metadata event received from the media element.
+   * @param expectedUrl URL assigned for the active source session.
+   * @param eventStartTime Earliest event timestamp accepted for the active source session.
+   * @returns `true` when the event can complete the active source load.
+   */
+  protected isSourceMetadataCurrent(
+    event: Event,
+    expectedUrl: string,
+    eventStartTime: number | undefined,
+  ): boolean {
+    // AI modified: late old-resource events cannot finish replacement loading while it still has no metadata.
+    if (
+      !this.isMediaEventCurrent(event, eventStartTime)
+      || !this.hasMediaMetadata()
+    ) {
+      return false
+    }
+    const currentUrl = this.audioElement.currentSrc || this.audioElement.src
+    if (!currentUrl) {
+      return true
+    }
+    const baseUrl = globalThis.document?.baseURI ?? globalThis.location?.href
+    if (!baseUrl) {
+      return currentUrl === expectedUrl
+    }
+    try {
+      return new URL(currentUrl, baseUrl).href === new URL(expectedUrl, baseUrl).href
+    }
+    catch {
+      return currentUrl === expectedUrl
+    }
+  }
+
+  /**
+   * Checks whether a media event was created after an operation started.
+   *
+   * @param event Media event to inspect.
+   * @param eventStartTime Earliest timestamp accepted by the operation.
+   * @returns `true` when the event is eligible for the active operation.
+   */
+  protected isMediaEventCurrent(event: Event, eventStartTime: number | undefined): boolean {
+    return eventStartTime !== undefined && event.timeStamp >= eventStartTime
+  }
+
+  /**
+   * Reports whether the active media resource has exposed its metadata.
+   *
+   * @returns `true` at `HAVE_METADATA` or a later HTML media ready state.
+   */
+  protected hasMediaMetadata(): boolean {
+    // AI modified: URL and event timing alone cannot prove that a replacement resource reached metadata readiness.
+    return this.audioElement.readyState >= 1
+  }
+
+  #detachActiveSourceUrl(): void {
+    const mediaError = this.audioElement.error
+    if (mediaError) {
+      // AI modified: remember the detached resource's error so its queued event cannot fail a newer source.
+      this.#detachedMediaErrors.add(mediaError)
+    }
+    this.detachSourceUrl()
   }
 
   /**
@@ -358,118 +833,559 @@ export class MediaElementAudioEngine implements AudioEngine {
    * @param error Error used to reject the pending load.
    */
   protected rejectActiveLoad(error: GAudioError): void {
-    const activeSourceSession = this.activeSourceSession
+    const activeSourceSession = this.#activeSourceSession
     if (!activeSourceSession?.reject) {
       return
     }
 
     // AI modified: vendor engines report fatal failures outside the media element error channel.
-    this.activeSourceSession = undefined
+    this.#activeSourceSession = undefined
     activeSourceSession.abortController?.abort()
     const reject = activeSourceSession.reject
     activeSourceSession.abortController = undefined
+    activeSourceSession.resolve = undefined
     activeSourceSession.reject = undefined
-    this.closeSourceSession(activeSourceSession)
-    reject(error)
+    // AI modified: vendor load failures join the same teardown and source-cleanup lifecycle as native failures.
+    this.#releaseFailedSourceSession(activeSourceSession, error, reject)
   }
 
-  private addMediaEventListeners(): void {
-    this.audioElement.addEventListener('loadstart', this.handleLoadStart)
-    this.audioElement.addEventListener('loadedmetadata', this.handleLoadedMetadata)
-    this.audioElement.addEventListener('canplay', this.handleCanPlay)
-    this.audioElement.addEventListener('play', this.handlePlay)
-    this.audioElement.addEventListener('playing', this.handlePlaying)
-    this.audioElement.addEventListener('pause', this.handlePause)
-    this.audioElement.addEventListener('waiting', this.handleWaiting)
-    this.audioElement.addEventListener('seeking', this.handleSeeking)
-    this.audioElement.addEventListener('seeked', this.handleSeeked)
-    this.audioElement.addEventListener('timeupdate', this.handleTimeUpdate)
-    this.audioElement.addEventListener('durationchange', this.handleDurationChange)
-    this.audioElement.addEventListener('progress', this.handleProgress)
-    this.audioElement.addEventListener('volumechange', this.handleVolumeChange)
-    this.audioElement.addEventListener('ratechange', this.handleRateChange)
-    this.audioElement.addEventListener('ended', this.handleEnded)
-    this.audioElement.addEventListener('error', this.handleError)
+  #addMediaEventListeners(): void {
+    const listenerRegistrations: Array<readonly [string, EventListener]> = [
+      ['loadstart', this.#handleLoadStart],
+      ['loadedmetadata', this.#handleLoadedMetadata],
+      ['canplay', this.#handleCanPlay],
+      ['play', this.#handlePlay],
+      ['playing', this.#handlePlaying],
+      ['pause', this.#handlePause],
+      ['waiting', this.#handleWaiting],
+      ['seeking', this.#handleSeeking],
+      ['seeked', this.#handleSeeked],
+      ['timeupdate', this.#handleTimeUpdate],
+      ['durationchange', this.#handleDurationChange],
+      ['progress', this.#handleProgress],
+      ['volumechange', this.#handleVolumeChange],
+      ['ratechange', this.#handleRateChange],
+      ['ended', this.#handleEnded],
+      ['error', this.#handleError],
+    ]
+    const completedRegistrations: Array<readonly [string, EventListener]> = []
+    try {
+      for (const [eventName, handler] of listenerRegistrations) {
+        this.audioElement.addEventListener(eventName, handler)
+        completedRegistrations.push([eventName, handler])
+      }
+    }
+    catch (error) {
+      // AI modified: constructor failure rolls back every browser listener registered before it.
+      for (const [eventName, handler] of completedRegistrations.reverse()) {
+        try {
+          this.audioElement.removeEventListener(eventName, handler)
+        }
+        catch {
+          // Preserve the registration failure that prevented construction.
+        }
+      }
+      throw error
+    }
   }
 
-  private removeMediaEventListeners(): void {
-    this.audioElement.removeEventListener('loadstart', this.handleLoadStart)
-    this.audioElement.removeEventListener('loadedmetadata', this.handleLoadedMetadata)
-    this.audioElement.removeEventListener('canplay', this.handleCanPlay)
-    this.audioElement.removeEventListener('play', this.handlePlay)
-    this.audioElement.removeEventListener('playing', this.handlePlaying)
-    this.audioElement.removeEventListener('pause', this.handlePause)
-    this.audioElement.removeEventListener('waiting', this.handleWaiting)
-    this.audioElement.removeEventListener('seeking', this.handleSeeking)
-    this.audioElement.removeEventListener('seeked', this.handleSeeked)
-    this.audioElement.removeEventListener('timeupdate', this.handleTimeUpdate)
-    this.audioElement.removeEventListener('durationchange', this.handleDurationChange)
-    this.audioElement.removeEventListener('progress', this.handleProgress)
-    this.audioElement.removeEventListener('volumechange', this.handleVolumeChange)
-    this.audioElement.removeEventListener('ratechange', this.handleRateChange)
-    this.audioElement.removeEventListener('ended', this.handleEnded)
-    this.audioElement.removeEventListener('error', this.handleError)
+  #removeMediaEventListeners(): void {
+    if (this.#hasRemovedMediaEventListeners) {
+      return
+    }
+    const listenerRemovals = this.#pendingMediaEventListenerRemovals ?? [
+      () => this.audioElement.removeEventListener('loadstart', this.#handleLoadStart),
+      () => this.audioElement.removeEventListener('loadedmetadata', this.#handleLoadedMetadata),
+      () => this.audioElement.removeEventListener('canplay', this.#handleCanPlay),
+      () => this.audioElement.removeEventListener('play', this.#handlePlay),
+      () => this.audioElement.removeEventListener('playing', this.#handlePlaying),
+      () => this.audioElement.removeEventListener('pause', this.#handlePause),
+      () => this.audioElement.removeEventListener('waiting', this.#handleWaiting),
+      () => this.audioElement.removeEventListener('seeking', this.#handleSeeking),
+      () => this.audioElement.removeEventListener('seeked', this.#handleSeeked),
+      () => this.audioElement.removeEventListener('timeupdate', this.#handleTimeUpdate),
+      () => this.audioElement.removeEventListener('durationchange', this.#handleDurationChange),
+      () => this.audioElement.removeEventListener('progress', this.#handleProgress),
+      () => this.audioElement.removeEventListener('volumechange', this.#handleVolumeChange),
+      () => this.audioElement.removeEventListener('ratechange', this.#handleRateChange),
+      () => this.audioElement.removeEventListener('ended', this.#handleEnded),
+      () => this.audioElement.removeEventListener('error', this.#handleError),
+    ]
+    const failedListenerRemovals: Array<() => void> = []
+    let firstRemovalError: unknown
+    let hasRemovalError = false
+    for (const removeListener of listenerRemovals) {
+      try {
+        removeListener()
+      }
+      catch (error) {
+        if (!hasRemovalError) {
+          hasRemovalError = true
+          firstRemovalError = error
+        }
+        failedListenerRemovals.push(removeListener)
+      }
+    }
+    if (hasRemovalError) {
+      // AI modified: later disposal retries only callbacks whose browser removal did not finish.
+      this.#pendingMediaEventListenerRemovals = failedListenerRemovals
+      throw firstRemovalError
+    }
+    this.#pendingMediaEventListenerRemovals = undefined
+    this.#hasRemovedMediaEventListeners = true
   }
 
-  private cancelActiveSourceSession(): void {
-    const activeSourceSession = this.activeSourceSession
+  #cancelActiveSourceSession(): ActiveSourceSession | undefined {
+    const activeSourceSession = this.#activeSourceSession
     if (!activeSourceSession) {
-      return
+      return undefined
     }
 
-    this.activeSourceSession = undefined
+    this.#activeSourceSession = undefined
     activeSourceSession.abortController?.abort()
-    activeSourceSession.reject?.(this.loadAbortedError())
+    activeSourceSession.reject?.(this.#loadAbortedError())
     activeSourceSession.abortController = undefined
+    activeSourceSession.resolve = undefined
     activeSourceSession.reject = undefined
-    if (activeSourceSession.hasOpenCompleted) {
-      this.closeSourceSession(activeSourceSession)
-    }
+    return activeSourceSession
   }
 
-  private closeSourceSession(activeSourceSession: ActiveSourceSession): void {
+  #waitForSourceOpen(activeSourceSession: ActiveSourceSession): Promise<AudioStreamHandle> {
+    return new Promise((resolve, reject) => {
+      let hasFinishedOpenWait = false
+      const finishOpenWait = (openResult: AudioStreamHandle | undefined, error?: unknown): void => {
+        if (hasFinishedOpenWait) {
+          return
+        }
+        hasFinishedOpenWait = true
+        activeSourceSession.reject = undefined
+        if (openResult) {
+          resolve(openResult)
+        }
+        else {
+          reject(error)
+        }
+      }
+      const rejectOpenWait = (error: GAudioError): void => finishOpenWait(undefined, error)
+      activeSourceSession.reject = rejectOpenWait
+      try {
+        // AI modified: observe both late outcomes so a cancelled custom open cannot create an unhandled rejection.
+        void activeSourceSession.source.open().then(
+          openResult => finishOpenWait(openResult),
+          error => finishOpenWait(undefined, error),
+        )
+      }
+      catch (error) {
+        finishOpenWait(undefined, error)
+      }
+    })
+  }
+
+  #waitForSourceMetadata(
+    activeSourceSession: ActiveSourceSession,
+    expectedUrl: string,
+  ): Promise<void> {
+    let resolveMetadata: () => void = () => {}
+    let rejectMetadata: (error: GAudioError) => void = () => {}
+    const metadataReady = new Promise<void>((resolve, reject) => {
+      resolveMetadata = resolve
+      rejectMetadata = reject
+    })
+    const abortController = new AbortController()
+    activeSourceSession.abortController = abortController
+    activeSourceSession.resolve = resolveMetadata
+    activeSourceSession.reject = rejectMetadata
+
+    const handleReady = (event: Event): void => {
+      if (
+        this.#activeSourceSession !== activeSourceSession
+        || !this.isSourceMetadataCurrent(
+          event,
+          expectedUrl,
+          activeSourceSession.metadataEventStartTime,
+        )
+      ) {
+        return
+      }
+      abortController.abort()
+      activeSourceSession.abortController = undefined
+      activeSourceSession.resolve = undefined
+      activeSourceSession.reject = undefined
+      resolveMetadata()
+    }
+
+    const handleLoadError = (): void => {
+      if (this.#isDetachedMediaError()) {
+        return
+      }
+      const error = mediaElementError(this.audioElement)
+      abortController.abort()
+      activeSourceSession.abortController = undefined
+      activeSourceSession.resolve = undefined
+      activeSourceSession.reject = undefined
+      if (this.#activeSourceSession === activeSourceSession) {
+        this.#activeSourceSession = undefined
+      }
+      // AI modified: a failed candidate releases native and vendor playback before fallback loading begins.
+      this.#releaseFailedSourceSession(activeSourceSession, error, rejectMetadata)
+    }
+
+    try {
+      this.audioElement.addEventListener('loadedmetadata', handleReady, {
+        signal: abortController.signal,
+      })
+      this.audioElement.addEventListener('error', handleLoadError, {
+        // AI modified: a stale detached-source error must not consume the current source's error listener.
+        signal: abortController.signal,
+      })
+    }
+    catch (error) {
+      abortController.abort()
+      activeSourceSession.abortController = undefined
+      activeSourceSession.resolve = undefined
+      activeSourceSession.reject = undefined
+      throw error
+    }
+    return metadataReady
+  }
+
+  #finishSourceMetadataWait(activeSourceSession: ActiveSourceSession): void {
+    const resolve = activeSourceSession.resolve
+    activeSourceSession.abortController?.abort()
+    activeSourceSession.abortController = undefined
+    activeSourceSession.resolve = undefined
+    activeSourceSession.reject = undefined
+    resolve?.()
+  }
+
+  #closeCancelledSourceSession(
+    activeSourceSession: ActiveSourceSession | undefined,
+  ): Promise<SourceCloseOutcome> | undefined {
+    const pendingSourceCleanup = this.#pendingSourceCleanup
+    if (pendingSourceCleanup && pendingSourceCleanup !== activeSourceSession) {
+      return this.#closeSourceSession(pendingSourceCleanup).then((closeOutcome) => {
+        if (!closeOutcome.isSuccessful || !activeSourceSession) {
+          return closeOutcome
+        }
+        return this.#closeSourceSession(activeSourceSession)
+      })
+    }
+    if (activeSourceSession) {
+      // AI modified: close owns cancellation of the current open operation, including one whose promise is still pending.
+      return this.#closeSourceSession(activeSourceSession)
+    }
+    return pendingSourceCleanup
+      ? this.#closeSourceSession(pendingSourceCleanup)
+      : undefined
+  }
+
+  #releaseFailedSourceSession(
+    activeSourceSession: ActiveSourceSession,
+    error: GAudioError,
+    reject: (error: GAudioError) => void,
+  ): void {
+    this.cancelActiveSeek()
+    try {
+      this.pauseWithoutEvent()
+    }
+    catch {
+      // The original media or vendor error remains the actionable load failure.
+    }
+    try {
+      // AI modified: source detachment remains mandatory when the preceding pause operation fails.
+      this.#detachActiveSourceUrl()
+    }
+    catch {
+      // The original media or vendor error remains the actionable load failure.
+    }
+    void this.#closeSourceSession(activeSourceSession).then(() => reject(error))
+  }
+
+  #closeSourceSession(activeSourceSession: ActiveSourceSession): Promise<SourceCloseOutcome> {
     if (activeSourceSession.isClosed) {
-      return
+      return Promise.resolve({ isSuccessful: true })
+    }
+    if (activeSourceSession.closePromise) {
+      return activeSourceSession.closePromise
     }
 
-    // AI modified: cancelled pending opens are closed after open() completes so allocated resources are released once.
-    activeSourceSession.isClosed = true
-    void activeSourceSession.source.close()
+    let finishClose: (closeOutcome: SourceCloseOutcome) => void = () => {}
+    let hasFinishedClose = false
+    const closePromise = new Promise<SourceCloseOutcome>((resolve) => {
+      finishClose = (closeOutcome): void => {
+        if (hasFinishedClose) {
+          return
+        }
+        hasFinishedClose = true
+        activeSourceSession.closePromise = undefined
+        if (closeOutcome.isSuccessful) {
+          activeSourceSession.isClosed = true
+          if (this.#pendingSourceCleanup === activeSourceSession) {
+            this.#pendingSourceCleanup = undefined
+          }
+        }
+        else {
+          // AI modified: failed cleanup retains source ownership so a later load, unload, or dispose can retry it.
+          this.#pendingSourceCleanup = activeSourceSession
+        }
+        resolve(closeOutcome)
+      }
+    })
+    activeSourceSession.closePromise = closePromise
+    this.#pendingSourceCleanup = activeSourceSession
+    const cleanupController = startMediaElementCleanup(this, activeSourceSession)
+    try {
+      const sourceClose = activeSourceSession.source.close()
+      void sourceClose.then(
+        () => {
+          finishClose({ isSuccessful: true })
+          cleanupController.succeed()
+        },
+        (error) => {
+          finishClose({ isSuccessful: false, error })
+          cleanupController.fail(error)
+        },
+      )
+    }
+    catch (error) {
+      finishClose({ isSuccessful: false, error })
+      cleanupController.fail(error)
+    }
+    return closePromise
   }
 
-  private pauseWithoutEvent(): void {
+  #waitForLoadOperation<OperationResult>(
+    operation: Promise<OperationResult>,
+    loadAbortController: AbortController,
+  ): Promise<OperationResult> {
+    return new Promise<OperationResult>((resolve, reject) => {
+      let hasFinishedWait = false
+      let handleAbort = (): void => {}
+      const finishWait = (
+        hasOperationResult: boolean,
+        operationResult: OperationResult | undefined,
+        error?: unknown,
+      ): void => {
+        if (hasFinishedWait) {
+          return
+        }
+        hasFinishedWait = true
+        loadAbortController.signal.removeEventListener('abort', handleAbort)
+        if (hasOperationResult) {
+          resolve(operationResult as OperationResult)
+        }
+        else {
+          reject(error)
+        }
+      }
+      handleAbort = (): void => finishWait(false, undefined, this.#loadAbortedError())
+      loadAbortController.signal.addEventListener('abort', handleAbort, { once: true })
+      if (loadAbortController.signal.aborted) {
+        handleAbort()
+      }
+      void operation.then(
+        operationResult => finishWait(true, operationResult),
+        error => finishWait(false, undefined, error),
+      )
+    })
+  }
+
+  #waitForPlaybackOperation(startPlayback: () => Promise<void>): Promise<void> {
+    const playAbortController = new AbortController()
+    const playbackIntentId = ++this.#playbackIntentId
+    this.#requestedMediaPlayback = 'play'
+    this.#activePlayAbortControllers.add(playAbortController)
+    let playback: Promise<void>
+    try {
+      playback = startPlayback()
+    }
+    catch (error) {
+      this.#activePlayAbortControllers.delete(playAbortController)
+      if (playbackIntentId === this.#playbackIntentId) {
+        this.#requestedMediaPlayback = 'pause'
+      }
+      return Promise.reject(error)
+    }
+
+    const completion = new Promise<void>((resolve, reject) => {
+      let hasFinishedWait = false
+      let handleAbort = (): void => {}
+      const finishWait = (isSuccessful: boolean, error?: unknown): void => {
+        if (hasFinishedWait) {
+          return
+        }
+        hasFinishedWait = true
+        playAbortController.signal.removeEventListener('abort', handleAbort)
+        if (isSuccessful) {
+          resolve()
+        }
+        else {
+          reject(error)
+        }
+      }
+      handleAbort = (): void => finishWait(
+        false,
+        this.#isDisposed
+          ? this.#disposedError()
+          : new GAudioError('LOAD_ABORTED', 'Audio playback was interrupted by a newer media operation'),
+      )
+      playAbortController.signal.addEventListener('abort', handleAbort, { once: true })
+      if (playAbortController.signal.aborted) {
+        handleAbort()
+      }
+      void playback.then(
+        () => {
+          if (playAbortController.signal.aborted && this.#requestedMediaPlayback === 'pause') {
+            // AI modified: a cancelled browser promise cannot restart media after its lifecycle call has settled.
+            this.#enforceCancelledPlaybackPause()
+          }
+          finishWait(true)
+        },
+        (error) => {
+          if (playbackIntentId === this.#playbackIntentId) {
+            this.#requestedMediaPlayback = 'pause'
+          }
+          finishWait(false, error)
+        },
+      )
+    })
+
+    return completion.finally(() => {
+      this.#activePlayAbortControllers.delete(playAbortController)
+    })
+  }
+
+  #enforceCancelledPlaybackPause(): void {
+    const playbackIntentId = this.#playbackIntentId
+    try {
+      this.pauseWithoutEvent()
+    }
+    catch (cause) {
+      if (
+        this.#playbackIntentId !== playbackIntentId + 1
+        || this.#requestedMediaPlayback !== 'pause'
+      ) {
+        return
+      }
+
+      // AI modified: late asynchronous pause failures use the error channel because the cancelling call already returned.
+      const failedPauseIntentId = this.#playbackIntentId
+      this.events.emit(
+        'error',
+        new GAudioError(
+          'ENGINE_ERROR',
+          'Cancelled audio playback could not be paused',
+          cause,
+        ),
+      )
+      if (
+        this.#playbackIntentId !== failedPauseIntentId
+        || this.#requestedMediaPlayback !== 'pause'
+      ) {
+        return
+      }
+
+      try {
+        // AI modified: retry once so a transient custom-element pause failure cannot leave cancelled playback audible.
+        this.pauseWithoutEvent()
+      }
+      catch {
+        // The first failure already owns the fatal boundary; repeated custom-element failures stay contained.
+      }
+    }
+  }
+
+  #cancelActivePlayRequests(): void {
+    this.#playbackIntentId += 1
+    this.#requestedMediaPlayback = 'pause'
+    for (const playAbortController of this.#activePlayAbortControllers) {
+      playAbortController.abort()
+    }
+    this.#activePlayAbortControllers.clear()
+  }
+
+  /** Pauses the element while suppressing the corresponding engine pause event. */
+  protected pauseWithoutEvent(): void {
+    this.#cancelActivePlayRequests()
     if (!this.audioElement.paused) {
-      this.shouldSuppressPause = true
+      this.#shouldSuppressPause = true
     }
     this.audioElement.pause()
   }
 
-  private async seekMediaElement(targetTime: number, startSeek: (targetTime: number) => void): Promise<void> {
+  async #seekMediaElement(targetTime: number, startSeek: (targetTime: number) => void): Promise<void> {
+    this.cancelActiveSeek()
+
     await new Promise<void>((resolve, reject) => {
       const abortController = new AbortController()
-      const finish = (): void => {
+      const activeSeekRequest: ActiveSeekRequest = {
+        abortController,
+        eventStartTime: new Event('gaudio-seek').timeStamp,
+        loadGeneration: this.#loadGeneration,
+        reject,
+      }
+      this.#activeSeekRequest = activeSeekRequest
+      const finish = (event?: Event): void => {
+        if (!this.#isCurrentSeekCompletion(event, activeSeekRequest)) {
+          // AI modified: a queued completion from the superseded native seek cannot settle its replacement.
+          return
+        }
+        this.#activeSeekRequest = undefined
         abortController.abort()
         resolve()
       }
       const fail = (): void => {
+        if (this.#activeSeekRequest !== activeSeekRequest) {
+          return
+        }
+        if (this.#isDetachedMediaError()) {
+          // AI modified: a queued detached-source error cannot fail a seek owned by the current source.
+          return
+        }
+        this.#activeSeekRequest = undefined
         abortController.abort()
-        reject(mediaElementError(this.audioElement))
+        // AI modified: the seek promise reuses the exact error already published by the permanent listener.
+        reject(activeSeekRequest.publishedError ?? mediaElementError(this.audioElement))
       }
 
-      this.audioElement.addEventListener('seeked', finish, {
-        once: true,
-        signal: abortController.signal,
-      })
-      this.audioElement.addEventListener('error', fail, {
-        once: true,
-        signal: abortController.signal,
-      })
+      try {
+        this.audioElement.addEventListener('seeked', finish, {
+          // AI modified: a stale seeked event may be ignored, so the listener remains until current native completion.
+          signal: abortController.signal,
+        })
+        if (this.#activeSeekRequest !== activeSeekRequest) {
+          // AI modified: listener registration reentrancy cannot continue a superseded seek.
+          return
+        }
+        this.audioElement.addEventListener('error', fail, {
+          // AI modified: ignoring a detached error must keep the current seek's error listener active.
+          signal: abortController.signal,
+        })
+        if (this.#activeSeekRequest !== activeSeekRequest) {
+          return
+        }
+      }
+      catch (error) {
+        if (this.#activeSeekRequest === activeSeekRequest) {
+          this.#activeSeekRequest = undefined
+        }
+        // AI modified: partial listener setup is always aborted before its seek promise rejects.
+        abortController.abort()
+        reject(error)
+        return
+      }
 
       try {
         // AI modified: seek promises now resolve after browser seek completion when one is reported.
         startSeek(targetTime)
       }
       catch (error) {
+        if (this.#activeSeekRequest !== activeSeekRequest) {
+          // AI modified: a reentrant seek owns its request even when the superseded starter later throws.
+          abortController.abort()
+          return
+        }
+        this.#activeSeekRequest = undefined
         abortController.abort()
         reject(error)
         return
@@ -480,131 +1396,296 @@ export class MediaElementAudioEngine implements AudioEngine {
     })
   }
 
-  private timeUpdate(): { currentTime: number, duration: number } {
+  /** Rejects and releases the currently pending seek operation, when present. */
+  protected cancelActiveSeek(): void {
+    this.#observedNativeSeek = undefined
+    const activeSeekRequest = this.#activeSeekRequest
+    if (!activeSeekRequest) {
+      return
+    }
+
+    // AI modified: a newer seek or unload explicitly rejects the superseded seek instead of resolving both together.
+    this.#activeSeekRequest = undefined
+    activeSeekRequest.abortController.abort()
+    activeSeekRequest.reject(new GAudioError('LOAD_ABORTED', 'Audio seek was superseded by a newer operation'))
+  }
+
+  #timeUpdate(): { currentTime: number, duration: number } {
     return {
       currentTime: this.getCurrentTime(),
       duration: this.getDuration(),
     }
   }
 
-  private loadAbortedError(): GAudioError {
+  #isCurrentSeekCompletion(event: Event | undefined, activeSeekRequest: ActiveSeekRequest): boolean {
+    return this.#activeSeekRequest === activeSeekRequest
+      && activeSeekRequest.loadGeneration === this.#loadGeneration
+      && !this.audioElement.seeking
+      && (event === undefined || this.isMediaEventCurrent(event, activeSeekRequest.eventStartTime))
+  }
+
+  #isCurrentMediaLifecycleEvent(event: Event): boolean {
+    const activeSourceSession = this.#activeSourceSession
+    if (!activeSourceSession) {
+      return this.#hasAttachedSource && this.hasMediaMetadata()
+    }
+
+    return activeSourceSession.attachedUrl !== undefined
+      && this.isSourceMetadataCurrent(
+        event,
+        activeSourceSession.attachedUrl,
+        activeSourceSession.metadataEventStartTime,
+      )
+  }
+
+  #loadAbortedError(): GAudioError {
     return new GAudioError('LOAD_ABORTED', 'Audio load was superseded by a newer source')
   }
 
-  private mediaAudioContext(): AudioContext {
-    if (this.audioContext) {
-      return this.audioContext
+  #disposedError(): GAudioError {
+    return new GAudioError('ENGINE_ERROR', 'MediaElementAudioEngine has been disposed')
+  }
+
+  #assertUsable(): void {
+    if (this.#isDisposed) {
+      throw this.#disposedError()
+    }
+  }
+
+  #mediaAudioContext(): AudioContext {
+    if (this.#audioContext) {
+      return this.#audioContext
     }
 
-    const AudioContextClass = this.audioContextClass()
+    const AudioContextClass = this.#audioContextClass()
     if (!AudioContextClass) {
       throw new GAudioError('ENGINE_ERROR', 'Web Audio analysis is unavailable in this browser')
     }
 
-    this.audioContext = new AudioContextClass()
-    return this.audioContext
+    this.#audioContext = new AudioContextClass()
+    return this.#audioContext
   }
 
-  private mediaSourceNode(audioContext: AudioContext): MediaElementAudioSourceNode {
-    if (!this.mediaElementSource) {
+  #mediaSourceNode(audioContext: AudioContext): MediaElementAudioSourceNode {
+    if (!this.#mediaElementSource) {
       // AI modified: reuse the single media element source allowed by the Web Audio API.
-      this.mediaElementSource = audioContext.createMediaElementSource(this.audioElement)
+      this.#mediaElementSource = audioContext.createMediaElementSource(this.audioElement)
     }
 
-    if (!this.isMediaElementSourceAudible) {
-      this.mediaElementSource.connect(audioContext.destination)
-      this.isMediaElementSourceAudible = true
+    if (!this.#isMediaElementSourceAudible) {
+      this.#mediaElementSource.connect(audioContext.destination)
+      this.#isMediaElementSourceAudible = true
     }
 
-    return this.mediaElementSource
+    return this.#mediaElementSource
   }
 
-  private audioContextClass(): AudioContextConstructor | undefined {
+  #audioContextClass(): AudioContextConstructor | undefined {
     const webAudioGlobal = globalThis as typeof globalThis & WebAudioGlobal
 
     return webAudioGlobal.AudioContext ?? webAudioGlobal.webkitAudioContext
   }
 
-  private closeAudioAnalysis(): void {
-    this.mediaElementSource?.disconnect()
-    this.mediaElementSource = undefined
-    this.isMediaElementSourceAudible = false
-
-    if (this.audioContext && this.audioContext.state !== 'closed') {
-      // AI modified: disposal is synchronous, so close the owned AudioContext without delaying engine teardown.
-      void this.audioContext.close()
+  #closeAudioAnalysis(): void {
+    const mediaElementSource = this.#mediaElementSource
+    this.#mediaElementSource = undefined
+    this.#isMediaElementSourceAudible = false
+    try {
+      mediaElementSource?.disconnect()
     }
-    this.audioContext = undefined
+    catch {
+      // AI modified: a failed graph disconnection cannot retain or prevent closing the owned AudioContext.
+    }
+
+    const audioContext = this.#audioContext ?? this.#pendingAudioContextCleanup
+    this.#audioContext = undefined
+    if (!audioContext) {
+      return
+    }
+    if (audioContext.state === 'closed') {
+      this.#pendingAudioContextCleanup = undefined
+      // AI modified: an externally closed context also completes a retained failed cleanup attempt.
+      finishMediaElementCleanup(this, audioContext)
+      return
+    }
+    if (this.#audioContextClosePromise) {
+      return
+    }
+
+    this.#pendingAudioContextCleanup = audioContext
+    let finishClose: (closeOutcome: SourceCloseOutcome) => void = () => {}
+    let hasFinishedClose = false
+    const closePromise = new Promise<SourceCloseOutcome>((resolve) => {
+      finishClose = (closeOutcome): void => {
+        if (hasFinishedClose) {
+          return
+        }
+        hasFinishedClose = true
+        this.#audioContextClosePromise = undefined
+        if (closeOutcome.isSuccessful && this.#pendingAudioContextCleanup === audioContext) {
+          this.#pendingAudioContextCleanup = undefined
+        }
+        resolve(closeOutcome)
+      }
+    })
+    this.#audioContextClosePromise = closePromise
+    const cleanupController = startMediaElementCleanup(this, audioContext)
+    try {
+      const contextClose = audioContext.close()
+      void contextClose.then(
+        () => {
+          finishClose({ isSuccessful: true })
+          cleanupController.succeed()
+        },
+        (error) => {
+          finishClose({ isSuccessful: false, error })
+          cleanupController.fail(error)
+        },
+      )
+    }
+    catch (error) {
+      finishClose({ isSuccessful: false, error })
+      cleanupController.fail(error)
+    }
   }
 
-  private readonly handleLoadStart = (): void => {
+  readonly #handleLoadStart = (): void => {
     this.events.emit('loadstart', undefined)
   }
 
-  private readonly handleLoadedMetadata = (): void => {
+  readonly #handleLoadedMetadata = (event: Event): void => {
+    if (!this.#isCurrentMediaLifecycleEvent(event)) {
+      // AI modified: a detached source's queued metadata cannot leak through the permanent event channel.
+      return
+    }
     this.events.emit('loadedmetadata', { duration: this.getDuration() })
   }
 
-  private readonly handleCanPlay = (): void => {
-    this.events.emit('canplay', undefined)
+  readonly #handleCanPlay = (): void => {
+    if (this.audioElement.readyState >= 3) {
+      // AI modified: a queued canplay event cannot claim readiness after the element returned to HAVE_NOTHING.
+      this.events.emit('canplay', undefined)
+    }
   }
 
-  private readonly handlePlay = (): void => {
-    this.events.emit('play', undefined)
+  readonly #handlePlay = (): void => {
+    if (!this.audioElement.paused) {
+      // AI modified: a queued play event cannot revive a source that is currently paused.
+      this.events.emit('play', undefined)
+    }
   }
 
-  private readonly handlePlaying = (): void => {
-    this.events.emit('playing', undefined)
+  readonly #handlePlaying = (): void => {
+    if (!this.audioElement.paused) {
+      // AI modified: native autoplay also clears suppression retained by an older source task.
+      this.#shouldSuppressPause = false
+      // AI modified: queued playing events cannot revive playback after a synchronous pause or stop.
+      this.events.emit('playing', undefined)
+    }
   }
 
-  private readonly handlePause = (): void => {
-    if (this.shouldSuppressPause) {
-      this.shouldSuppressPause = false
+  readonly #handlePause = (): void => {
+    if (this.#shouldSuppressPause) {
+      this.#shouldSuppressPause = false
       return
     }
-    this.events.emit('pause', undefined)
+    if (this.audioElement.paused) {
+      // AI modified: queued pause events cannot override playback that has already resumed.
+      this.events.emit('pause', undefined)
+    }
   }
 
-  private readonly handleWaiting = (): void => {
-    this.events.emit('waiting', undefined)
+  readonly #handleWaiting = (): void => {
+    if (!this.audioElement.paused && !this.audioElement.ended) {
+      // AI modified: queued waiting events cannot report buffering after pause, stop, or completion.
+      this.events.emit('waiting', undefined)
+    }
   }
 
-  private readonly handleSeeking = (): void => {
-    this.events.emit('seeking', this.timeUpdate())
+  readonly #handleSeeking = (event: Event): void => {
+    const activeSeekRequest = this.#activeSeekRequest
+    const isCurrentApiSeek = activeSeekRequest !== undefined
+      && activeSeekRequest.loadGeneration === this.#loadGeneration
+      && this.isMediaEventCurrent(event, activeSeekRequest.eventStartTime)
+    if (
+      this.audioElement.seeking
+      && (isCurrentApiSeek || this.#isCurrentMediaLifecycleEvent(event))
+    ) {
+      this.#observedNativeSeek = {
+        eventStartTime: event.timeStamp,
+        loadGeneration: this.#loadGeneration,
+      }
+      // AI modified: queued seeking events cannot describe a native seek that has already completed.
+      this.events.emit('seeking', this.#timeUpdate())
+    }
   }
 
-  private readonly handleSeeked = (): void => {
-    this.events.emit('seeked', this.timeUpdate())
+  readonly #handleSeeked = (event: Event): void => {
+    const activeSeekRequest = this.#activeSeekRequest
+    const observedNativeSeek = this.#observedNativeSeek
+    const isCurrentApiSeek = activeSeekRequest !== undefined
+      && this.#isCurrentSeekCompletion(event, activeSeekRequest)
+    const isCurrentNativeSeek = observedNativeSeek !== undefined
+      && observedNativeSeek.loadGeneration === this.#loadGeneration
+      && !this.audioElement.seeking
+      && this.isMediaEventCurrent(event, observedNativeSeek.eventStartTime)
+    if (isCurrentApiSeek || isCurrentNativeSeek) {
+      this.#observedNativeSeek = undefined
+      // AI modified: publish completion only for an active request or a native seek observed by this engine.
+      this.events.emit('seeked', this.#timeUpdate())
+    }
   }
 
-  private readonly handleTimeUpdate = (): void => {
-    this.events.emit('timeupdate', this.timeUpdate())
+  readonly #handleTimeUpdate = (): void => {
+    this.events.emit('timeupdate', this.#timeUpdate())
   }
 
-  private readonly handleDurationChange = (): void => {
+  readonly #handleDurationChange = (): void => {
     this.events.emit('durationchange', { duration: this.getDuration() })
   }
 
-  private readonly handleProgress = (): void => {
+  readonly #handleProgress = (): void => {
     this.events.emit('bufferupdate', { ranges: this.getBufferedRanges() })
   }
 
-  private readonly handleVolumeChange = (): void => {
+  readonly #handleVolumeChange = (): void => {
     this.events.emit('volumechange', {
       volume: this.getVolume(),
       isMuted: this.isMuted(),
     })
   }
 
-  private readonly handleRateChange = (): void => {
+  readonly #handleRateChange = (): void => {
     this.events.emit('ratechange', { playbackRate: this.getPlaybackRate() })
   }
 
-  private readonly handleEnded = (): void => {
-    this.events.emit('ended', undefined)
+  readonly #handleEnded = (): void => {
+    if (this.audioElement.ended) {
+      // AI modified: queued ended events cannot advance consumers after the media timeline was reset.
+      this.events.emit('ended', undefined)
+    }
   }
 
-  private readonly handleError = (): void => {
-    this.events.emit('error', mediaElementError(this.audioElement))
+  readonly #handleError = (): void => {
+    if (this.#isDetachedMediaError()) {
+      return
+    }
+    if (this.#activeSourceSession?.reject) {
+      // AI modified: the load promise owns candidate failures so successful fallbacks do not emit fatal errors.
+      return
+    }
+    const error = mediaElementError(this.audioElement)
+    const activeSeekRequest = this.#activeSeekRequest
+    if (activeSeekRequest?.loadGeneration === this.#loadGeneration) {
+      // AI modified: one canonical media error owns both the event channel and an in-flight seek rejection.
+      activeSeekRequest.publishedError = error
+    }
+    this.events.emit('error', error)
+  }
+
+  #isDetachedMediaError(): boolean {
+    const mediaError = this.audioElement.error
+    // AI modified: suppress only identity-proven old errors; null retains the current-source fallback contract.
+    return mediaError !== null && this.#detachedMediaErrors.has(mediaError)
   }
 }

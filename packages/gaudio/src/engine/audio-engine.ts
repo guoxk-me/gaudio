@@ -111,35 +111,71 @@ export interface AudioEngine {
   pause: () => void
   /** Pauses playback and returns to the beginning while retaining the source. */
   stop: () => void
-  /** @param seconds Target playback position in seconds. */
+  /**
+   * Moves the active media timeline while preserving the caller's playback intent.
+   *
+   * @param seconds Target playback position in seconds.
+   */
   seek: (seconds: number) => Promise<void>
-  /** @param seconds Target playback position in seconds for the optimized seek path. */
+  /**
+   * Uses an optimized browser seek path when the runtime provides one.
+   *
+   * @param seconds Target playback position in seconds for the optimized seek path.
+   */
   fastSeek: (seconds: number) => Promise<void>
-  /** @param preload Browser preload hint for current and future sources. */
+  /**
+   * Applies the browser's media-fetch hint to current and future source loads.
+   *
+   * @param preload Browser preload hint for current and future sources.
+   */
   setPreload: (preload: PreloadMode) => void
   /** Returns the current browser preload hint. */
   getPreload: () => PreloadMode
-  /** @param shouldAutoplay Whether engine-native autoplay should be enabled. */
+  /**
+   * Controls native media autoplay for engines that delegate the policy to the browser.
+   *
+   * @param shouldAutoplay Whether engine-native autoplay should be enabled.
+   */
   setAutoplay: (shouldAutoplay: boolean) => void
   /** Returns whether engine-native autoplay is enabled. */
   getAutoplay: () => boolean
-  /** @param volume Linear output volume between `0` and `1`. */
+  /**
+   * Changes output gain without altering the configured mute state.
+   *
+   * @param volume Linear output volume between `0` and `1`.
+   */
   setVolume: (volume: number) => void
   /** Returns linear output volume between `0` and `1`. */
   getVolume: () => number
-  /** @param isMuted Whether audio output should be muted. */
+  /**
+   * Suppresses or restores audible output while retaining the current volume.
+   *
+   * @param isMuted Whether audio output should be muted.
+   */
   setMuted: (isMuted: boolean) => void
   /** Returns whether output is muted. */
   isMuted: () => boolean
-  /** @param isLooping Whether playback should restart after reaching the end. */
+  /**
+   * Controls whether an ended source restarts without application intervention.
+   *
+   * @param isLooping Whether playback should restart after reaching the end.
+   */
   setLoop: (isLooping: boolean) => void
   /** Returns whether playback looping is enabled. */
   isLooping: () => boolean
-  /** @param rate Playback speed multiplier, where `1` is normal speed. */
+  /**
+   * Changes timeline speed while leaving the source and position intact.
+   *
+   * @param rate Playback speed multiplier, where `1` is normal speed.
+   */
   setPlaybackRate: (rate: number) => void
   /** Returns the playback speed multiplier. */
   getPlaybackRate: () => number
-  /** @param shouldPreservePitch Whether pitch should remain stable when playback speed changes. */
+  /**
+   * Chooses whether rate changes retain natural pitch or shift it with speed.
+   *
+   * @param shouldPreservePitch Whether pitch should remain stable when playback speed changes.
+   */
   setPreservesPitch: (shouldPreservePitch: boolean) => void
   /** Returns whether pitch preservation is enabled. */
   getPreservesPitch: () => boolean
@@ -188,6 +224,7 @@ export interface AudioEngine {
   /**
    * Registers an engine event listener.
    *
+   * @typeParam EventName Event key whose payload type is delivered to the handler.
    * @param eventName Event to observe.
    * @param handler Listener invoked with the event payload.
    * @returns A function that removes this listener.
@@ -196,6 +233,10 @@ export interface AudioEngine {
     eventName: EventName,
     handler: (payload: AudioEngineEvents[EventName]) => void,
   ) => () => void
-  /** Releases listeners, active loads, sources, and vendor resources. */
+  /**
+   * Releases listeners, active loads, sources, and vendor resources.
+   *
+   * Implementations do not need to support other engine methods after disposal.
+   */
   dispose: () => void
 }
