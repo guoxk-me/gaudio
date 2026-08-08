@@ -3,15 +3,15 @@
   "type": "module",
   "version": "0.4.0",
   "description": "A browser-first TypeScript audio streaming library.",
-  "author": "guoxk",
+  "author": "guoxk-me",
   "license": "MIT",
-  "homepage": "https://github.com/guoxk/gaudio#readme",
+  "homepage": "https://guoxk-me.github.io/gaudio/",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/guoxk/gaudio.git"
+    "url": "git+https://github.com/guoxk-me/gaudio.git"
   },
   "bugs": {
-    "url": "https://github.com/guoxk/gaudio/issues"
+    "url": "https://github.com/guoxk-me/gaudio/issues"
   },
   "keywords": [
     "audio",
@@ -70,21 +70,28 @@
     }
   },
   "files": [
+    "CHANGELOG.md",
     "LICENSE",
     "README.md",
     "dist"
   ],
+  "publishConfig": {
+    "access": "public",
+    "tag": "next"
+  },
   "engines": {
     "node": ">=18"
   },
   "scripts": {
-    "build": "tsdown",
+    "build": "tsdown && node scripts/include-declaration-source-content.mjs && node scripts/verify-declaration-source-maps.mjs",
+    "coverage": "vitest run --coverage",
     "dev": "tsdown --watch",
     "lint": "eslint .",
-    "pack:dry-run": "npm pack --dry-run",
-    "prepublishOnly": "pnpm run typecheck && pnpm run test && pnpm run build && pnpm run pack:dry-run",
+    "pack:dry-run": "corepack pnpm@10.28.0 pack --dry-run",
+    "prepublishOnly": "node scripts/validate-release-changelog.mjs --package-publish && tsc --noEmit && vitest run && tsdown && node scripts/include-declaration-source-content.mjs && node scripts/verify-declaration-source-maps.mjs && corepack pnpm@10.28.0 pack --dry-run",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "verify:declaration-maps": "node scripts/verify-declaration-source-maps.mjs"
   },
   "peerDependencies": {
     "dashjs": "^5.2.0",
@@ -99,13 +106,13 @@
     }
   },
   "devDependencies": {
-    "@arethetypeswrong/core": "^0.18.4",
-    "@types/node": "^26.0.1",
+    "@arethetypeswrong/core": "^0.18.5",
+    "@types/node": "^24.13.3",
     "dashjs": "^5.2.0",
     "hls.js": "^1.6.16",
-    "publint": "^0.3.21",
-    "tsdown": "^0.22.3",
+    "publint": "^0.3.22",
+    "tsdown": "^0.22.14",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.9"
+    "vitest": "^4.1.10"
   }
 }

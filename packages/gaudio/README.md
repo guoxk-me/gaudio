@@ -6,15 +6,17 @@ GAudio is currently pre-release. Use the documented API directly, but expect int
 
 ## Install
 
+The commands below target npm's `next` dist-tag. Before the first registry release is visible, clone this repository and use its `gaudio` workspace package instead.
+
 ```bash
-pnpm add gaudio
+pnpm add gaudio@next
 ```
 
 Install only the adaptive dependency your application uses:
 
 ```bash
-pnpm add gaudio hls.js
-pnpm add gaudio dashjs
+pnpm add gaudio@next hls.js
+pnpm add gaudio@next dashjs
 ```
 
 ## Entry points
@@ -23,9 +25,20 @@ pnpm add gaudio dashjs
 | --- | --- |
 | `gaudio` | `AudioPlayer`, `HttpAudioSource`, `BlobAudioSource`, `AudioAnalyzer`, `EventEmitter`, core types, adaptive event types, `AdaptiveContentType`, `AdaptivePlaybackPreset` |
 | `gaudio/hls` | `createHlsAdapter`, HLS adapter types, `HlsConfig` |
-| `gaudio/dash` | `createDashAdapter`, DASH adapter types, dash.js type re-exports |
+| `gaudio/dash` | `createDashAdapter`, `DashSettingsChanges`, DASH adapter types, dash.js type re-exports |
 
 The root entry does not import `hls.js` or `dashjs`.
+
+## Compatibility
+
+- The built `gaudio` core and `gaudio/hls` entry points support Node.js 18 or newer for SSR imports and package-consumer tooling. Browser playback APIs still require a browser and should be created after client mount.
+- `dashjs@5` itself requires Node.js 20 or newer when evaluated in Node.js. This does not change DASH playback support in compatible browsers.
+- Published declarations support TypeScript 5.8 or newer and are verified with TypeScript 5.8.3 plus the current project compiler.
+- `hls.js` and `dashjs` remain optional peers. Install only the peer used by the corresponding subpath import.
+- Browser support is capability-based. CI exercises the current Playwright-bundled Chromium, Firefox, and WebKit desktop engines plus a Pixel 5 Chromium emulation project; this is a tested-current matrix, not a minimum-version or real-device guarantee. Core playback requires `HTMLAudioElement`, and analysis requires Web Audio. HLS requires native HLS or Media Source Extensions compatible with hls.js. DASH requires Media Source Extensions compatible with dash.js and native `globalThis.structuredClone()`. GAudio does not ship browser polyfills.
+- TypeScript consumers of `gaudio/dash` must use `node16`, `nodenext`, or `bundler` module resolution. Legacy `node10` resolution cannot resolve dash.js's transitive type packages.
+
+Node.js 18 and 20 are end-of-life. Those numbers are artifact compatibility floors, not deployment recommendations; use a maintained Node.js release for SSR applications and tooling. GAudio itself develops and releases on Node.js 24 LTS.
 
 ## Capability map
 
@@ -43,6 +56,10 @@ GAudio combines a small high-level player with lower-level escape hatches for au
 | Observability and cleanup | Typed `AudioPlayerEvents`, `once()`, `removeAllListeners()`, `GAudioError` codes, active source inspection, active protocol inspection, and `dispose()` |
 
 Core-only applications can stay on the root `gaudio` import. Adaptive applications opt into `gaudio/hls` or `gaudio/dash` so vendor code and configuration stay out of native-media bundles.
+
+### Class extension policy
+
+`MediaElementAudioEngine` is the only exported class with a supported inheritance contract. Subclasses may depend on its public and protected members, while its internal state remains private. Use `AudioPlayer`, `AudioAnalyzer`, and `EventEmitter` directly or through composition; subclassing those concrete utilities is not a compatibility contract. Prefer the public `AudioEngine`, `AudioEngineAdapter`, `AudioSource`, analyzer-factory, and event APIs for extensions.
 
 ## Quick start
 
@@ -127,7 +144,7 @@ await player.next()
 await player.previous()
 ```
 
-When a playlist track ends, GAudio automatically loads and plays the next track. If a track fails to load, its `fallbackSources` are attempted in order before an error is emitted.
+When a playlist track ends, GAudio automatically loads and plays the next track. If a track fails to load, its `fallbackSources` are attempted in order before an error is emitted. Because automatic continuation has no returned promise, an otherwise unreported source-replacement cleanup failure is published once as `ENGINE_ERROR`; a load failure already published by `load()` is not emitted again.
 
 For video companion audio or dubbed language selection, put alternate audio tracks inside a playlist track:
 
@@ -177,6 +194,8 @@ player.setMediaSessionMetadata({
 
 Playlist track `metadata` takes priority while that track is active. `setMediaSessionMetadata()` updates the default metadata used by direct sources and playlist tracks that do not provide their own metadata.
 
+Media Session actions do not have a promise caller. GAudio-owned loading or playback failures remain observable through the player's `error` event and are not reported twice. Expected `LOAD_ABORTED` cancellations caused by newer source or lifecycle operations are ignored. Other synchronous and asynchronous action failures are contained and forwarded to the host's global error reporting (`globalThis.reportError`, with an uncaught microtask fallback).
+
 ## Source inputs
 
 ```ts
@@ -200,7 +219,13 @@ const fileSource = new BlobAudioSource(file)
 player.setSource(fileSource)
 ```
 
-`HttpAudioSource` is only a URL wrapper; it does not attach headers, set credentials, or refresh expired tokens. Custom `AudioSource` objects can lazily open signed URLs, local object URLs, or app-owned resources through `open()` and `close()`. For HLS/DASH manifests and segments that need authentication after playback starts, use the selected vendor's request hooks through the adapter configuration.
+`HttpAudioSource` is only a URL wrapper; it does not attach headers, set credentials, or refresh expired tokens. Custom `AudioSource` objects can lazily open signed URLs, local object URLs, or app-owned resources through `open()` and `close()`. GAudio may call `close()` before `open()` settles and may retry it after a cleanup failure. Custom sources must cancel or invalidate pending work, prevent late `open()` results from becoming usable, keep failed cleanup state for retry, and make repeated `close()` calls safe. For HLS/DASH manifests and segments that need authentication after playback starts, use the selected vendor's request hooks through the adapter configuration.
+
+GAudio-owned failures use stable `GAudioError` codes. Extension callbacks can still propagate their original errors at documented boundaries. `AudioPlayer.load()` wraps non-`GAudioError` failures from adapter `createEngine()` calls and analyzer factories as `ENGINE_ERROR`, retaining the original error in `cause` and publishing that same wrapper through the player `error` event. Calling a custom adapter's `createEngine()` directly can still expose the adapter's own error.
+
+An injected custom `AudioEngine` is also a direct extension boundary. Constructor setup and subscriptions, `pause()`, `stop()`, `seek()`, `fastSeek()`, engine-backed settings, `canPlayType()`, state and range queries, and adaptive-quality operations preserve the engine's original thrown or rejected value. A delegated failure alone is not automatically published through the player `error` event. `load()` and `play()` remain player-owned boundaries; they use the documented `GAudioError` contract, and a fatal engine `error` rejects an in-flight play or autoplay load.
+
+Cleanup is a separate extension boundary. `setSource()`, `setPlaylist()`, `selectPlaylistTrack()`, `next()`, `previous()`, and `selectAudioTrack()` preserve the original analyzer-disposal or engine-unload error from source replacement; an explicit `load()` likewise preserves a caller-provided analyzer's disposal error before the new load starts. Direct `MediaElementAudioEngine` use preserves errors from custom `AudioSource.open()` / `close()` and underlying media-element or subclass hooks. Treat caught extension failures as `unknown` unless the callback contract narrows them.
 
 ## Adaptive playback
 
@@ -227,13 +252,52 @@ const player = new AudioPlayer({
 
 `Balanced` is used when `preset` is omitted. Choose `FastStart` for smaller startup buffers or `Stable` for weak and variable networks. Use `contentType: 'long-form'` for audiobooks and multi-hour programs, or `contentType: 'live'` for HLS/DASH live streams with latency and reconnect tuning. Explicit vendor configuration overrides the selected preset and content type.
 
+### Runtime adapter configuration
+
+```ts
+console.log(hlsAdapter.getConfig())
+
+await hlsAdapter.updateConfig({
+  maxBufferLength: 48,
+})
+
+await hlsAdapter.updateConfig(
+  { maxBufferLength: 60 },
+  {
+    apply: 'reload',
+    restorePosition: true,
+    resumePlayback: true,
+  },
+)
+
+console.log(dashAdapter.getSettings())
+
+dashAdapter.updateSettings({
+  streaming: {
+    buffer: {
+      bufferTimeDefault: 24,
+    },
+  },
+})
+```
+
+`DashAdapterOptions.settings` and `updateSettings()` accept `DashSettingsChanges`, a recursively sparse view of dash.js `MediaPlayerSettingClass`; callers can update one nested setting without supplying its siblings. `getConfig()` and `getSettings()` return isolated complete copies. HLS updates are stored for future loads by default; `apply: 'reload'` recreates the active `hls.js` engine, interrupts playback, and discards buffered data, retry state, and bandwidth estimates. DASH updates use the active dash.js runtime settings API.
+
 GAudio reports adaptive quality through `manifestloaded` and `variantchange`. Use the player-level API for protocol-neutral quality controls:
 
 ```ts
 const variants = player.getAdaptiveVariants()
 await player.setAdaptiveQuality('auto')
-await player.setAdaptiveQuality(variants[0].id)
+
+// AI modified: adapter variant order is not a quality ranking.
+const highestBitrateVariant = [...variants]
+  .sort((leftVariant, rightVariant) => rightVariant.bitrate - leftVariant.bitrate)[0]
+if (highestBitrateVariant) {
+  await player.setAdaptiveQuality(highestBitrateVariant.id)
+}
 ```
+
+Variant order is implementation-owned. Sort by `bitrate` before selecting a quality by rank.
 
 Native HLS still uses browser-owned ABR and does not expose manual variants. Advanced integrations can still inspect the exposed `hlsInstance` or `dashInstance` from adapter subpaths.
 
@@ -268,6 +332,8 @@ const waveform = analyzer?.getWaveformData({ sampleCount: 128 })
 
 Custom engines can expose `createAnalyzer`, or applications can pass `analyzer.createAnalyzer` to connect their own Web Audio graph.
 
+Cross-origin media can play successfully while analyzer samples remain silent unless the media response allows Web Audio access through CORS.
+
 For lower-level Web Audio usage, `AudioAnalyzer` reads frequency and waveform byte samples from an `AudioNode`:
 
 ```ts
@@ -287,4 +353,10 @@ oscillator.stop()
 await audioContext.close()
 ```
 
-See the [GAudio documentation](https://guoxk.github.io/gaudio/) for bilingual guides, API reference, and interactive examples with adaptive quality controls and a canvas spectrum visualizer.
+See the [GAudio documentation](https://guoxk-me.github.io/gaudio/) for bilingual guides, API reference, and interactive examples with adaptive quality controls and a canvas spectrum visualizer.
+
+## Support and security
+
+Use the [support guide](https://github.com/guoxk-me/gaudio/blob/main/SUPPORT.md) for usage questions, reproducible defects, and the information to include in an issue.
+
+Report undisclosed vulnerabilities through [GitHub private vulnerability reporting](https://github.com/guoxk-me/gaudio/security/advisories/new) and follow the [security policy](https://github.com/guoxk-me/gaudio/security/policy). Do not disclose a vulnerability in a public issue.
