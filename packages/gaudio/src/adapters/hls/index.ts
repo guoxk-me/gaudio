@@ -10,6 +10,7 @@ import type { HlsConfig } from 'hls.js'
 import type { HlsAdapterOptions, HlsAdapterRuntime, HlsAudioAdapter } from './hls-audio-adapter'
 import { GAudioError } from '../../errors/errors'
 import { hlsMimeTypes } from '../../source/audio-protocol'
+import { hasMediaSourceSupport } from '../media-source-support'
 import { HlsAudioAdapterImpl } from './hls-audio-adapter'
 
 export type {
@@ -27,50 +28,13 @@ export type { HlsConfig } from 'hls.js'
 type HlsModule = typeof import('hls.js')
 
 let hlsRuntimePromise: Promise<HlsAdapterRuntime> | undefined
-
-function hasMediaSourceSupport(): boolean {
-  const mediaGlobal = globalThis as typeof globalThis & {
-    ManagedMediaSource?: typeof MediaSource
-    WebKitMediaSource?: typeof MediaSource
-    WebKitSourceBuffer?: typeof SourceBuffer
-  }
-  if (typeof mediaGlobal.Audio !== 'function') {
-    return false
-  }
-
-  const mediaSource = mediaGlobal.ManagedMediaSource
-    ?? mediaGlobal.MediaSource
-    ?? mediaGlobal.WebKitMediaSource
-  if (typeof mediaSource !== 'function' || typeof mediaSource.isTypeSupported !== 'function') {
-    return false
-  }
-
-  const sourceBuffer = mediaGlobal.SourceBuffer ?? mediaGlobal.WebKitSourceBuffer
-  if (
-    sourceBuffer
-    && (
-      !sourceBuffer.prototype
-      || typeof sourceBuffer.prototype.appendBuffer !== 'function'
-      || typeof sourceBuffer.prototype.remove !== 'function'
-    )
-  ) {
-    return false
-  }
-
-  try {
-    // AI modified: mirror hls.js capability requirements so synchronous routing never reports partial MSE as playable.
-    return [
-      'video/mp4;codecs=avc1.42E01E,mp4a.40.2',
-      'video/mp4;codecs=av01.0.01M.08',
-      'video/mp4;codecs=vp09.00.50.08',
-      'audio/mp4;codecs=mp4a.40.2',
-      'audio/mp4;codecs=fLaC',
-    ].some(mimeType => mediaSource.isTypeSupported(mimeType))
-  }
-  catch {
-    return false
-  }
-}
+const hlsMediaSourceMimeTypes = [
+  'video/mp4;codecs=avc1.42E01E,mp4a.40.2',
+  'video/mp4;codecs=av01.0.01M.08',
+  'video/mp4;codecs=vp09.00.50.08',
+  'audio/mp4;codecs=mp4a.40.2',
+  'audio/mp4;codecs=fLaC',
+] as const
 
 function hasNativeHlsSupport(): boolean {
   // AI modified: capability checks must be safe during SSR where browser media globals do not exist.
@@ -131,7 +95,8 @@ export function createHlsAdapter(options: HlsAdapterOptions = {}): HlsAudioAdapt
   return new HlsAudioAdapterImpl(options, {
     audioElementFactory: () => new Audio(),
     loadHlsRuntime,
-    hasHlsRuntimeSupport: hasMediaSourceSupport,
+    // AI modified: probe the same MSE codecs required by hls.js without duplicating browser guards.
+    hasHlsRuntimeSupport: () => hasMediaSourceSupport(hlsMediaSourceMimeTypes),
     hasNativeHlsSupport,
   })
 }

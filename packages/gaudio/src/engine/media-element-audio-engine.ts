@@ -669,6 +669,9 @@ export class MediaElementAudioEngine implements AudioEngine {
   /**
    * Registers an engine event listener.
    *
+   * Listener callbacks run synchronously. A callback failure does not interrupt internal or sibling
+   * listeners; it is passed to `globalThis.reportError` when available or rethrown from a queued microtask.
+   *
    * @typeParam EventName Event key whose payload type is delivered to the handler.
    * @param eventName Event to observe.
    * @param handler Listener invoked with the event payload.

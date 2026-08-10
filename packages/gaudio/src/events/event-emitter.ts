@@ -71,6 +71,10 @@ export class EventEmitter<Events extends object> {
   /**
    * Synchronously notifies listeners for an event.
    *
+   * A listener exception does not escape this call or stop sibling listeners. It is passed to
+   * `globalThis.reportError` when available; otherwise it is rethrown from a queued microtask.
+   * If the reporter also throws, the queued failure is an `AggregateError` containing both errors.
+   *
    * @typeParam EventName Event key whose declared payload type is published.
    * @param eventName Event to publish.
    * @param payload Payload delivered to every current listener.

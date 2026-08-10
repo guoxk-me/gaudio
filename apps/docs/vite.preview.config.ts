@@ -32,14 +32,14 @@ export function documentationNotFoundMiddleware(outputDirectory: string, notFoun
     const isDocumentDestination = fetchDestination === undefined
       || fetchDestination === ''
       || ['document', 'fencedframe', 'frame', 'iframe'].includes(fetchDestination)
-    const acceptsHtml = acceptHeader?.includes('text/html') === true
+    const canAcceptHtml = acceptHeader?.includes('text/html') === true
       || (isDocumentDestination && (
         acceptHeader === undefined
         || acceptHeader === ''
         || acceptHeader.includes('*/*')
       ))
 
-    if (!['GET', 'HEAD'].includes(request.method ?? '') || !acceptsHtml || request.url === '/favicon.ico') {
+    if (!['GET', 'HEAD'].includes(request.method ?? '') || !canAcceptHtml || request.url === '/favicon.ico') {
       next()
       return
     }

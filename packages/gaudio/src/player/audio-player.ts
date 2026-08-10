@@ -1595,6 +1595,9 @@ export class AudioPlayer {
   /**
    * Registers a typed player event listener.
    *
+   * Listener callbacks run synchronously. A callback failure does not interrupt internal or sibling
+   * listeners; it is passed to `globalThis.reportError` when available or rethrown from a queued microtask.
+   *
    * @typeParam EventName Player event key whose payload type is delivered to the handler.
    * @param eventName Event to observe.
    * @param handler Listener invoked with the event payload.
@@ -1610,6 +1613,8 @@ export class AudioPlayer {
 
   /**
    * Registers a typed listener that is removed after the next matching player event.
+   *
+   * Listener failure reporting follows {@link on}.
    *
    * @typeParam EventName Player event key whose payload type is delivered to the handler.
    * @param eventName Event to observe once.
@@ -2159,7 +2164,10 @@ export class AudioPlayer {
 
     const audioTrack = this.getSelectedAudioTrack()
     const source = audioTrack?.source ?? playlistTrack.source
-    const fallbackSources = audioTrack?.fallbackSources ?? playlistTrack.fallbackSources ?? []
+    // AI modified: alternate tracks own their fallback chain and must never inherit the primary track's sources.
+    const fallbackSources = audioTrack
+      ? audioTrack.fallbackSources ?? []
+      : playlistTrack.fallbackSources ?? []
 
     return [
       source,

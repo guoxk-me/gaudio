@@ -369,6 +369,8 @@ Import from `gaudio/dash`.
 
 `EventEmitter<Events>` is exported for small app-owned typed event channels.
 
+`emit()` invokes listeners synchronously, isolates each listener failure so later listeners still run, and reports failures through `globalThis.reportError` when available. Without that host API, the failure is rethrown from a queued microtask; a failing reporter produces a queued `AggregateError` with both errors.
+
 | API | Returns |
 | --- | --- |
 | `on(eventName, handler)` | `() => void` |

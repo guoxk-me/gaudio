@@ -369,6 +369,8 @@ Adapter contract：
 
 `EventEmitter<Events>` 可用于应用自己的小型类型化事件通道。
 
+`emit()` 会同步调用监听器，同时隔离每个监听器的失败，确保后续监听器仍会运行；异常会在可用时交给 `globalThis.reportError`。如果宿主没有该 API，异常会在排队的 microtask 中重新抛出；若 reporter 自身失败，则会排队抛出包含两项错误的 `AggregateError`。
+
 | API | 返回 |
 | --- | --- |
 | `on(eventName, handler)` | `() => void` |

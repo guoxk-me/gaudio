@@ -1003,11 +1003,11 @@ export function useGaudioDemo() {
 
   async function navigatePreviewPlaylist(direction: 'previous' | 'next'): Promise<void> {
     await withBusyControls(async () => {
-      const didNavigate = direction === 'previous'
+      const hasNavigated = direction === 'previous'
         ? await player.previous({ autoplay: false })
         : await player.next({ autoplay: false })
 
-      if (!didNavigate) {
+      if (!hasNavigated) {
         return
       }
 

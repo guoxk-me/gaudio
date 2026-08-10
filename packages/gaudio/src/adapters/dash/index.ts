@@ -10,6 +10,7 @@ import type { DashAdapterOptions, DashAudioAdapter } from './dash-audio-adapter'
 import type { DashErrorCodes } from './dash-audio-engine'
 import type { MediaPlayerClass, MediaPlayerEvents } from './dashjs-types'
 import { GAudioError } from '../../errors/errors'
+import { hasMediaSourceSupport } from '../media-source-support'
 import { DashAudioAdapterImpl } from './dash-audio-adapter'
 
 export type { DashAdapterOptions, DashAudioAdapter } from './dash-audio-adapter'
@@ -24,49 +25,12 @@ interface DashRuntime {
 }
 
 let dashRuntimePromise: Promise<DashRuntime> | undefined
-
-function hasMediaSourceSupport(): boolean {
-  const mediaGlobal = globalThis as typeof globalThis & {
-    ManagedMediaSource?: typeof MediaSource
-    WebKitMediaSource?: typeof MediaSource
-    WebKitSourceBuffer?: typeof SourceBuffer
-  }
-  if (typeof mediaGlobal.Audio !== 'function') {
-    return false
-  }
-
-  const mediaSource = mediaGlobal.ManagedMediaSource
-    ?? mediaGlobal.MediaSource
-    ?? mediaGlobal.WebKitMediaSource
-  if (typeof mediaSource !== 'function' || typeof mediaSource.isTypeSupported !== 'function') {
-    return false
-  }
-
-  const sourceBuffer = mediaGlobal.SourceBuffer ?? mediaGlobal.WebKitSourceBuffer
-  if (
-    sourceBuffer
-    && (
-      !sourceBuffer.prototype
-      || typeof sourceBuffer.prototype.appendBuffer !== 'function'
-      || typeof sourceBuffer.prototype.remove !== 'function'
-    )
-  ) {
-    return false
-  }
-
-  try {
-    // AI modified: reject partial MSE shims before the router advertises DASH playback support.
-    return [
-      'audio/mp4;codecs=mp4a.40.2',
-      'audio/mp4;codecs=ac-3',
-      'audio/webm;codecs=opus',
-      'audio/webm;codecs=vorbis',
-    ].some(mimeType => mediaSource.isTypeSupported(mimeType))
-  }
-  catch {
-    return false
-  }
-}
+const dashMediaSourceMimeTypes = [
+  'audio/mp4;codecs=mp4a.40.2',
+  'audio/mp4;codecs=ac-3',
+  'audio/webm;codecs=opus',
+  'audio/webm;codecs=vorbis',
+] as const
 
 async function loadDashRuntime(): Promise<DashRuntime> {
   const runtimePromise = dashRuntimePromise ?? import('dashjs')
@@ -105,6 +69,7 @@ export function createDashAdapter(options: DashAdapterOptions = {}): DashAudioAd
   return new DashAudioAdapterImpl(options, {
     audioElementFactory: () => new Audio(),
     loadDashRuntime,
-    isDashSupported: hasMediaSourceSupport,
+    // AI modified: reject partial MSE shims while sharing the browser guard with HLS.
+    isDashSupported: () => hasMediaSourceSupport(dashMediaSourceMimeTypes),
   })
 }

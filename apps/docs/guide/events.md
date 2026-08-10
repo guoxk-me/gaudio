@@ -12,6 +12,8 @@ removePlayingListener()
 
 Events do not replay past state. Register listeners before `load()` when you need the full source lifecycle.
 
+Listener callbacks run synchronously, but an exception from one listener does not escape the publishing operation or stop other listeners. GAudio passes it to `globalThis.reportError` when available; otherwise it is rethrown from a queued microtask. If `reportError` itself throws, the queued failure is an `AggregateError` containing both errors. Handle expected failures inside the listener.
+
 ## Playback state
 
 `statechange` reports the public `PlaybackState`:

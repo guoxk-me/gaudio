@@ -845,6 +845,40 @@ describe('documentation application', () => {
     expect(chineseEvents).toContain('manual')
   })
 
+  it('documents listener failure isolation across public event surfaces', async () => {
+    const [
+      eventEmitterSource,
+      audioPlayerSource,
+      mediaElementEngineSource,
+      englishEvents,
+      chineseEvents,
+      englishApiReference,
+      chineseApiReference,
+    ] = await Promise.all([
+      readFile(resolve(docsRoot, '../../packages/gaudio/src/events/event-emitter.ts'), 'utf8'),
+      readFile(resolve(docsRoot, '../../packages/gaudio/src/player/audio-player.ts'), 'utf8'),
+      readFile(resolve(docsRoot, '../../packages/gaudio/src/engine/media-element-audio-engine.ts'), 'utf8'),
+      readFile(resolve(docsRoot, 'guide/events.md'), 'utf8'),
+      readFile(resolve(docsRoot, 'zh/guide/events.md'), 'utf8'),
+      readFile(resolve(docsRoot, 'guide/api-reference.md'), 'utf8'),
+      readFile(resolve(docsRoot, 'zh/guide/api-reference.md'), 'utf8'),
+    ])
+
+    // AI modified: public event APIs must preserve the documented asynchronous error-reporting boundary.
+    expect(eventEmitterSource).toContain('A listener exception does not escape this call or stop sibling listeners')
+    expect(audioPlayerSource).toContain('A callback failure does not interrupt internal or sibling')
+    expect(mediaElementEngineSource).toContain('A callback failure does not interrupt internal or sibling')
+    for (const englishEventDocumentation of [englishEvents, englishApiReference]) {
+      expect(englishEventDocumentation).toContain('globalThis.reportError')
+      expect(englishEventDocumentation).toContain('queued microtask')
+    }
+    for (const chineseEventDocumentation of [chineseEvents, chineseApiReference]) {
+      expect(chineseEventDocumentation).toContain('globalThis.reportError')
+      expect(chineseEventDocumentation).toContain('排队的 microtask')
+    }
+  })
+
+  // AI modified: cold TypeScript program creation can exceed Vitest's default timeout on loaded CI runners.
   it('type-checks self-contained public API documentation examples', async () => {
     const semanticExamples: SemanticDocumentationExample[] = [
       {
@@ -876,7 +910,7 @@ describe('documentation application', () => {
 
     // AI modified: a real Program catches public-export and signature drift that syntax-only transpilation cannot see.
     expect(await semanticDocumentationDiagnostics(semanticExamples)).toEqual([])
-  })
+  }, 30_000)
 
   it('keeps TypeScript documentation examples syntactically executable', async () => {
     // AI modified: repository and npm landing-page examples are public documentation too.

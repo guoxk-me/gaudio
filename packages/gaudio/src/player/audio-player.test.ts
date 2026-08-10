@@ -3229,6 +3229,63 @@ describe('audioPlayer', () => {
     expect(errors).toEqual([])
   })
 
+  it('does not use primary playlist fallbacks for a selected audio track', async () => {
+    const engine = new FakeAudioEngine()
+    const loadSource = engine.load.bind(engine)
+    vi.spyOn(engine, 'load').mockImplementation(async (source) => {
+      await loadSource(source)
+      if (source.url === 'https://example.com/episode.ko.m4a') {
+        throw new GAudioError('NETWORK_ERROR', 'Selected audio track failed')
+      }
+    })
+    const player = new AudioPlayer({}, engine)
+    player.setPlaylist([{
+      source: 'https://example.com/episode.en.m4a',
+      fallbackSources: ['https://example.com/episode.en-fallback.m4a'],
+      defaultAudioTrackId: 'ko',
+      audioTracks: [{
+        id: 'ko',
+        source: 'https://example.com/episode.ko.m4a',
+      }],
+    }])
+
+    // AI modified: a selected language track cannot silently inherit the primary language fallback.
+    await expect(player.load()).rejects.toMatchObject({ code: 'NETWORK_ERROR' })
+    expect(player.getSelectedAudioTrack()?.id).toBe('ko')
+    expect(engine.loadedSources.map(source => source.url)).toEqual([
+      'https://example.com/episode.ko.m4a',
+    ])
+  })
+
+  it('uses the selected audio track fallback instead of the primary playlist fallback', async () => {
+    const engine = new FakeAudioEngine()
+    const loadSource = engine.load.bind(engine)
+    vi.spyOn(engine, 'load').mockImplementation(async (source) => {
+      await loadSource(source)
+      if (source.url === 'https://example.com/episode.ko.m4a') {
+        throw new GAudioError('NETWORK_ERROR', 'Selected audio track failed')
+      }
+    })
+    const player = new AudioPlayer({}, engine)
+    player.setPlaylist([{
+      source: 'https://example.com/episode.en.m4a',
+      fallbackSources: ['https://example.com/episode.en-fallback.m4a'],
+      defaultAudioTrackId: 'ko',
+      audioTracks: [{
+        id: 'ko',
+        source: 'https://example.com/episode.ko.m4a',
+        fallbackSources: ['https://example.com/episode.ko-fallback.m4a'],
+      }],
+    }])
+
+    await expect(player.load()).resolves.toBeUndefined()
+    expect(player.getSelectedAudioTrack()?.id).toBe('ko')
+    expect(engine.loadedSources.map(source => source.url)).toEqual([
+      'https://example.com/episode.ko.m4a',
+      'https://example.com/episode.ko-fallback.m4a',
+    ])
+  })
+
   it('selects the default audio track for a playlist track', async () => {
     const engine = new FakeAudioEngine()
     const player = new AudioPlayer({}, engine)

@@ -12,6 +12,8 @@ removePlayingListener()
 
 事件不会回放历史状态。如果需要完整 source 生命周期，应在 `load()` 前注册监听器。
 
+监听器回调会同步运行，但某个监听器抛出的异常不会从发布操作中直接冒泡，也不会中断其他监听器。GAudio 会在可用时把异常交给 `globalThis.reportError`；否则会在排队的 microtask 中重新抛出。如果 `reportError` 自身也抛错，排队的异常会是包含两项错误的 `AggregateError`。预期内的失败应在监听器内部处理。
+
 ## 播放状态
 
 `statechange` 报告公共 `PlaybackState`：

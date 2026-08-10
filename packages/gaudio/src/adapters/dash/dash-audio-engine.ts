@@ -15,7 +15,6 @@ import type {
   MediaPlayerEvents,
   MediaPlayerSettingClass,
   QualityChangeRenderedEvent,
-  Representation,
   StreamInitializedEvent,
 } from './dashjs-types'
 import { MediaElementAudioEngine } from '../../engine/media-element-audio-engine'
@@ -407,7 +406,12 @@ export class DashAudioEngine extends MediaElementAudioEngine {
       this.vendorVariantIdsByPublicVariantId.set(publicVariantId, vendorVariantId)
       unassignedVendorVariantIds.delete(vendorVariantId)
       currentPublicVariantIds.add(publicVariantId)
-      return this.adaptiveVariant(representation, publicVariantId)
+      // AI modified: construct this one-time field mapping directly instead of hiding it behind a copy-only helper.
+      return {
+        id: publicVariantId,
+        bitrate: representation.bandwidth,
+        codecs: representation.codecs ?? undefined,
+      }
     })
     if (
       this.adaptiveQualitySelection !== 'auto'
@@ -519,17 +523,6 @@ export class DashAudioEngine extends MediaElementAudioEngine {
         return
       }
       this.rejectActiveLoad(error)
-    }
-  }
-
-  private adaptiveVariant(
-    representation: Representation,
-    publicVariantId: string,
-  ): { id: string, bitrate: number, codecs?: string } {
-    return {
-      id: publicVariantId,
-      bitrate: representation.bandwidth,
-      codecs: representation.codecs ?? undefined,
     }
   }
 
