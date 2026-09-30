@@ -567,6 +567,98 @@ describe('mediaElementEngine', () => {
     vi.unstubAllGlobals()
   })
 
+  it.each(['anonymous', 'use-credentials'] as const)('applies %s before requesting media', async (crossOrigin) => {
+    const audioElement = new FakeAudioElement()
+    const requestPolicies: Array<string | null> = []
+    vi.spyOn(audioElement, 'load').mockImplementation(() => {
+      requestPolicies.push(audioElement.crossOrigin)
+      audioElement.dispatchEvent(new Event('loadedmetadata'))
+    })
+    const engine = new MediaElementAudioEngine(audioElement as unknown as HTMLAudioElement)
+
+    // AI modified: CORS must be selected before the first media request, not when the analyzer is attached.
+    await engine.load(new FakeAudioSource('https://cdn.example.com/audio.wav'), { crossOrigin })
+
+    expect(requestPolicies).toEqual([crossOrigin])
+    await engine.dispose()
+  })
+
+  it('preserves caller media credentials when a load does not choose a CORS policy', async () => {
+    const audioElement = new FakeAudioElement()
+    audioElement.crossOrigin = 'use-credentials'
+    vi.spyOn(audioElement, 'load').mockImplementation(() => {
+      audioElement.dispatchEvent(new Event('loadedmetadata'))
+    })
+    const engine = new MediaElementAudioEngine(audioElement as unknown as HTMLAudioElement)
+
+    await engine.load(new FakeAudioSource('https://cdn.example.com/audio.wav'))
+
+    expect(audioElement.crossOrigin).toBe('use-credentials')
+    await engine.dispose()
+  })
+
+  it('does not attach a source rejected while applying its CORS policy', async () => {
+    const audioElement = new FakeAudioElement()
+    const engine = new MediaElementAudioEngine(audioElement as unknown as HTMLAudioElement)
+    const source = new FakeAudioSource('https://cdn.example.com/audio.wav')
+    const attachedUrls: string[] = []
+    vi.spyOn(audioElement, 'load').mockImplementation(() => {
+      if (audioElement.src) {
+        attachedUrls.push(audioElement.src)
+      }
+    })
+    Object.defineProperty(audioElement, 'crossOrigin', {
+      get: () => null,
+      set: () => {
+        audioElement.error = { code: 4, message: 'CORS policy rejected the source' } as MediaError
+        audioElement.dispatchEvent(new Event('error'))
+      },
+    })
+
+    await expect(engine.load(source, { crossOrigin: 'anonymous' })).rejects.toMatchObject({
+      code: 'UNSUPPORTED_FORMAT',
+    })
+
+    // AI modified: a synchronous policy failure must retain its original error without reopening the closed source.
+    expect(attachedUrls).toEqual([])
+    expect(audioElement.src).toBe('')
+    expect(source.closeCalls).toBe(1)
+    await engine.dispose()
+  })
+
+  it('preserves replacement playback when an obsolete CORS setter throws after reentry', async () => {
+    const audioElement = new FakeAudioElement()
+    const engine = new MediaElementAudioEngine(audioElement as unknown as HTMLAudioElement)
+    const source = new FakeAudioSource('https://cdn.example.com/first.wav')
+    const replacementSource = new FakeAudioSource('https://cdn.example.com/replacement.wav')
+    let replacementLoad: Promise<void> | undefined
+    let replacementPlayback: Promise<unknown> | undefined
+    vi.spyOn(audioElement, 'load').mockImplementation(() => {
+      audioElement.dispatchEvent(new Event('loadedmetadata'))
+    })
+    Object.defineProperty(audioElement, 'crossOrigin', {
+      get: () => null,
+      set: () => {
+        engine.unload()
+        replacementLoad = engine.load(replacementSource)
+        replacementPlayback = engine.play().then(() => 'playing', (error: unknown) => error)
+        throw new Error('obsolete CORS setter failed')
+      },
+    })
+
+    await expect(engine.load(source, { crossOrigin: 'anonymous' })).rejects.toMatchObject({
+      code: 'LOAD_ABORTED',
+    })
+    await expect(replacementLoad).resolves.toBeUndefined()
+
+    expect(await replacementPlayback).toBe('playing')
+    expect(audioElement.paused).toBe(false)
+    expect(audioElement.src).toBe(replacementSource.url)
+    expect(source.closeCalls).toBe(1)
+    expect(replacementSource.closeCalls).toBe(0)
+    await engine.dispose()
+  })
+
   it('allows external subclasses to reuse implementation-private names', () => {
     const audioElement = new FakeAudioElement()
     const engine = new InheritableMediaElementAudioEngine(
@@ -587,6 +679,23 @@ describe('mediaElementEngine', () => {
 
     // AI modified: a failed constructor cannot leave its successfully registered prefix attached.
     expect(audioElement.removalCalls).toBe(2)
+  })
+
+  it('rejects caller-owned child source elements without changing the media markup', () => {
+    const audioElement = new FakeAudioElement()
+    const sourceElement = { localName: 'source' } as Element
+    audioElement.children.push(sourceElement)
+
+    const createEngine = (): MediaElementAudioEngine => new MediaElementAudioEngine(
+      audioElement as unknown as HTMLAudioElement,
+    )
+
+    expect(createEngine).toThrowError(new TypeError(
+      'MediaElementAudioEngine requires an audio element without child <source> elements; pass sources through AudioPlayer or load() instead',
+    ))
+    expect(createEngine).toThrowError(TypeError)
+    expect(audioElement.children).toEqual([sourceElement])
+    expect(audioElement.loadCalls).toBe(0)
   })
 
   it('exposes media properties and complete time ranges', () => {
@@ -721,15 +830,11 @@ describe('mediaElementEngine', () => {
       engine.createAnalyzer()
       const audioContext = audioContexts[0]
 
-      expect(() => engine.dispose()).not.toThrow()
-      await vi.waitFor(() => {
-        expect(audioContext.closeCalls).toBe(1)
-      })
+      await expect(engine.dispose()).rejects.toBe(audioContext.closeError)
+      expect(audioContext.closeCalls).toBe(1)
 
-      expect(() => engine.dispose()).not.toThrow()
-      await vi.waitFor(() => {
-        expect(audioContext.closeCalls).toBe(2)
-      })
+      await expect(engine.dispose()).resolves.toBeUndefined()
+      expect(audioContext.closeCalls).toBe(2)
       expect(audioContext.state).toBe('closed')
     },
   )
@@ -843,6 +948,23 @@ describe('mediaElementEngine', () => {
     audioElement.dispatchEvent(new Event('seeked'))
 
     await expect(secondSeek).resolves.toBeUndefined()
+  })
+
+  it('rejects a pending seek when stop resets the media timeline', async () => {
+    const audioElement = new FakeAudioElement()
+    audioElement.seeking = true
+    const engine = new MediaElementAudioEngine(audioElement as unknown as HTMLAudioElement)
+    const seeking = engine.seek(25)
+    const seekOutcome = expect(seeking).rejects.toMatchObject({ code: 'LOAD_ABORTED' })
+
+    // AI modified: the stop completion must not incorrectly resolve a superseded seek to 25 seconds.
+    engine.stop()
+    audioElement.seeking = false
+    audioElement.dispatchEvent(new Event('seeked'))
+
+    await seekOutcome
+    expect(engine.getCurrentTime()).toBe(0)
+    await engine.dispose()
   })
 
   it('ignores a superseded seek completion while the latest native seek is still active', async () => {
@@ -1405,11 +1527,12 @@ describe('mediaElementEngine', () => {
 
     const loading = engine.load(source)
     const loadingExpectation = expect(loading).rejects.toMatchObject({ code: 'LOAD_ABORTED' })
-    engine.dispose()
+    const disposal = engine.dispose()
     expect(source.closeCalls).toBe(1)
     source.continueOpening()
 
     await loadingExpectation
+    await disposal
     expect(source.closeCalls).toBe(1)
     expect(source.releaseCalls).toBe(1)
     expect(source.hasAllocatedResource).toBe(false)
@@ -1449,9 +1572,12 @@ describe('mediaElementEngine', () => {
       const loadingExpectation = expect(loading).rejects.toMatchObject({ code: 'LOAD_ABORTED' })
       await Promise.resolve()
 
-      engine[operation]()
+      const cleanup = engine[operation]()
       await loadingExpectation
-      engine.dispose()
+      if (cleanup instanceof Promise) {
+        await cleanup
+      }
+      await engine.dispose()
 
       expect(source.closeCalls).toBe(1)
       expect(audioElement.src).toBe('')
@@ -1484,17 +1610,21 @@ describe('mediaElementEngine', () => {
     async (operation) => {
       const audioElement = new FakeAudioElement()
       const engine = new MediaElementAudioEngine(audioElement as unknown as HTMLAudioElement)
+      const closeError = new Error('source close failed')
       const source = new NeverSettlingAudioSource(
         'https://example.com/pending.mp3',
-        new Error('source close failed'),
+        closeError,
       )
       const loading = engine.load(source)
       const loadingExpectation = expect(loading).rejects.toMatchObject({ code: 'LOAD_ABORTED' })
       await Promise.resolve()
 
-      expect(() => engine[operation]()).not.toThrow()
+      const cleanup = engine[operation]()
       await loadingExpectation
-      engine.dispose()
+      if (cleanup instanceof Promise) {
+        await expect(cleanup).rejects.toBe(closeError)
+      }
+      await expect(engine.dispose()).rejects.toBe(closeError)
 
       expect(source.closeCalls).toBe(2)
     },
@@ -1555,13 +1685,10 @@ describe('mediaElementEngine', () => {
       audioElement.dispatchEvent(new Event('loadedmetadata'))
       await loading
 
-      expect(() => engine.dispose()).not.toThrow()
-      await Promise.resolve()
-      await Promise.resolve()
+      await expect(engine.dispose()).rejects.toBe(source.closeError)
       expect(source.closeCalls).toBe(1)
 
-      expect(() => engine.dispose()).not.toThrow()
-      await Promise.resolve()
+      await expect(engine.dispose()).resolves.toBeUndefined()
 
       expect(source.closeCalls).toBe(2)
     },
@@ -1730,17 +1857,17 @@ describe('mediaElementEngine', () => {
     audioElement.dispatchEvent(new Event('loadedmetadata'))
     await loading
 
-    expect(() => engine.dispose()).toThrow(audioElement.detachError)
+    await expect(engine.dispose()).rejects.toBe(audioElement.detachError)
     expect(source.closeCalls).toBe(1)
     expect(audioElement.src).toBe(source.url)
     expect(audioElement.removeCalls).toBe(1)
 
-    expect(() => engine.dispose()).not.toThrow()
+    await expect(engine.dispose()).resolves.toBeUndefined()
     expect(audioElement.src).toBe('')
     expect(audioElement.removeCalls).toBe(2)
     const loadCallsAfterCleanup = audioElement.loadCalls
 
-    engine.dispose()
+    await engine.dispose()
     expect(audioElement.removeCalls).toBe(2)
     expect(audioElement.loadCalls).toBe(loadCallsAfterCleanup)
   })
@@ -1756,11 +1883,11 @@ describe('mediaElementEngine', () => {
     audioElement.dispatchEvent(new Event('loadedmetadata'))
     await loading
 
-    expect(() => engine.dispose()).toThrow(audioElement.pauseError)
+    await expect(engine.dispose()).rejects.toBe(audioElement.pauseError)
     expect(source.closeCalls).toBe(1)
     expect(audioElement.src).toBe('')
 
-    expect(() => engine.dispose()).not.toThrow()
+    await expect(engine.dispose()).resolves.toBeUndefined()
     expect(source.closeCalls).toBe(1)
   })
 
@@ -1777,14 +1904,14 @@ describe('mediaElementEngine', () => {
     const removalCallsBeforeDisposal = audioElement.removalCalls
     audioElement.failNextRemoval()
 
-    expect(() => engine.dispose()).toThrow(audioElement.listenerRemovalError)
+    await expect(engine.dispose()).rejects.toBe(audioElement.listenerRemovalError)
     expect(source.closeCalls).toBe(1)
     expect(audioElement.src).toBe('')
     expect(audioElement.removalCalls).toBe(removalCallsBeforeDisposal + 16)
 
-    expect(() => engine.dispose()).not.toThrow()
+    await expect(engine.dispose()).resolves.toBeUndefined()
     expect(audioElement.removalCalls).toBe(removalCallsBeforeDisposal + 17)
-    engine.dispose()
+    await engine.dispose()
     expect(audioElement.removalCalls).toBe(removalCallsBeforeDisposal + 17)
   })
 
@@ -1799,9 +1926,9 @@ describe('mediaElementEngine', () => {
     audioElement.dispatchEvent(new Event('loadedmetadata'))
     await loading
 
-    engine.dispose()
+    await engine.dispose()
     const loadCallsAfterDispose = audioElement.loadCalls
-    engine.dispose()
+    await engine.dispose()
 
     expect(source.closeCalls).toBe(1)
     expect(audioElement.loadCalls).toBe(loadCallsAfterDispose)

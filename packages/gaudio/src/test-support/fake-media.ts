@@ -31,7 +31,9 @@ interface FakeAudioElementOptions {
 
 // AI modified: shared test media fakes keep browser behavior consistent across engine and adapter tests.
 export class FakeAudioElement extends EventTarget {
+  readonly children: Element[] = []
   src = ''
+  crossOrigin: string | null = null
   preload = 'metadata'
   volume = 1
   muted = false

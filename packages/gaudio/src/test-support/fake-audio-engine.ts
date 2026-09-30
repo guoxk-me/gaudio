@@ -202,8 +202,9 @@ export class FakeAudioEngine implements AudioEngine {
     this.events.emit(eventName, payload)
   }
 
-  dispose(): void {
+  dispose(): Promise<void> {
     this.disposeCalls += 1
     this.events.clear()
+    return Promise.resolve()
   }
 }

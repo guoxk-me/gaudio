@@ -649,6 +649,76 @@ describe('hlsAudioAdapter', () => {
     expect(hls.nextLevel).toBe(1)
   })
 
+  it('keeps HLS quality identities and pending selection aligned when runtime levels change', async () => {
+    const harness = adapterHarness({ strategy: 'hls-only' })
+    const engine = await loadEngine(harness)
+    const hls = harness.hlsInstances[0]
+    const variantChanges: AudioEngineEvents['variantchange'][] = []
+    const segmentStarts: AudioEngineEvents['segmentloadstart'][] = []
+    engine.on('variantchange', variant => variantChanges.push(variant))
+    engine.on('segmentloadstart', segment => segmentStarts.push(segment))
+    // AI modified: real hls.js levels can share the default vendor ID of zero.
+    const lowLevel = { id: 0, bitrate: 64_000, codecSet: 'mp4a.40.2' }
+    const middleLevel = { id: 0, bitrate: 128_000, codecSet: 'mp4a.40.2' }
+    const highLevel = { id: 0, bitrate: 192_000, codecSet: 'mp4a.40.2' }
+    hls.levels = [lowLevel, middleLevel, highLevel]
+    hls.emit(Events.MANIFEST_PARSED, { levels: [] })
+    await engine.setAdaptiveQuality?.('2')
+
+    hls.levels = [highLevel, middleLevel]
+    hls.emit(Events.LEVELS_UPDATED, { levels: hls.levels })
+    expect(engine.getAdaptiveVariants?.()).toMatchObject([
+      { id: '2', bitrate: 192_000 },
+      { id: '1', bitrate: 128_000 },
+    ])
+    expect(hls.nextLevel).toBe(0)
+    hls.emit(Events.LEVEL_SWITCHED, { level: 0 })
+    hls.emit(Events.FRAG_LOADING, { frag: { url: '/high.ts', level: 0, duration: 4 } })
+    expect(variantChanges.at(-1)).toMatchObject({ variantId: '2', reason: 'manual' })
+    expect(segmentStarts.at(-1)).toMatchObject({ variantId: '2' })
+
+    hls.levels = [middleLevel]
+    hls.emit(Events.LEVELS_UPDATED, { levels: hls.levels })
+    expect(engine.getAdaptiveQualitySelection?.()).toBe('auto')
+    expect(hls.loadLevel).toBe(-1)
+    await expect(engine.setAdaptiveQuality?.('2')).rejects.toMatchObject({ code: 'ADAPTIVE_STREAM_ERROR' })
+
+    hls.levels = [middleLevel, { id: 0, bitrate: 256_000, codecSet: 'mp4a.40.2' }]
+    hls.emit(Events.LEVELS_UPDATED, { levels: hls.levels })
+    expect(engine.getAdaptiveVariants?.()[0]).toMatchObject({ id: '1' })
+    expect(engine.getAdaptiveVariants?.()[1]?.id).not.toBe('0')
+    expect(engine.getAdaptiveVariants?.()[1]?.id).not.toBe('1')
+    expect(engine.getAdaptiveVariants?.()[1]?.id).not.toBe('2')
+    await engine.dispose()
+  })
+
+  it('preserves HLS stable variant identities across content steering pathways', async () => {
+    const harness = adapterHarness({ strategy: 'hls-only' })
+    const engine = await loadEngine(harness)
+    const hls = harness.hlsInstances[0]
+    const originalLevel = {
+      id: 0,
+      bitrate: 128_000,
+      codecSet: 'mp4a.40.2',
+      attrs: { 'STABLE-VARIANT-ID': 'main-audio', 'PATHWAY-ID': 'primary' },
+    }
+    hls.levels = [originalLevel]
+    hls.emit(Events.MANIFEST_PARSED, { levels: [] })
+    await engine.setAdaptiveQuality?.('0')
+
+    const alternateLevel = {
+      ...originalLevel,
+      attrs: { 'STABLE-VARIANT-ID': 'main-audio', 'PATHWAY-ID': 'backup' },
+    }
+    hls.levels = [alternateLevel]
+    hls.emit(Events.LEVELS_UPDATED, { levels: hls.levels })
+
+    expect(engine.getAdaptiveVariants?.()).toMatchObject([{ id: '0', bitrate: 128_000 }])
+    expect(engine.getAdaptiveQualitySelection?.()).toBe('0')
+    expect(hls.nextLevel).toBe(0)
+    await engine.dispose()
+  })
+
   it('reports a requested first HLS level switch as manual', async () => {
     const harness = adapterHarness({ strategy: 'hls-only' })
     const engine = await loadEngine(harness)
@@ -1018,6 +1088,330 @@ describe('hlsAudioAdapter', () => {
     expect(audioElement.currentTime).toBe(29)
     expect(audioElement.playCalls).toBe(1)
   })
+
+  it.each(['pause', 'stop'] as const)(
+    'honors player %s while an HLS reload waits for metadata',
+    async (control) => {
+      const harness = adapterHarness({ strategy: 'hls-only' })
+      const player = new AudioPlayer({
+        source: { url: '/stream.m3u8', protocol: 'hls' },
+        adapters: [harness.adapter],
+      })
+      const load = player.load()
+      await vi.waitFor(() => {
+        expect(harness.hlsInstances).toHaveLength(1)
+      })
+      const audioElement = harness.audioElements[0]
+      harness.hlsInstances[0].emit(Events.MANIFEST_PARSED, { levels: [] })
+      audioElement.dispatchEvent(new Event('loadedmetadata'))
+      await load
+      await player.play()
+      audioElement.dispatchEvent(new Event('playing'))
+      audioElement.currentTime = 42
+
+      const reload = harness.adapter.updateConfig({ maxBufferLength: 42 }, { apply: 'reload' })
+      // AI modified: the replacement has already paused internally, so the user's pause produces no new native event.
+      audioElement.dispatchEvent(new Event('pause'))
+      player[control]()
+      harness.hlsInstances[1].emit(Events.MANIFEST_PARSED, { levels: [] })
+      audioElement.dispatchEvent(new Event('loadedmetadata'))
+      await reload
+
+      expect(audioElement.playCalls).toBe(1)
+      expect(player.isPaused()).toBe(true)
+      expect(player.getState()).toBe(control === 'pause' ? 'paused' : 'ready')
+      expect(player.getCurrentTime()).toBe(control === 'pause' ? 42 : 0)
+      await player.dispose()
+    },
+  )
+
+  it('publishes paused state when a later HLS reload disables pending playback restoration', async () => {
+    const harness = adapterHarness({ strategy: 'hls-only' })
+    const player = new AudioPlayer({
+      source: { url: '/stream.m3u8', protocol: 'hls' },
+      adapters: [harness.adapter],
+    })
+    const load = player.load()
+    await vi.waitFor(() => {
+      expect(harness.hlsInstances).toHaveLength(1)
+    })
+    const audioElement = harness.audioElements[0]
+    harness.hlsInstances[0].emit(Events.MANIFEST_PARSED, { levels: [] })
+    audioElement.dispatchEvent(new Event('loadedmetadata'))
+    await load
+    await player.play()
+    audioElement.dispatchEvent(new Event('playing'))
+
+    const firstReload = harness.adapter.updateConfig({ maxBufferLength: 40 }, { apply: 'reload' })
+    const firstReloadExpectation = expect(firstReload).rejects.toMatchObject({ code: 'LOAD_ABORTED' })
+    // AI modified: the second reload cannot rely on a native pause after the first reload silently paused the media.
+    audioElement.dispatchEvent(new Event('pause'))
+    const latestReload = harness.adapter.updateConfig(
+      { maxBufferLength: 42 },
+      { apply: 'reload', resumePlayback: false },
+    )
+    await firstReloadExpectation
+    harness.hlsInstances[2].emit(Events.MANIFEST_PARSED, { levels: [] })
+    audioElement.dispatchEvent(new Event('loadedmetadata'))
+    await latestReload
+
+    expect(player.getState()).toBe('paused')
+    expect(player.isPaused()).toBe(true)
+    expect(audioElement.playCalls).toBe(1)
+    await player.dispose()
+  })
+
+  it.each(['play', 'reload'] as const)(
+    'keeps a newer %s started by the pause event that disables HLS reload restoration',
+    async (control) => {
+      const harness = adapterHarness({ strategy: 'hls-only' })
+      const engine = await loadEngine(harness)
+      const audioElement = harness.audioElements[0]
+      audioElement.paused = false
+      const firstReload = harness.adapter.updateConfig({ maxBufferLength: 40 }, { apply: 'reload' })
+      const firstReloadExpectation = expect(firstReload).rejects.toMatchObject({ code: 'LOAD_ABORTED' })
+      let newerControl: Promise<void> | undefined
+      const removePauseListener = engine.on('pause', () => {
+        removePauseListener()
+        newerControl = control === 'play'
+          ? engine.play()
+          : harness.adapter.updateConfig(
+              { maxBufferLength: 44 },
+              { apply: 'reload', resumePlayback: true },
+            )
+      })
+
+      const pausedReload = harness.adapter.updateConfig(
+        { maxBufferLength: 42 },
+        { apply: 'reload', resumePlayback: false },
+      )
+      const pausedReloadExpectation = control === 'reload'
+        ? expect(pausedReload).rejects.toMatchObject({ code: 'LOAD_ABORTED' })
+        : expect(pausedReload).resolves.toBeUndefined()
+      expect(newerControl).toBeDefined()
+      await firstReloadExpectation
+      const activeHls = harness.hlsInstances.at(-1)
+      activeHls?.emit(Events.MANIFEST_PARSED, { levels: [] })
+      audioElement.dispatchEvent(new Event('loadedmetadata'))
+      await pausedReloadExpectation
+      await newerControl
+
+      expect(harness.hlsInstances).toHaveLength(control === 'reload' ? 4 : 3)
+      expect(activeHls?.destroyCalls).toBe(0)
+      expect(harness.adapter.hlsInstance).toBe(activeHls)
+      expect(audioElement.playCalls).toBe(1)
+      expect(audioElement.paused).toBe(false)
+      await engine.dispose()
+    },
+  )
+
+  it.each(['seek', 'fastSeek', 'fastSeek fallback'] as const)(
+    'preserves a newer %s while an HLS reload waits for metadata',
+    async (control) => {
+      const harness = adapterHarness({ strategy: 'hls-only' })
+      const engine = await loadEngine(harness)
+      const audioElement = harness.audioElements[0]
+      audioElement.currentTime = 42
+      audioElement.paused = false
+      if (control === 'fastSeek') {
+        audioElement.fastSeek = (seconds) => {
+          audioElement.fastSeekCalls.push(seconds)
+          audioElement.currentTime = seconds
+        }
+      }
+
+      const reload = harness.adapter.updateConfig({ maxBufferLength: 42 }, { apply: 'reload' })
+      if (control === 'seek') {
+        await engine.seek(73)
+      }
+      else {
+        await engine.fastSeek?.(73)
+      }
+      harness.hlsInstances[1].emit(Events.MANIFEST_PARSED, { levels: [] })
+      audioElement.dispatchEvent(new Event('loadedmetadata'))
+      await reload
+
+      expect(audioElement.currentTime).toBe(73)
+      expect(audioElement.playCalls).toBe(1)
+      expect(audioElement.paused).toBe(false)
+      if (control === 'fastSeek') {
+        expect(audioElement.fastSeekCalls).toEqual([73])
+      }
+      await engine.dispose()
+    },
+  )
+
+  it('does not repeat a newer play when HLS reload metadata arrives', async () => {
+    const harness = adapterHarness({ strategy: 'hls-only' })
+    const engine = await loadEngine(harness)
+    const audioElement = harness.audioElements[0]
+    audioElement.paused = false
+
+    const reload = harness.adapter.updateConfig({ maxBufferLength: 42 }, { apply: 'reload' })
+    await engine.play()
+    harness.hlsInstances[1].emit(Events.MANIFEST_PARSED, { levels: [] })
+    audioElement.dispatchEvent(new Event('loadedmetadata'))
+    await reload
+
+    expect(audioElement.playCalls).toBe(1)
+    expect(audioElement.paused).toBe(false)
+    await engine.dispose()
+  })
+
+  it.each(['pause', 'stop', 'play'] as const)(
+    'inherits the latest %s intent across overlapping HLS reloads',
+    async (control) => {
+      const harness = adapterHarness({ strategy: 'hls-only' })
+      const engine = await loadEngine(harness)
+      const audioElement = harness.audioElements[0]
+      audioElement.currentTime = 42
+      audioElement.paused = false
+      const firstReload = harness.adapter.updateConfig({ maxBufferLength: 40 }, { apply: 'reload' })
+      const firstReloadExpectation = expect(firstReload).rejects.toMatchObject({ code: 'LOAD_ABORTED' })
+      // AI modified: a later reload must inherit the explicit control, not the first reload's captured playback state.
+      engine.pause()
+      await engine[control]()
+      const latestReload = harness.adapter.updateConfig({ maxBufferLength: 42 }, { apply: 'reload' })
+      await firstReloadExpectation
+      harness.hlsInstances[2].emit(Events.MANIFEST_PARSED, { levels: [] })
+      audioElement.dispatchEvent(new Event('loadedmetadata'))
+      await latestReload
+
+      expect(audioElement.playCalls).toBe(control === 'play' ? 2 : 0)
+      expect(audioElement.paused).toBe(control !== 'play')
+      expect(audioElement.currentTime).toBe(control === 'stop' ? 0 : 42)
+      await engine.dispose()
+    },
+  )
+
+  it('does not publish an old reload pause after a reentrant play takes ownership', async () => {
+    const harness = adapterHarness({ strategy: 'hls-only' })
+    const engine = await loadEngine(harness)
+    const audioElement = harness.audioElements[0]
+    const paused = vi.fn()
+    engine.on('pause', paused)
+    audioElement.paused = false
+    const reload = harness.adapter.updateConfig({ maxBufferLength: 42 }, { apply: 'reload' })
+    let reentrantPlay: Promise<void> | undefined
+    vi.spyOn(audioElement, 'pause').mockImplementationOnce(() => {
+      reentrantPlay = engine.play()
+    })
+
+    engine.pause()
+    await reentrantPlay
+    harness.hlsInstances[1].emit(Events.MANIFEST_PARSED, { levels: [] })
+    audioElement.dispatchEvent(new Event('loadedmetadata'))
+    await reload
+
+    expect(paused).not.toHaveBeenCalled()
+    expect(audioElement.playCalls).toBe(1)
+    expect(audioElement.paused).toBe(false)
+    await engine.dispose()
+  })
+
+  it('honors a pause while HLS reload position restoration is pending', async () => {
+    const harness = adapterHarness({ strategy: 'hls-only' })
+    const engine = await loadEngine(harness)
+    const audioElement = harness.audioElements[0]
+    audioElement.currentTime = 42
+    audioElement.paused = false
+    const reload = harness.adapter.updateConfig({ maxBufferLength: 42 }, { apply: 'reload' })
+    audioElement.currentTime = 0
+    audioElement.seeking = true
+    harness.hlsInstances[1].emit(Events.MANIFEST_PARSED, { levels: [] })
+    audioElement.dispatchEvent(new Event('loadedmetadata'))
+    await vi.waitFor(() => {
+      expect(audioElement.currentTime).toBe(42)
+    })
+
+    engine.pause()
+    audioElement.seeking = false
+    audioElement.dispatchEvent(new Event('seeked'))
+    await reload
+
+    expect(audioElement.currentTime).toBe(42)
+    expect(audioElement.playCalls).toBe(0)
+    expect(audioElement.paused).toBe(true)
+    await engine.dispose()
+  })
+
+  it.each(['stop', 'seek', 'fastSeek'] as const)(
+    'keeps an HLS replacement when %s cancels position restoration',
+    async (control) => {
+      const harness = adapterHarness({ strategy: 'hls-only' })
+      const engine = await loadEngine(harness)
+      const audioElement = harness.audioElements[0]
+      const errors = vi.fn()
+      engine.on('error', errors)
+      audioElement.currentTime = 42
+      audioElement.paused = false
+      const reload = harness.adapter.updateConfig({ maxBufferLength: 42 }, { apply: 'reload' })
+      const reloadExpectation = expect(reload).rejects.toMatchObject({ code: 'LOAD_ABORTED' })
+      audioElement.currentTime = 0
+      audioElement.seeking = true
+      harness.hlsInstances[1].emit(Events.MANIFEST_PARSED, { levels: [] })
+      audioElement.dispatchEvent(new Event('loadedmetadata'))
+      await vi.waitFor(() => {
+        expect(audioElement.currentTime).toBe(42)
+      })
+
+      const newerSeek = control === 'stop'
+        ? engine.stop()
+        : control === 'seek' ? engine.seek(73) : engine.fastSeek?.(73)
+      audioElement.seeking = false
+      audioElement.dispatchEvent(new Event('seeked'))
+      await newerSeek
+      await reloadExpectation
+
+      expect(audioElement.currentTime).toBe(control === 'stop' ? 0 : 73)
+      expect(audioElement.playCalls).toBe(0)
+      expect(errors).not.toHaveBeenCalled()
+      expect(harness.hlsInstances[1].destroyCalls).toBe(0)
+      expect(harness.adapter.hlsInstance).toBe(harness.hlsInstances[1])
+      await engine.dispose()
+    },
+  )
+
+  it.each(['pause', 'stop'] as const)(
+    'keeps an HLS replacement paused when %s cancels playback restoration',
+    async (control) => {
+      const harness = adapterHarness({ strategy: 'hls-only' })
+      const engine = await loadEngine(harness)
+      const audioElement = harness.audioElements[0]
+      const errors = vi.fn()
+      engine.on('error', errors)
+      audioElement.paused = false
+      let finishPlayback: (() => void) | undefined
+      const play = vi.spyOn(audioElement, 'play').mockImplementation(() => new Promise<void>((resolve) => {
+        finishPlayback = () => {
+          audioElement.paused = false
+          resolve()
+        }
+      }))
+      const reload = harness.adapter.updateConfig(
+        { maxBufferLength: 42 },
+        { apply: 'reload', restorePosition: false },
+      )
+      const reloadExpectation = expect(reload).rejects.toMatchObject({ code: 'LOAD_ABORTED' })
+      harness.hlsInstances[1].emit(Events.MANIFEST_PARSED, { levels: [] })
+      audioElement.dispatchEvent(new Event('loadedmetadata'))
+      await vi.waitFor(() => {
+        expect(play).toHaveBeenCalledOnce()
+      })
+
+      engine[control]()
+      await reloadExpectation
+      finishPlayback?.()
+      await vi.waitFor(() => {
+        expect(audioElement.paused).toBe(true)
+      })
+
+      expect(errors).not.toHaveBeenCalled()
+      expect(harness.hlsInstances[1].destroyCalls).toBe(0)
+      expect(harness.adapter.hlsInstance).toBe(harness.hlsInstances[1])
+      await engine.dispose()
+    },
+  )
 
   it('waits for current HLS metadata after ignoring a queued pre-reload event', async () => {
     const harness = adapterHarness({ strategy: 'hls-only' })
@@ -1395,7 +1789,7 @@ describe('hlsAudioAdapter', () => {
     expect(engine.getActiveAdaptivePlayback?.()).toBeUndefined()
 
     replacementHls.destroyError = undefined
-    expect(() => engine.dispose()).not.toThrow()
+    await expect(engine.dispose()).resolves.toBeUndefined()
     expect(replacementHls.destroyCalls).toBe(2)
   })
 
@@ -1404,12 +1798,18 @@ describe('hlsAudioAdapter', () => {
     async (restoration) => {
       const harness = adapterHarness({ strategy: 'hls-only' })
       const engine = await loadEngine(harness)
+      const audioElement = harness.audioElements[0]
       const restorationError = new Error(`${restoration} restoration failed`)
+      // AI modified: fail the native operation so both public controls and internal restoration exercise the same error path.
       if (restoration === 'seek') {
-        vi.spyOn(engine, 'seek').mockRejectedValue(restorationError)
+        Object.defineProperty(audioElement, 'currentTime', {
+          configurable: true,
+          get: () => 42,
+          set: () => { throw restorationError },
+        })
       }
       else {
-        vi.spyOn(engine, 'play').mockRejectedValue(restorationError)
+        vi.spyOn(audioElement, 'play').mockRejectedValue(restorationError)
       }
 
       const reload = harness.adapter.updateConfig(
@@ -1428,7 +1828,7 @@ describe('hlsAudioAdapter', () => {
       harness.audioElements[0].dispatchEvent(new Event('loadedmetadata'))
 
       await expect(reload).rejects.toMatchObject({
-        code: 'ADAPTIVE_STREAM_ERROR',
+        code: restoration === 'seek' ? 'ADAPTIVE_STREAM_ERROR' : 'ENGINE_ERROR',
         cause: restorationError,
       })
       expect(replacementHls.destroyCalls).toBe(0)
@@ -1459,13 +1859,13 @@ describe('hlsAudioAdapter', () => {
     const disposalError = new Error('hls destroy failed')
     harness.hlsInstances[0].destroyError = disposalError
 
-    expect(() => engine.dispose()).toThrow(disposalError)
+    await expect(engine.dispose()).rejects.toBe(disposalError)
 
     expect(harness.adapter.hlsInstance).toBeUndefined()
     expect(harness.adapter.implementation).toBeUndefined()
 
     harness.hlsInstances[0].destroyError = undefined
-    expect(() => engine.dispose()).not.toThrow()
+    await expect(engine.dispose()).resolves.toBeUndefined()
     expect(harness.hlsInstances[0].destroyCalls).toBe(2)
     expect(harness.adapter.hlsInstance).toBeUndefined()
     expect(closeSource).toHaveBeenCalledOnce()
@@ -1499,20 +1899,19 @@ describe('hlsAudioAdapter', () => {
     const vendorCleanupError = new Error('hls destroy failed')
     hls.destroyError = vendorCleanupError
 
-    expect(() => engine.dispose()).toThrow(vendorCleanupError)
+    await expect(engine.dispose()).rejects.toBe(vendorCleanupError)
     expect(hls.destroyCalls).toBe(1)
     expect(closeSource).toHaveBeenCalledOnce()
     const browserLoadCalls = harness.audioElements[0].loadCalls
 
     // AI modified: a repeated vendor failure cannot short-circuit the base source retry.
-    expect(() => engine.dispose()).toThrow(vendorCleanupError)
-    await Promise.resolve()
+    await expect(engine.dispose()).rejects.toBe(vendorCleanupError)
     expect(hls.destroyCalls).toBe(2)
     expect(closeSource).toHaveBeenCalledTimes(2)
     expect(harness.audioElements[0].loadCalls).toBe(browserLoadCalls)
 
     hls.destroyError = undefined
-    expect(() => engine.dispose()).not.toThrow()
+    await expect(engine.dispose()).resolves.toBeUndefined()
     expect(hls.destroyCalls).toBe(3)
     expect(closeSource).toHaveBeenCalledTimes(2)
     expect(harness.audioElements[0].loadCalls).toBe(browserLoadCalls)
@@ -1536,17 +1935,17 @@ describe('hlsAudioAdapter', () => {
       removeAttribute(name)
     })
 
-    expect(() => engine.dispose()).toThrow(vendorCleanupError)
+    await expect(engine.dispose()).rejects.toBe(vendorCleanupError)
     expect(hls.destroyCalls).toBe(1)
     expect(removeAttributeSpy).toHaveBeenCalledOnce()
 
     hls.destroyError = undefined
-    expect(() => engine.dispose()).not.toThrow()
+    await expect(engine.dispose()).resolves.toBeUndefined()
     expect(hls.destroyCalls).toBe(2)
     expect(removeAttributeSpy).toHaveBeenCalledTimes(2)
     const browserLoadCallsAfterCleanup = audioElement.loadCalls
 
-    engine.dispose()
+    await engine.dispose()
     expect(hls.destroyCalls).toBe(2)
     expect(removeAttributeSpy).toHaveBeenCalledTimes(2)
     expect(audioElement.loadCalls).toBe(browserLoadCallsAfterCleanup)

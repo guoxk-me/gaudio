@@ -1,7 +1,7 @@
 import type { AudioAnalyzer } from '../analysis/audio-analyzer'
 import type { AudioEngine } from '../engine/audio-engine'
 import type { AudioEngineAdapter } from '../engine/audio-engine-adapter'
-import type { PreloadMode } from '../engine/audio-engine-types'
+import type { AudioCrossOriginMode, PreloadMode } from '../engine/audio-engine-types'
 import type { AudioSourceInput } from '../source/audio-source'
 import type { AudioMediaSessionOptions } from './browser-media-session'
 
@@ -58,6 +58,13 @@ export interface AudioPlayerAnalyzerOptions {
 export interface AudioPlayerOptions {
   /** Initial source. It is not loaded until {@link AudioPlayer.load} or {@link AudioPlayer.play} runs. */
   source?: AudioSourceInput
+  /**
+   * Browser media CORS mode. Built-in player-owned analysis defaults to `'anonymous'`.
+   * Otherwise omission preserves the engine's request policy. Use `'use-credentials'`
+   * for cross-origin media that requires cookies and an explicit credentialed CORS response.
+   * Custom engines and custom analyzer factories retain their own policy unless this is specified.
+   */
+  crossOrigin?: AudioCrossOriginMode
   /** Adaptive protocol adapters available to the internally managed engine router. */
   adapters?: readonly AudioEngineAdapter[]
   /**

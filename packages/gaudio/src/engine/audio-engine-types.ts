@@ -1,6 +1,18 @@
 /** Controls how much media data the browser should preload. */
 export type PreloadMode = 'none' | 'metadata' | 'auto'
 
+/** CORS request mode used when loading browser media. */
+export type AudioCrossOriginMode = 'anonymous' | 'use-credentials'
+
+/** Request policy for a single engine load. */
+export interface AudioEngineLoadOptions {
+  /**
+   * CORS mode applied before attaching browser media. Omission preserves the element's current policy.
+   * Custom engines own their transport and must apply this policy when they use browser media requests.
+   */
+  crossOrigin?: AudioCrossOriginMode
+}
+
 /** Indicates the browser's confidence that it can play a MIME type. */
 export type AudioFormatSupport = '' | 'maybe' | 'probably'
 

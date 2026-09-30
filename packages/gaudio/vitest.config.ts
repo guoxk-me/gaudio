@@ -3,6 +3,8 @@ import { defineConfig } from 'vitest/config'
 export default defineConfig({
   test: {
     environment: 'node',
+    // AI modified: Playwright browser specs run through their dedicated real-browser command.
+    include: ['src/**/*.test.ts'],
     coverage: {
       // AI modified: enforce production-source coverage without counting tests or test harnesses.
       provider: 'v8',

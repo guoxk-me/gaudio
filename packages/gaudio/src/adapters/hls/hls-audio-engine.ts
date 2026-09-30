@@ -73,6 +73,9 @@ export class HlsAudioEngine extends MediaElementAudioEngine {
   private adaptiveVariants: AdaptiveVariant[] = []
   private variantIdsByLevelIndex: string[] = []
   private readonly levelIndexesByVariantId = new Map<string, number>()
+  private variantIdsByLevel = new WeakMap<ManifestParsedData['levels'][number], string>()
+  private readonly variantIdsByStableId = new Map<string, string>()
+  private readonly reservedVariantIds = new Set<string>()
   private adaptiveQualitySelection: AdaptiveQualitySelection = 'auto'
   private pendingManualLevelIndex?: number
   private manualSelectionIntentId = 0
@@ -81,8 +84,13 @@ export class HlsAudioEngine extends MediaElementAudioEngine {
   private publishedReloadErrorGeneration?: number
   private pendingReloadResumePlayback?: boolean
   private reloadGeneration = 0
+  private playbackIntentId = 0
+  private positionIntentId = 0
   private hasParsedCurrentManifest = false
   private hasStartedDisposal = false
+  private hasFinishedDisposal = false
+  private hasCompletedDisposeCallback = false
+  private activeDisposal?: Promise<void>
 
   constructor(options: HlsAudioEngineOptions) {
     super(options.audioElement)
@@ -93,6 +101,52 @@ export class HlsAudioEngine extends MediaElementAudioEngine {
     this.onDispose = options.onDispose
   }
 
+  override play(): Promise<void> {
+    this.playbackIntentId += 1
+    if (this.pendingReloadResumePlayback !== undefined) {
+      this.pendingReloadResumePlayback = true
+    }
+    return super.play()
+  }
+
+  override pause(): void {
+    const shouldPublishPause = this.pendingReloadResumePlayback === true && this.isPaused()
+    const reloadGeneration = this.reloadGeneration
+    const playbackIntentId = ++this.playbackIntentId
+    if (this.pendingReloadResumePlayback !== undefined) {
+      this.pendingReloadResumePlayback = false
+    }
+    super.pause()
+    if (
+      shouldPublishPause
+      && reloadGeneration === this.reloadGeneration
+      && playbackIntentId === this.playbackIntentId
+      && this.isPaused()
+    ) {
+      // AI modified: an explicit pause during silent replacement still updates the player unless a newer control took over.
+      this.events.emit('pause', undefined)
+    }
+  }
+
+  override stop(): void {
+    this.playbackIntentId += 1
+    this.positionIntentId += 1
+    if (this.pendingReloadResumePlayback !== undefined) {
+      this.pendingReloadResumePlayback = false
+    }
+    super.stop()
+  }
+
+  override seek(seconds: number): Promise<void> {
+    this.positionIntentId += 1
+    return super.seek(seconds)
+  }
+
+  override fastSeek(seconds: number): Promise<void> {
+    this.positionIntentId += 1
+    return super.fastSeek(seconds)
+  }
+
   async reload(config: Partial<HlsConfig>, options: HlsReloadOptions): Promise<void> {
     this.config = config
     if (this.implementation !== 'hls.js' || !this.activeUrl) {
@@ -101,6 +155,9 @@ export class HlsAudioEngine extends MediaElementAudioEngine {
 
     const currentTime = this.getCurrentTime()
     const shouldResume = options.resumePlayback ?? this.pendingReloadResumePlayback ?? !this.isPaused()
+    const shouldPublishPause = !shouldResume && this.pendingReloadResumePlayback === true && this.isPaused()
+    const playbackIntentId = this.playbackIntentId
+    const positionIntentId = this.positionIntentId
     const reloadGeneration = ++this.reloadGeneration
     const metadataEventStartTime = new Event('gaudio-hls-reload').timeStamp
     this.pendingReloadResumePlayback = shouldResume
@@ -112,7 +169,7 @@ export class HlsAudioEngine extends MediaElementAudioEngine {
     }
     else {
       // AI modified: a reload that intentionally remains paused must update the public player lifecycle.
-      this.pause()
+      super.pause()
     }
     this.publishedReloadError = undefined
     this.publishedReloadErrorGeneration = undefined
@@ -136,20 +193,33 @@ export class HlsAudioEngine extends MediaElementAudioEngine {
       this.adaptiveVariants = []
       this.variantIdsByLevelIndex = []
       this.levelIndexesByVariantId.clear()
+      this.variantIdsByLevel = new WeakMap()
+      this.variantIdsByStableId.clear()
+      this.reservedVariantIds.clear()
       this.adaptiveQualitySelection = 'auto'
       this.pendingManualLevelIndex = undefined
       this.destroyHlsInstance()
       this.createHlsInstance(this.activeUrl)
+      if (
+        shouldPublishPause
+        && reloadGeneration === this.reloadGeneration
+        && playbackIntentId === this.playbackIntentId
+        && this.isPaused()
+      ) {
+        // AI modified: disabling a prior reload's silent resume updates state after replacement setup, so listeners control the new source.
+        this.events.emit('pause', undefined)
+      }
       await metadataReady
       hasReplacementMetadata = true
       this.assertCurrentReload(reloadGeneration)
 
-      if (options.restorePosition && Number.isFinite(currentTime)) {
-        await this.seek(currentTime)
+      // AI modified: newer user controls supersede only their restoration dimension; internal calls keep those intents intact.
+      if (options.restorePosition && Number.isFinite(currentTime) && positionIntentId === this.positionIntentId) {
+        await super.seek(currentTime)
         this.assertCurrentReload(reloadGeneration)
       }
-      if (shouldResume) {
-        await this.play()
+      if (shouldResume && playbackIntentId === this.playbackIntentId) {
+        await super.play()
         this.assertCurrentReload(reloadGeneration)
       }
     }
@@ -211,11 +281,17 @@ export class HlsAudioEngine extends MediaElementAudioEngine {
     this.config = config
   }
 
-  override dispose(): void {
+  override dispose(): Promise<void> {
+    if (this.hasFinishedDisposal) {
+      return Promise.resolve()
+    }
+    if (this.activeDisposal) {
+      return this.activeDisposal
+    }
+
     const isRepeatedDisposal = this.hasStartedDisposal
     this.hasStartedDisposal = true
-    let firstCleanupError: unknown
-    let hasCleanupError = false
+    const cleanupErrors: unknown[] = []
 
     if (isRepeatedDisposal || this.pendingHlsCleanup) {
       try {
@@ -223,32 +299,43 @@ export class HlsAudioEngine extends MediaElementAudioEngine {
         this.destroyHlsInstance()
       }
       catch (error) {
-        hasCleanupError = true
-        firstCleanupError = error
+        cleanupErrors.push(error)
       }
     }
 
+    let baseDisposal = Promise.resolve()
     try {
-      super.dispose()
+      baseDisposal = super.dispose()
     }
     catch (error) {
-      if (!hasCleanupError) {
-        hasCleanupError = true
-        firstCleanupError = error
+      cleanupErrors.push(error)
+    }
+    if (!this.hasCompletedDisposeCallback) {
+      try {
+        this.onDispose()
+        this.hasCompletedDisposeCallback = true
+      }
+      catch (error) {
+        cleanupErrors.push(error)
       }
     }
-    try {
-      this.onDispose()
-    }
-    catch (error) {
-      if (!hasCleanupError) {
-        hasCleanupError = true
-        firstCleanupError = error
+
+    const cleanup = baseDisposal.catch((error: unknown) => {
+      cleanupErrors.push(error)
+    }).then(() => {
+      if (cleanupErrors.length > 0) {
+        throw cleanupErrors[0]
       }
-    }
-    if (hasCleanupError) {
-      throw firstCleanupError
-    }
+      this.hasFinishedDisposal = true
+    })
+    // AI modified: vendor, browser, and adapter cleanup share one observable disposal attempt.
+    const activeDisposal = cleanup.finally(() => {
+      if (this.activeDisposal === activeDisposal) {
+        this.activeDisposal = undefined
+      }
+    })
+    this.activeDisposal = activeDisposal
+    return activeDisposal
   }
 
   getActiveAdaptivePlayback(): AdaptivePlaybackInfo | undefined {
@@ -329,6 +416,9 @@ export class HlsAudioEngine extends MediaElementAudioEngine {
     this.adaptiveVariants = []
     this.variantIdsByLevelIndex = []
     this.levelIndexesByVariantId.clear()
+    this.variantIdsByLevel = new WeakMap()
+    this.variantIdsByStableId.clear()
+    this.reservedVariantIds.clear()
     this.adaptiveQualitySelection = 'auto'
     this.pendingManualLevelIndex = undefined
     this.pendingReloadResumePlayback = undefined
@@ -359,6 +449,9 @@ export class HlsAudioEngine extends MediaElementAudioEngine {
     this.adaptiveVariants = []
     this.variantIdsByLevelIndex = []
     this.levelIndexesByVariantId.clear()
+    this.variantIdsByLevel = new WeakMap()
+    this.variantIdsByStableId.clear()
+    this.reservedVariantIds.clear()
     this.adaptiveQualitySelection = 'auto'
     this.pendingManualLevelIndex = undefined
     this.pendingReloadResumePlayback = undefined
@@ -402,6 +495,12 @@ export class HlsAudioEngine extends MediaElementAudioEngine {
     hls.on(events.MANIFEST_PARSED, (event, payload) => {
       if (this.hls === hls) {
         this.handleManifestParsed(event, payload)
+      }
+    })
+    hls.on(events.LEVELS_UPDATED, (_event, payload) => {
+      // AI modified: codec recovery and content steering can remove or reorder playable levels.
+      if (this.hls === hls && this.hasParsedCurrentManifest) {
+        this.refreshAdaptiveVariants(payload.levels)
       }
     })
     hls.on(events.LEVEL_SWITCHED, (event, payload) => {
@@ -488,19 +587,7 @@ export class HlsAudioEngine extends MediaElementAudioEngine {
     // AI modified: metadata is accepted only after the active hls.js instance parses its own manifest.
     this.hasParsedCurrentManifest = true
     // AI modified: hls.js runtime levels are the playable, filtered order used by every level index event.
-    this.setPlayableVariants(this.hls?.levels ?? [])
-
-    this.events.emit('manifestloaded', {
-      protocol: 'hls',
-      implementation: 'hls.js',
-      url: this.activeUrl ?? '',
-      // AI modified: event consumers receive a snapshot isolated from the engine's selection metadata.
-      variants: this.adaptiveVariants.map(variant => ({
-        id: variant.id,
-        bitrate: variant.bitrate,
-        codecs: variant.codecs,
-      })),
-    })
+    this.refreshAdaptiveVariants(this.hls?.levels ?? [])
   }
 
   private readonly handleLevelSwitched = (_event: HlsEvents['LEVEL_SWITCHED'], payload: LevelSwitchedData): void => {
@@ -615,17 +702,31 @@ export class HlsAudioEngine extends MediaElementAudioEngine {
     return 'ADAPTIVE_STREAM_ERROR'
   }
 
-  private setPlayableVariants(levels: ManifestParsedData['levels']): void {
-    const assignedVariantIds = new Set<string>()
+  private refreshAdaptiveVariants(levels: ManifestParsedData['levels']): void {
+    const pendingVariantId = this.pendingManualLevelIndex === undefined
+      ? undefined
+      : this.variantIdsByLevelIndex[this.pendingManualLevelIndex]
     this.levelIndexesByVariantId.clear()
     this.variantIdsByLevelIndex = levels.map((level, levelIndex) => {
-      const vendorVariantId = String(level.id)
-      const variantId = assignedVariantIds.has(vendorVariantId)
-        ? assignedVariantIds.has(String(levelIndex))
-          ? `${vendorVariantId}:${levelIndex}`
-          : String(levelIndex)
-        : vendorVariantId
-      assignedVariantIds.add(variantId)
+      // AI modified: content steering replaces Level objects while retaining STABLE-VARIANT-ID.
+      const stableVariantId = level.attrs?.['STABLE-VARIANT-ID']
+      let variantId = this.variantIdsByLevel.get(level)
+        ?? (stableVariantId === undefined ? undefined : this.variantIdsByStableId.get(stableVariantId))
+      if (variantId === undefined) {
+        // AI modified: removed or reordered levels keep their public identities for this source lifecycle.
+        const vendorVariantId = String(level.id)
+        variantId = this.reservedVariantIds.has(vendorVariantId) ? String(levelIndex) : vendorVariantId
+        let collisionIndex = 0
+        while (this.reservedVariantIds.has(variantId) || variantId === 'auto') {
+          variantId = `${vendorVariantId}:${collisionIndex}`
+          collisionIndex += 1
+        }
+        this.reservedVariantIds.add(variantId)
+      }
+      this.variantIdsByLevel.set(level, variantId)
+      if (stableVariantId !== undefined) {
+        this.variantIdsByStableId.set(stableVariantId, variantId)
+      }
       this.levelIndexesByVariantId.set(variantId, levelIndex)
       return variantId
     })
@@ -634,6 +735,28 @@ export class HlsAudioEngine extends MediaElementAudioEngine {
       bitrate: level.bitrate,
       codecs: level.audioCodec ?? level.codecSet,
     }))
+    this.pendingManualLevelIndex = pendingVariantId === undefined
+      ? undefined
+      : this.levelIndexesByVariantId.get(pendingVariantId)
+    if (this.adaptiveQualitySelection !== 'auto' && this.hls) {
+      const selectedLevelIndex = this.levelIndexesByVariantId.get(this.adaptiveQualitySelection)
+      if (selectedLevelIndex === undefined) {
+        // AI modified: a removed manual level must release ABR instead of retaining an invalid selection.
+        this.adaptiveQualitySelection = 'auto'
+        this.pendingManualLevelIndex = undefined
+        this.manualSelectionIntentId += 1
+        this.hls.loadLevel = -1
+      }
+      else {
+        this.hls.nextLevel = selectedLevelIndex
+      }
+    }
+    this.events.emit('manifestloaded', {
+      protocol: 'hls',
+      implementation: 'hls.js',
+      url: this.activeUrl ?? '',
+      variants: this.getAdaptiveVariants(),
+    })
   }
 
   private assertCurrentReload(reloadGeneration: number): void {

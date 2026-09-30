@@ -4,6 +4,7 @@ import type { AudioAnalyzerOptions } from '../analysis/audio-analyzer'
 import type { AudioSource, AudioStreamHandle } from '../source/audio-source'
 import type { AudioEngine, AudioEngineEvents } from './audio-engine'
 import type {
+  AudioEngineLoadOptions,
   AudioFormatSupport,
   PreloadMode,
   TimeRange,
@@ -29,6 +30,12 @@ type SourceCloseOutcome
   = { isSuccessful: true }
     | { isSuccessful: false, error: unknown }
 
+interface MediaResourceRelease {
+  hasError: boolean
+  sourceCleanup?: Promise<SourceCloseOutcome>
+  error?: unknown
+}
+
 interface ActiveSeekRequest {
   abortController: AbortController
   eventStartTime: number
@@ -42,100 +49,11 @@ interface ObservedNativeSeek {
   loadGeneration: number
 }
 
-export interface MediaElementCleanupStatus {
-  readonly state: 'pending' | 'failed'
-  readonly completion: Promise<void>
-  readonly error?: unknown
-}
-
-interface MediaElementCleanupAttempt {
-  state: 'pending' | 'failed'
-  completion: Promise<void>
-  error?: unknown
-  resolve: () => void
-}
-
-interface MediaElementCleanupController {
-  fail: (error: unknown) => void
-  succeed: () => void
-}
-
 type AudioContextConstructor = typeof AudioContext
 
 interface WebAudioGlobal {
   AudioContext?: AudioContextConstructor
   webkitAudioContext?: AudioContextConstructor
-}
-
-const mediaElementCleanupAttempts = new WeakMap<object, Map<object, MediaElementCleanupAttempt>>()
-
-// AI modified: Router-only cleanup state stays outside the public AudioEngine contract.
-export function mediaElementCleanupStatus(engine: AudioEngine): MediaElementCleanupStatus | undefined {
-  const cleanupAttempts = mediaElementCleanupAttempts.get(engine)
-  if (!cleanupAttempts || cleanupAttempts.size === 0) {
-    return undefined
-  }
-
-  const currentAttempts = [...cleanupAttempts.values()]
-  const firstFailedAttempt = currentAttempts.find(attempt => attempt.state === 'failed')
-  const completion = Promise.allSettled(currentAttempts.map(attempt => attempt.completion)).then(() => {
-    const failedAttempt = currentAttempts.find(attempt => attempt.state === 'failed')
-    if (failedAttempt) {
-      throw failedAttempt.error
-    }
-  })
-  void completion.catch(() => {})
-
-  return {
-    state: firstFailedAttempt ? 'failed' : 'pending',
-    completion,
-    error: firstFailedAttempt?.error,
-  }
-}
-
-function startMediaElementCleanup(engine: AudioEngine, resource: object): MediaElementCleanupController {
-  let resolveCleanup: () => void = () => {}
-  let rejectCleanup: (error: unknown) => void = () => {}
-  const cleanupAttempt: MediaElementCleanupAttempt = {
-    state: 'pending',
-    completion: new Promise<void>((resolve, reject) => {
-      resolveCleanup = resolve
-      rejectCleanup = reject
-    }),
-    resolve: () => resolveCleanup(),
-  }
-  void cleanupAttempt.completion.catch(() => {})
-  const cleanupAttempts = mediaElementCleanupAttempts.get(engine) ?? new Map()
-  cleanupAttempts.set(resource, cleanupAttempt)
-  mediaElementCleanupAttempts.set(engine, cleanupAttempts)
-
-  return {
-    fail: (error): void => {
-      if (cleanupAttempts.get(resource) !== cleanupAttempt || cleanupAttempt.state === 'failed') {
-        return
-      }
-      cleanupAttempt.state = 'failed'
-      cleanupAttempt.error = error
-      rejectCleanup(error)
-    },
-    succeed: (): void => {
-      finishMediaElementCleanup(engine, resource, cleanupAttempt)
-    },
-  }
-}
-
-function finishMediaElementCleanup(
-  engine: AudioEngine,
-  resource: object,
-  expectedAttempt?: MediaElementCleanupAttempt,
-): void {
-  const cleanupAttempts = mediaElementCleanupAttempts.get(engine)
-  const cleanupAttempt = cleanupAttempts?.get(resource)
-  if (!cleanupAttempt || (expectedAttempt && cleanupAttempt !== expectedAttempt)) {
-    return
-  }
-  cleanupAttempts?.delete(resource)
-  cleanupAttempt.resolve()
 }
 
 /**
@@ -168,6 +86,8 @@ export class MediaElementAudioEngine implements AudioEngine {
   #loadGeneration = 0
   #hasAttachedSource = false
   #hasRemovedMediaEventListeners = false
+  #hasFinishedDisposal = false
+  #activeDisposal?: Promise<void>
   #pendingMediaEventListenerRemovals?: Array<() => void>
   // AI modified: a permanent guard prevents disposed engines from recreating browser resources.
   #isDisposed = false
@@ -176,8 +96,15 @@ export class MediaElementAudioEngine implements AudioEngine {
    * Creates a media-element engine.
    *
    * @param audioElement Element to control. A new `Audio` element is created by default.
+   * @throws {TypeError} When the element contains child `<source>` candidates owned by the browser.
    */
   constructor(audioElement: HTMLAudioElement = new Audio()) {
+    // AI modified: one source owner prevents native child candidates from reviving after engine cleanup.
+    if (Array.from(audioElement.children).some(child => child.localName === 'source')) {
+      throw new TypeError(
+        'MediaElementAudioEngine requires an audio element without child <source> elements; pass sources through AudioPlayer or load() instead',
+      )
+    }
     this.audioElement = audioElement
     // AI modified: a caller-supplied element with existing media joins the same replacement teardown lifecycle.
     this.#hasAttachedSource = ('srcObject' in audioElement && audioElement.srcObject !== null)
@@ -196,11 +123,16 @@ export class MediaElementAudioEngine implements AudioEngine {
    * Errors thrown by custom source lifecycle methods or underlying media-element and subclass hooks are preserved.
    *
    * @param source Source to attach to the media element.
+   * @param options CORS request policy applied before attachment; omission preserves the current element policy.
    * @throws {@link GAudioError} When the media element reports a load failure or a newer operation supersedes this load.
    * @throws The original error when custom source lifecycle or media-element and subclass hook code fails.
    */
-  async load(source: AudioSource): Promise<void> {
+  async load(source: AudioSource, options?: AudioEngineLoadOptions): Promise<void> {
     this.#assertUsable()
+    const crossOrigin = options?.crossOrigin
+    if (crossOrigin !== undefined && crossOrigin !== 'anonymous' && crossOrigin !== 'use-credentials') {
+      throw new TypeError('crossOrigin must be anonymous or use-credentials')
+    }
     this.#activeLoadAbortController?.abort()
     const loadAbortController = new AbortController()
     this.#activeLoadAbortController = loadAbortController
@@ -309,14 +241,28 @@ export class MediaElementAudioEngine implements AudioEngine {
         throw this.#loadAbortedError()
       }
       try {
-        // AI modified: mark ownership before attachment so synchronous vendor callbacks cannot revive a detached source.
-        this.#hasAttachedSource = true
-        activeSourceSession.metadataEventStartTime = new Event('gaudio-source-attachment').timeStamp
-        this.attachSourceUrl(streamHandle.url)
+        // AI modified: Web Audio needs a CORS-enabled request before media is fetched, not after metadata loads.
+        if (crossOrigin !== undefined) {
+          this.audioElement.crossOrigin = crossOrigin
+        }
+        if (
+          loadGeneration === this.#loadGeneration
+          && !this.#isDisposed
+          && this.#activeSourceSession === activeSourceSession
+        ) {
+          // AI modified: only the surviving source may attach after synchronous CORS callbacks.
+          this.#hasAttachedSource = true
+          activeSourceSession.metadataEventStartTime = new Event('gaudio-source-attachment').timeStamp
+          this.attachSourceUrl(streamHandle.url)
+        }
       }
       catch (error) {
         this.#finishSourceMetadataWait(activeSourceSession)
         void metadataReady.catch(() => {})
+        if (loadGeneration !== this.#loadGeneration || this.#isDisposed) {
+          // AI modified: the winning lifecycle owns cleanup; an obsolete setter cannot pause or detach its replacement.
+          throw this.#loadAbortedError()
+        }
         if (this.#activeSourceSession === activeSourceSession) {
           this.#activeSourceSession = undefined
         }
@@ -356,10 +302,13 @@ export class MediaElementAudioEngine implements AudioEngine {
   /** Cancels loading, pauses playback, and detaches the current source. */
   unload(): void {
     this.#assertUsable()
-    this.#releaseMediaResources()
+    const release = this.#releaseMediaResources()
+    if (release.hasError) {
+      throw release.error
+    }
   }
 
-  #releaseMediaResources(): void {
+  #releaseMediaResources(): MediaResourceRelease {
     this.#activeLoadAbortController?.abort()
     this.#activeLoadAbortController = undefined
     this.#loadGeneration += 1
@@ -386,9 +335,11 @@ export class MediaElementAudioEngine implements AudioEngine {
       }
     }
     // AI modified: pause, detachment, and source cleanup are independent teardown obligations.
-    void this.#closeCancelledSourceSession(cancelledSourceSession)
-    if (hasReleaseError) {
-      throw firstReleaseError
+    const sourceCleanup = this.#closeCancelledSourceSession(cancelledSourceSession)
+    return {
+      hasError: hasReleaseError,
+      sourceCleanup,
+      ...(hasReleaseError ? { error: firstReleaseError } : {}),
     }
   }
 
@@ -462,6 +413,8 @@ export class MediaElementAudioEngine implements AudioEngine {
   /** Pauses playback and returns to `0` seconds while retaining the source. */
   stop(): void {
     this.#assertUsable()
+    // AI modified: resetting the timeline owns the next seeked event, so an earlier seek must reject first.
+    this.cancelActiveSeek()
     // AI modified: suppress the native pause event because stop has a distinct ready state.
     this.pauseWithoutEvent()
     this.audioElement.currentTime = 0
@@ -685,36 +638,59 @@ export class MediaElementAudioEngine implements AudioEngine {
     return this.events.on(eventName, handler)
   }
 
-  /** Removes browser listeners, unloads the source, and clears engine listeners. */
-  dispose(): void {
+  /** Removes browser listeners, unloads the source, and waits for owned asynchronous cleanup. */
+  dispose(): Promise<void> {
+    if (this.#hasFinishedDisposal) {
+      return Promise.resolve()
+    }
+    if (this.#activeDisposal) {
+      return this.#activeDisposal
+    }
+
+    const cleanup = this.#disposeOwnedResources()
+    // AI modified: one disposal attempt owns all in-flight browser cleanup and failed attempts remain retryable.
+    const activeDisposal = cleanup.finally(() => {
+      if (this.#activeDisposal === activeDisposal) {
+        this.#activeDisposal = undefined
+      }
+    })
+    this.#activeDisposal = activeDisposal
+    return activeDisposal
+  }
+
+  async #disposeOwnedResources(): Promise<void> {
     const isRepeatedDisposal = this.#isDisposed
     this.#isDisposed = true
-    let firstCleanupError: unknown
-    let hasCleanupError = false
+    const cleanupErrors: unknown[] = []
     try {
       this.#removeMediaEventListeners()
     }
     catch (error) {
-      hasCleanupError = true
-      firstCleanupError = error
+      cleanupErrors.push(error)
     }
-    try {
-      // AI modified: repeated disposal retries detach and source cleanup while successful browser work stays skipped.
-      this.#releaseMediaResources()
+    // AI modified: repeated disposal retries detach and source cleanup while successful browser work stays skipped.
+    const mediaRelease = this.#releaseMediaResources()
+    if (mediaRelease.hasError) {
+      cleanupErrors.push(mediaRelease.error)
     }
-    catch (error) {
-      if (!hasCleanupError) {
-        hasCleanupError = true
-        firstCleanupError = error
-      }
-    }
-    this.#closeAudioAnalysis()
+    const audioAnalysisCleanup = this.#closeAudioAnalysis()
     if (!isRepeatedDisposal) {
       this.events.clear()
     }
-    if (hasCleanupError) {
-      throw firstCleanupError
+
+    const cleanupOutcomes = await Promise.all([
+      mediaRelease.sourceCleanup ?? Promise.resolve<SourceCloseOutcome>({ isSuccessful: true }),
+      audioAnalysisCleanup ?? Promise.resolve<SourceCloseOutcome>({ isSuccessful: true }),
+    ])
+    for (const cleanupOutcome of cleanupOutcomes) {
+      if (!cleanupOutcome.isSuccessful) {
+        cleanupErrors.push(cleanupOutcome.error)
+      }
     }
+    if (cleanupErrors.length > 0) {
+      throw cleanupErrors[0]
+    }
+    this.#hasFinishedDisposal = true
   }
 
   /**
@@ -1136,23 +1112,19 @@ export class MediaElementAudioEngine implements AudioEngine {
     })
     activeSourceSession.closePromise = closePromise
     this.#pendingSourceCleanup = activeSourceSession
-    const cleanupController = startMediaElementCleanup(this, activeSourceSession)
     try {
       const sourceClose = activeSourceSession.source.close()
       void sourceClose.then(
         () => {
           finishClose({ isSuccessful: true })
-          cleanupController.succeed()
         },
         (error) => {
           finishClose({ isSuccessful: false, error })
-          cleanupController.fail(error)
         },
       )
     }
     catch (error) {
       finishClose({ isSuccessful: false, error })
-      cleanupController.fail(error)
     }
     return closePromise
   }
@@ -1489,7 +1461,7 @@ export class MediaElementAudioEngine implements AudioEngine {
     return webAudioGlobal.AudioContext ?? webAudioGlobal.webkitAudioContext
   }
 
-  #closeAudioAnalysis(): void {
+  #closeAudioAnalysis(): Promise<SourceCloseOutcome> | undefined {
     const mediaElementSource = this.#mediaElementSource
     this.#mediaElementSource = undefined
     this.#isMediaElementSourceAudible = false
@@ -1503,16 +1475,14 @@ export class MediaElementAudioEngine implements AudioEngine {
     const audioContext = this.#audioContext ?? this.#pendingAudioContextCleanup
     this.#audioContext = undefined
     if (!audioContext) {
-      return
+      return undefined
     }
     if (audioContext.state === 'closed') {
       this.#pendingAudioContextCleanup = undefined
-      // AI modified: an externally closed context also completes a retained failed cleanup attempt.
-      finishMediaElementCleanup(this, audioContext)
-      return
+      return Promise.resolve({ isSuccessful: true })
     }
     if (this.#audioContextClosePromise) {
-      return
+      return this.#audioContextClosePromise
     }
 
     this.#pendingAudioContextCleanup = audioContext
@@ -1532,24 +1502,21 @@ export class MediaElementAudioEngine implements AudioEngine {
       }
     })
     this.#audioContextClosePromise = closePromise
-    const cleanupController = startMediaElementCleanup(this, audioContext)
     try {
       const contextClose = audioContext.close()
       void contextClose.then(
         () => {
           finishClose({ isSuccessful: true })
-          cleanupController.succeed()
         },
         (error) => {
           finishClose({ isSuccessful: false, error })
-          cleanupController.fail(error)
         },
       )
     }
     catch (error) {
       finishClose({ isSuccessful: false, error })
-      cleanupController.fail(error)
     }
+    return closePromise
   }
 
   readonly #handleLoadStart = (): void => {

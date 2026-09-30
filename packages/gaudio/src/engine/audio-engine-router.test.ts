@@ -2,8 +2,10 @@ import type { AudioAnalyzer } from '../analysis/audio-analyzer'
 import type { AudioSource, AudioStreamHandle } from '../source/audio-source'
 import type { AudioEngine, AudioEngineEvents } from './audio-engine'
 import type { AudioEngineAdapter } from './audio-engine-adapter'
+import type { AudioEngineLoadOptions } from './audio-engine-types'
 import { describe, expect, it, vi } from 'vitest'
 import { GAudioError } from '../errors/errors'
+import { AudioPlayer } from '../player/audio-player'
 import { HttpAudioSource } from '../source/http-audio-source'
 import { FakeAudioEngine } from '../test-support/fake-audio-engine'
 import { FakeAudioElement } from '../test-support/fake-media'
@@ -494,12 +496,28 @@ class RetryableDisposeAudioEngine extends FakeAudioEngine {
   readonly disposalError = new Error('engine disposal failed')
   private disposalFailuresRemaining = 1
 
-  override dispose(): void {
-    super.dispose()
+  override async dispose(): Promise<void> {
+    await super.dispose()
     if (this.disposalFailuresRemaining > 0) {
       this.disposalFailuresRemaining -= 1
       throw this.disposalError
     }
+  }
+}
+
+class DeferredDisposeAudioEngine extends FakeAudioEngine {
+  private finishCleanup: (() => void) | undefined
+  private readonly cleanup = new Promise<void>((resolve) => {
+    this.finishCleanup = resolve
+  })
+
+  override async dispose(): Promise<void> {
+    await super.dispose()
+    await this.cleanup
+  }
+
+  completeCleanup(): void {
+    this.finishCleanup?.()
   }
 }
 
@@ -890,7 +908,7 @@ describe('audioEngineRouter', () => {
       mediaEngineFactory: () => new FakeAudioEngine(),
     })).toThrow(TypeError)
 
-    firstRouter.dispose()
+    await firstRouter.dispose()
 
     expect(() => new AudioEngineRouter({
       adapters: [sharedAdapter],
@@ -1015,10 +1033,14 @@ describe('audioEngineRouter', () => {
     await vi.waitFor(() => {
       expect(delayedEngine.disposeCalls).toBe(1)
     })
+    await Promise.resolve()
+    await Promise.resolve()
 
     router.unload()
 
-    expect(delayedEngine.disposeCalls).toBe(2)
+    await vi.waitFor(() => {
+      expect(delayedEngine.disposeCalls).toBe(2)
+    })
     expect(mediaEngine.unloadCalls).toBe(1)
   })
 
@@ -1095,14 +1117,124 @@ describe('audioEngineRouter', () => {
     await vi.waitFor(() => {
       expect(delayedAdapter.createCalls).toBe(1)
     })
-    router.dispose()
+    const disposal = router.dispose()
     delayedAdapter.finishCreation()
 
     await loadingExpectation
     await vi.waitFor(() => {
       expect(delayedEngine.disposeCalls).toBe(1)
     })
+    await disposal
     expect(delayedEngine.loadedSources).toEqual([])
+  })
+
+  it('forwards each load request policy to the selected engine without retaining it', async () => {
+    const engine = new FakeAudioEngine()
+    const loadSource = vi.fn<AudioEngine['load']>(async () => {})
+    engine.load = loadSource
+    const router = new AudioEngineRouter({ adapters: [new FakeAdapter('hls', engine)] })
+    const source = new HttpAudioSource('/stream.m3u8')
+    const options: AudioEngineLoadOptions = { crossOrigin: 'use-credentials' }
+
+    await router.load(source, options)
+    await router.load(source)
+
+    expect(loadSource.mock.calls[0]?.[0]).toBe(source)
+    expect(loadSource.mock.calls[0]?.[1]).toBe(options)
+    expect(loadSource).toHaveBeenLastCalledWith(source, undefined)
+    await router.dispose()
+  })
+
+  it.each(Array.from({ length: 20 }, (_, microtasks) => microtasks))(
+    'retains player engine ownership when disposed after %i microtasks',
+    async (microtasks) => {
+      const engine = new FakeAudioEngine()
+      const adapter = new FakeAdapter('hls', engine)
+      const player = new AudioPlayer({ source: '/stream.m3u8', adapters: [adapter] })
+      const loading = player.load().catch(() => {})
+
+      // AI modified: cancellation at each asynchronous handoff must still retire every created engine.
+      for (let turn = 0; turn < microtasks; turn += 1) {
+        await Promise.resolve()
+      }
+      await player.dispose()
+      await loading
+
+      expect(engine.disposeCalls).toBe(adapter.createCalls)
+      const nextPlayer = new AudioPlayer({ adapters: [adapter] })
+      await nextPlayer.dispose()
+    },
+  )
+
+  it.each(Array.from({ length: 12 }, (_, microtasks) => microtasks))(
+    'retains native engine ownership when disposed after %i microtasks',
+    async (microtasks) => {
+      const engine = new FakeAudioEngine()
+      const createEngine = vi.fn(() => engine)
+      const router = new AudioEngineRouter({ mediaEngineFactory: createEngine })
+      const loading = router.load(new HttpAudioSource('/episode.mp3')).catch(() => {})
+
+      for (let turn = 0; turn < microtasks; turn += 1) {
+        await Promise.resolve()
+      }
+      await router.dispose()
+      await loading
+
+      expect(engine.disposeCalls).toBe(createEngine.mock.calls.length)
+    },
+  )
+
+  it('waits for engine cleanup when disposal reenters an adapter factory', async () => {
+    const engine = new DeferredDisposeAudioEngine()
+    const adapter = new FakeAdapter('hls', engine)
+    const router = new AudioEngineRouter({ adapters: [adapter] })
+    let disposal: Promise<void> | undefined
+    let hasDisposed = false
+    vi.spyOn(adapter, 'createEngine').mockImplementation(() => {
+      disposal = router.dispose().then(() => {
+        hasDisposed = true
+      })
+      return engine
+    })
+
+    await expect(router.load(new HttpAudioSource('/stream.m3u8'))).rejects.toMatchObject({
+      code: 'LOAD_ABORTED',
+    })
+    await vi.waitFor(() => expect(engine.disposeCalls).toBe(1))
+
+    expect(hasDisposed).toBe(false)
+    expect(() => new AudioEngineRouter({ adapters: [adapter] })).toThrow(TypeError)
+    engine.completeCleanup()
+    await disposal
+    expect(hasDisposed).toBe(true)
+    const nextRouter = new AudioEngineRouter({ adapters: [adapter] })
+    await nextRouter.dispose()
+  })
+
+  it('retries engine cleanup when disposal reenters an adapter factory', async () => {
+    const engine = new RetryableDisposeAudioEngine()
+    const adapter = new FakeAdapter('hls', engine)
+    const router = new AudioEngineRouter({ adapters: [adapter] })
+    let disposalFailure: unknown
+    let disposal: Promise<void> | undefined
+    vi.spyOn(adapter, 'createEngine').mockImplementation(() => {
+      disposal = router.dispose().catch((error: unknown) => {
+        disposalFailure = error
+      })
+      return engine
+    })
+
+    await expect(router.load(new HttpAudioSource('/stream.m3u8'))).rejects.toMatchObject({
+      code: 'LOAD_ABORTED',
+    })
+    await disposal
+
+    expect(disposalFailure).toBe(engine.disposalError)
+    expect(() => new AudioEngineRouter({ adapters: [adapter] })).toThrow(TypeError)
+    await expect(router.dispose()).resolves.toBeUndefined()
+    expect(engine.disposeCalls).toBe(2)
+    const nextRouter = new AudioEngineRouter({ adapters: [adapter] })
+    await nextRouter.dispose()
   })
 
   it('keeps a pending factory load cancelled and its adapter exclusively owned', async () => {
@@ -1114,7 +1246,7 @@ describe('audioEngineRouter', () => {
       expect(adapter.createCalls).toBe(1)
     })
 
-    router.dispose()
+    void router.dispose()
     await loadingExpectation
 
     expect(() => new AudioEngineRouter({ adapters: [adapter] })).toThrow(TypeError)
@@ -1130,7 +1262,7 @@ describe('audioEngineRouter', () => {
       expect(adapter.createCalls).toBe(1)
     })
 
-    router.dispose()
+    const disposalExpectation = expect(router.dispose()).rejects.toBe(delayedEngine.disposalError)
     await loadingExpectation
     expect(() => new AudioEngineRouter({ adapters: [adapter] })).toThrow(TypeError)
 
@@ -1138,9 +1270,10 @@ describe('audioEngineRouter', () => {
     await vi.waitFor(() => {
       expect(delayedEngine.disposeCalls).toBe(1)
     })
+    await disposalExpectation
     expect(() => new AudioEngineRouter({ adapters: [adapter] })).toThrow(TypeError)
 
-    expect(() => router.dispose()).not.toThrow()
+    await expect(router.dispose()).resolves.toBeUndefined()
     const replacementRouter = new AudioEngineRouter({ adapters: [adapter] })
     await Promise.resolve()
     expect(() => new AudioEngineRouter({ adapters: [adapter] })).toThrow(TypeError)
@@ -1173,6 +1306,27 @@ describe('audioEngineRouter', () => {
     // AI modified: a disposed router cannot create resources through an adapter now owned by its replacement.
     expect(adapter.createCalls).toBe(0)
     replacementRouter?.dispose()
+  })
+
+  it('waits for custom engine disposal before loading a cross-protocol replacement', async () => {
+    const hlsEngine = new DeferredDisposeAudioEngine()
+    const mediaEngine = new FakeAudioEngine()
+    const router = new AudioEngineRouter({
+      adapters: [new FakeAdapter('hls', hlsEngine)],
+      mediaEngineFactory: () => mediaEngine,
+    })
+    await router.load(new HttpAudioSource('/stream.m3u8'))
+
+    const replacementLoad = router.load(new HttpAudioSource('/episode.mp3'))
+    await vi.waitFor(() => {
+      expect(hlsEngine.disposeCalls).toBe(1)
+    })
+    expect(mediaEngine.loadedSources).toEqual([])
+
+    hlsEngine.completeCleanup()
+    await replacementLoad
+
+    expect(mediaEngine.loadedSources.map(source => source.url)).toEqual(['/episode.mp3'])
   })
 
   it('waits for built-in source cleanup before creating a cross-protocol engine', async () => {
@@ -1243,10 +1397,10 @@ describe('audioEngineRouter', () => {
     audioElement.dispatchEvent(new Event('loadedmetadata'))
     await loading
 
-    expect(() => router.dispose()).toThrow(source.closeError)
+    await expect(router.dispose()).rejects.toBe(source.closeError)
     expect(source.closeCalls).toBe(1)
 
-    expect(() => router.dispose()).not.toThrow()
+    await expect(router.dispose()).resolves.toBeUndefined()
     expect(source.closeCalls).toBe(2)
   })
 
@@ -1261,7 +1415,7 @@ describe('audioEngineRouter', () => {
     expect(router.canPlayType('audio/mpeg')).toBe('probably')
     await router.load(new HttpAudioSource('/stream.m3u8'))
 
-    expect(() => router.dispose()).toThrow(activeEngine.disposalError)
+    await expect(router.dispose()).rejects.toBe(activeEngine.disposalError)
 
     expect(activeEngine.disposeCalls).toBe(1)
     expect(mediaCapabilityEngine.disposeCalls).toBe(1)
@@ -1269,7 +1423,7 @@ describe('audioEngineRouter', () => {
       adapters: [sharedAdapter],
       mediaEngineFactory: () => new FakeAudioEngine(),
     })).toThrow(TypeError)
-    expect(() => router.dispose()).not.toThrow()
+    await expect(router.dispose()).resolves.toBeUndefined()
     expect(activeEngine.disposeCalls).toBe(2)
     const replacementRouter = new AudioEngineRouter({
       adapters: [sharedAdapter],
@@ -1308,11 +1462,11 @@ describe('audioEngineRouter', () => {
     const router = new AudioEngineRouter({ adapters: [adapter] })
     await router.load(new HttpAudioSource('/stream.m3u8'))
 
-    expect(() => router.dispose()).toThrow(engine.removalError)
+    await expect(router.dispose()).rejects.toBe(engine.removalError)
     expect(engine.disposeCalls).toBe(1)
     expect(() => new AudioEngineRouter({ adapters: [adapter] })).toThrow(TypeError)
 
-    expect(() => router.dispose()).not.toThrow()
+    await expect(router.dispose()).resolves.toBeUndefined()
     expect(engine.disposeCalls).toBe(1)
     const replacementRouter = new AudioEngineRouter({ adapters: [adapter] })
     replacementRouter.dispose()

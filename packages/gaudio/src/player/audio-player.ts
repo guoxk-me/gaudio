@@ -1,7 +1,7 @@
 import type { AdaptivePlaybackInfo, AdaptiveQualitySelection, AdaptiveVariant } from '../adapters/adaptive-audio-types'
 import type { AudioAnalyzer } from '../analysis/audio-analyzer'
 import type { AudioEngine, AudioEngineEvents } from '../engine/audio-engine'
-import type { AudioFormatSupport, PreloadMode, TimeRange } from '../engine/audio-engine-types'
+import type { AudioEngineLoadOptions, AudioFormatSupport, PreloadMode, TimeRange } from '../engine/audio-engine-types'
 import type { EngineOperationGate } from '../engine/engine-operation-gate'
 import type { AudioSource, AudioSourceInput } from '../source/audio-source'
 import type { AudioPlayerEvents } from './audio-player-events'
@@ -59,6 +59,7 @@ export class AudioPlayer {
   private readonly engine: AudioEngine
   private readonly removeEngineListeners: Array<() => void> = []
   private readonly analyzerOptions?: AudioPlayerAnalyzerOptions
+  private readonly sourceLoadOptions?: AudioEngineLoadOptions
   private readonly mediaSession?: BrowserMediaSession
   private analyzer?: AudioAnalyzer
   private mediaSessionMetadata?: AudioMediaSessionMetadata
@@ -83,11 +84,14 @@ export class AudioPlayer {
   private hasLoadedSource = false
   private isDisposed = false
   private hasPendingEngineDisposal = false
+  private hasPendingMediaSessionDisposal = false
+  private activeDisposal: Promise<void> | undefined
   private terminalErrorGeneration = 0
   private errorPublicationSequence = 0
   private readonly errorPublicationSequences = new WeakMap<GAudioError, number>()
   private requestedPlayback: 'play' | 'pause' | 'stop' = 'pause'
   private preloadMode: PreloadMode = 'metadata'
+  private preloadIntentId = 0
   private shouldAutoplay: boolean
   private outputVolume = 1
   private isOutputMuted = false
@@ -100,7 +104,7 @@ export class AudioPlayer {
    *
    * @param options Initial source, playback settings, and adaptive adapters.
    * @param engine Optional custom engine. It cannot be combined with `options.adapters`.
-   * @throws {TypeError} When both a custom engine and adaptive adapters are supplied.
+   * @throws {TypeError} When a custom engine and adapters are combined or the CORS mode is invalid.
    * @throws {RangeError} When the initial volume or playback rate is invalid.
    * @throws The original error when setup or event subscription on an injected custom engine fails.
    */
@@ -127,6 +131,21 @@ export class AudioPlayer {
     this.shouldAutoplay = options.autoplay ?? false
 
     try {
+      const configuredCrossOrigin = options.crossOrigin
+      if (
+        configuredCrossOrigin !== undefined
+        && configuredCrossOrigin !== 'anonymous'
+        && configuredCrossOrigin !== 'use-credentials'
+      ) {
+        throw new TypeError('crossOrigin must be anonymous or use-credentials')
+      }
+      // AI modified: owned Web Audio analysis needs CORS-enabled media; custom integrations retain their request policy.
+      const shouldUseBuiltInAnalysis = !engine
+        && this.analyzerOptions !== undefined
+        && this.analyzerOptions.createAnalyzer === undefined
+      const crossOrigin = configuredCrossOrigin ?? (shouldUseBuiltInAnalysis ? 'anonymous' : undefined)
+      this.sourceLoadOptions = crossOrigin === undefined ? undefined : { crossOrigin }
+
       // AI modified: an empty URL string follows the same source semantics as setSource('').
       if (options.source !== undefined) {
         this.source = this.audioSourceForInput(options.source)
@@ -134,7 +153,7 @@ export class AudioPlayer {
 
       this.setPreload(options.preload ?? 'metadata')
       // AI modified: disable engine-native autoplay so load() owns the observable playback attempt.
-      this.engine.setAutoplay(false)
+      this.engine.setAutoplay?.(false)
       this.setMuted(options.muted ?? false)
       this.setLoop(options.loop ?? false)
       this.setVolume(options.volume ?? 1)
@@ -167,7 +186,9 @@ export class AudioPlayer {
       }
       if (!engine) {
         try {
-          this.engine.dispose()
+          void this.engine.dispose().catch(() => {
+            // Preserve the construction failure that explains why the player was not created.
+          })
         }
         catch {
           // Preserve the construction failure that explains why the player was not created.
@@ -331,25 +352,30 @@ export class AudioPlayer {
   /**
    * Reveals how aggressively the browser is asked to fetch the active source.
    *
-   * @returns The current browser preload hint.
+   * @returns The engine's browser preload hint, or the configured hint when the engine omits this query.
    * @throws The original error when the corresponding query on an injected custom engine fails.
    */
   getPreload(): PreloadMode {
-    return this.isDisposed ? this.preloadMode : this.engine.getPreload()
+    return this.isDisposed ? this.preloadMode : this.engine.getPreload?.() ?? this.preloadMode
   }
 
   /**
    * Changes the browser preload hint for current and future sources.
+   * Engines without browser-fetch controls retain the hint as player configuration.
    *
    * @param preload Amount of media data the browser should preload.
    * @throws The original error when the corresponding operation on an injected custom engine fails.
    */
   setPreload(preload: PreloadMode): void {
     this.assertUsable()
-    this.engine.setPreload(preload)
-    // AI modified: preserve the final engine hint when a synchronous callback issues a newer request.
-    if (!this.isDisposed) {
-      this.preloadMode = this.engine.getPreload()
+    const preloadIntentId = ++this.preloadIntentId
+    this.engine.setPreload?.(preload)
+    // AI modified: without an engine getter, only the latest successful request may commit its retained hint.
+    if (!this.isDisposed && preloadIntentId === this.preloadIntentId) {
+      const effectivePreload = this.engine.getPreload?.() ?? preload
+      if (!this.isDisposed && preloadIntentId === this.preloadIntentId) {
+        this.preloadMode = effectivePreload
+      }
     }
   }
 
@@ -556,33 +582,33 @@ export class AudioPlayer {
   /**
    * Provides the timeline windows a seek interface can target for the active source.
    *
-   * @returns Media ranges that can currently be sought without failing.
+   * @returns Seekable media ranges, or an empty array when the engine does not expose them.
    * @throws The original error when the corresponding query on an injected custom engine fails.
    */
   getSeekableRanges(): readonly TimeRange[] {
     if (this.isDisposed) {
       return []
     }
-    return this.engine.getSeekableRanges().map(range => ({
+    return this.engine.getSeekableRanges?.().map(range => ({
       start: range.start,
       end: range.end,
-    }))
+    })) ?? []
   }
 
   /**
    * Provides consumed timeline ranges for progress history and completion analytics.
    *
-   * @returns Media ranges played during the current source lifecycle.
+   * @returns Played media ranges, or an empty array when the engine does not expose them.
    * @throws The original error when the corresponding query on an injected custom engine fails.
    */
   getPlayedRanges(): readonly TimeRange[] {
     if (this.isDisposed) {
       return []
     }
-    return this.engine.getPlayedRanges().map(range => ({
+    return this.engine.getPlayedRanges?.().map(range => ({
       start: range.start,
       end: range.end,
-    }))
+    })) ?? []
   }
 
   /**
@@ -592,11 +618,11 @@ export class AudioPlayer {
    * probes. This query does not verify that an optional vendor peer can be imported later.
    *
    * @param mimeType MIME type with optional codec parameters.
-   * @returns `''`, `'maybe'`, or `'probably'` using HTML media capability semantics.
+   * @returns `''`, `'maybe'`, or `'probably'`; an omitted engine capability query returns `''`.
    * @throws The original error when the capability query on an injected custom engine fails.
    */
   canPlayType(mimeType: string): AudioFormatSupport {
-    return this.isDisposed ? '' : this.engine.canPlayType(mimeType)
+    return this.isDisposed ? '' : this.engine.canPlayType?.(mimeType) ?? ''
   }
 
   /**
@@ -651,6 +677,19 @@ export class AudioPlayer {
         }
       : undefined
     this.updateMediaSessionMetadata()
+  }
+
+  /**
+   * Gives this player browser Media Session controls without starting playback.
+   *
+   * A later playing or explicitly activated player can take ownership again.
+   * Calling this method is a no-op when Media Session integration is disabled or unavailable.
+   *
+   * @throws The original browser Media Session error when ownership presentation cannot be restored.
+   */
+  activateMediaSession(): void {
+    this.assertUsable()
+    this.mediaSession?.activate()
   }
 
   /**
@@ -1087,9 +1126,19 @@ export class AudioPlayer {
           throw this.loadInterruptionError('Audio load was superseded by a newer operation')
         }
         await this.loadCurrentSource(loadRequestId)
+        // AI modified: handoff errors must reach the load boundary before its buffered error is cleared.
+        if (loadRequestId !== this.loadRequestId || this.isDisposed) {
+          throw this.loadInterruptionError('Audio load was superseded by a newer operation')
+        }
+        if (this.activeLoadRequestId === loadRequestId && this.activeLoadError) {
+          throw this.activeLoadError
+        }
       }
       catch (error) {
-        const activeLoadError = this.activeLoadError
+        // AI modified: a previous load's rejection cannot inherit the replacement source's fatal error.
+        const activeLoadError = this.activeLoadRequestId === loadRequestId
+          ? this.activeLoadError
+          : undefined
         if (this.activeLoadRequestId === loadRequestId) {
           this.activeLoadRequestId = undefined
           this.activeLoadError = undefined
@@ -1434,12 +1483,13 @@ export class AudioPlayer {
       this.resolveActivePlaybackAttempts()
       return
     }
-    // AI modified: even a throwing engine pause releases the superseded public play wait.
+    // AI modified: synchronous pause listeners may start new plays that this older control must not settle.
+    const supersededPlaybackAttempts = [...this.activePlaybackAttempts]
     try {
       this.engine.pause()
     }
     finally {
-      this.resolveActivePlaybackAttempts()
+      this.resolveActivePlaybackAttempts(supersededPlaybackAttempts)
     }
   }
 
@@ -1469,12 +1519,13 @@ export class AudioPlayer {
     const stopLoadRequestId = this.loadRequestId
     const stopPlaybackIntentId = this.playbackIntentId
     const terminalErrorGeneration = this.terminalErrorGeneration
-    // AI modified: even a throwing engine stop releases the superseded public play wait.
+    // AI modified: retain only older plays so reentrant stop listeners own their new playback attempts.
+    const supersededPlaybackAttempts = [...this.activePlaybackAttempts]
     try {
       this.engine.stop()
     }
     finally {
-      this.resolveActivePlaybackAttempts()
+      this.resolveActivePlaybackAttempts(supersededPlaybackAttempts)
     }
     // AI modified: synchronous engine errors or reentrant controls own the post-stop state.
     if (
@@ -1544,6 +1595,7 @@ export class AudioPlayer {
 
   /**
    * Seeks using the browser's optimized seek operation when available.
+   * Calls the engine's exact seek operation when it omits an optimized path.
    *
    * A newer seek, stop, or source operation rejects this request with `LOAD_ABORTED`; disposal
    * rejects it with `ENGINE_ERROR`. A fatal engine `error` rejects it with that exact published
@@ -1572,7 +1624,11 @@ export class AudioPlayer {
       gate: createEngineOperationGate(),
     }
     this.activePositionOperation = activePositionOperation
-    observeEngineOperation(() => this.engine.fastSeek(seconds), activePositionOperation.gate)
+    // AI modified: engines without a browser fast-seek path retain the same position-operation lifecycle through seek.
+    observeEngineOperation(
+      () => this.engine.fastSeek ? this.engine.fastSeek(seconds) : this.engine.seek(seconds),
+      activePositionOperation.gate,
+    )
     try {
       await activePositionOperation.gate.completion
       if (activePositionOperation.terminalError) {
@@ -1641,48 +1697,68 @@ export class AudioPlayer {
   }
 
   /**
-   * Permanently disposes the player and starts cleanup of every owned resource.
+   * Permanently disposes the player and waits for cleanup of every owned resource.
    *
-   * The player becomes unusable synchronously, but source, browser, and vendor
-   * cleanup may continue after this method returns. A cleanup failure can be
-   * thrown by this call or retained for a later repeated `dispose()` call; the
-   * player remains disposed while that cleanup is retried. An adapter remains
-   * owned by its router until all router cleanup finishes.
+   * The player becomes unusable synchronously. The returned promise settles after source,
+   * browser, and vendor cleanup finishes. A failed cleanup remains retryable by a later
+   * repeated `dispose()` call; the player remains disposed while that cleanup is retried.
+   * An adapter remains owned by its router until all router cleanup finishes.
    *
    * Read-only queries remain safe. Create a new player and fresh adapter instances
    * instead of transferring adapters from a router that may still be cleaning up.
    * In-flight load, play, seek, fast-seek, adaptive-quality, and navigation work is rejected
    * promptly with `ENGINE_ERROR` and does not emit a public player `error` solely because of disposal.
    *
-   * @throws The first cleanup error reported by an owned resource.
+   * @returns A promise that rejects with the first cleanup error reported by an owned resource.
    */
-  dispose(): void {
+  dispose(): Promise<void> {
+    if (this.activeDisposal) {
+      return this.activeDisposal
+    }
+
+    const disposalErrors: unknown[] = []
+    let engineDisposal = Promise.resolve()
+
     if (this.isDisposed) {
-      const retryErrors: unknown[] = []
+      if (this.hasPendingMediaSessionDisposal) {
+        try {
+          // AI modified: a failed browser ownership handoff remains retryable after logical player disposal.
+          this.mediaSession?.dispose()
+          this.hasPendingMediaSessionDisposal = false
+        }
+        catch (error) {
+          disposalErrors.push(error)
+        }
+      }
       if (this.removeEngineListeners.length > 0) {
         try {
           // AI modified: repeated disposal retries only engine subscriptions whose cleanup failed.
           this.disconnectEngineEvents()
         }
         catch (error) {
-          retryErrors.push(error)
+          disposalErrors.push(error)
         }
       }
-      if (this.hasPendingEngineDisposal || this.engine instanceof AudioEngineRouter) {
+      if (this.hasPendingEngineDisposal) {
         try {
-          // AI modified: routers are rechecked because a stale lazy factory can finish after the first disposal.
-          this.engine.dispose()
-          this.hasPendingEngineDisposal = false
+          this.hasPendingEngineDisposal = true
+          engineDisposal = this.engine.dispose().then(
+            () => {
+              this.hasPendingEngineDisposal = false
+            },
+            (error: unknown) => {
+              this.hasPendingEngineDisposal = true
+              throw error
+            },
+          )
         }
         catch (error) {
           this.hasPendingEngineDisposal = true
-          retryErrors.push(error)
+          disposalErrors.push(error)
         }
       }
-      if (retryErrors.length > 0) {
-        throw retryErrors[0]
-      }
-      return
+
+      return this.trackDisposal(engineDisposal, disposalErrors)
     }
 
     // AI modified: disposed players reject future control operations and cannot be revived by late loads.
@@ -1697,7 +1773,6 @@ export class AudioPlayer {
     this.activeLoadError = undefined
     this.activeLoadPlaybackIntent = undefined
     this.activeLoadCompletion = undefined
-    const disposalErrors: unknown[] = []
 
     // AI modified: every owned resource gets one cleanup attempt even when an earlier disposer fails.
     try {
@@ -1714,13 +1789,23 @@ export class AudioPlayer {
     }
     try {
       this.mediaSession?.dispose()
+      this.hasPendingMediaSessionDisposal = false
     }
     catch (error) {
+      this.hasPendingMediaSessionDisposal = true
       disposalErrors.push(error)
     }
     try {
-      this.engine.dispose()
-      this.hasPendingEngineDisposal = false
+      this.hasPendingEngineDisposal = true
+      engineDisposal = this.engine.dispose().then(
+        () => {
+          this.hasPendingEngineDisposal = false
+        },
+        (error: unknown) => {
+          this.hasPendingEngineDisposal = true
+          throw error
+        },
+      )
     }
     catch (error) {
       // AI modified: failed engine cleanup remains retryable without repeating already released player resources.
@@ -1732,9 +1817,25 @@ export class AudioPlayer {
     this.hasLoadedSource = false
     this.state = 'idle'
 
-    if (disposalErrors.length > 0) {
-      throw disposalErrors[0]
-    }
+    return this.trackDisposal(engineDisposal, disposalErrors)
+  }
+
+  private trackDisposal(engineDisposal: Promise<void>, disposalErrors: unknown[]): Promise<void> {
+    const cleanup = engineDisposal.catch((error: unknown) => {
+      disposalErrors.push(error)
+    }).then(() => {
+      if (disposalErrors.length > 0) {
+        throw disposalErrors[0]
+      }
+    })
+    // AI modified: concurrent dispose calls share one cleanup attempt; a rejection unlocks an explicit retry.
+    const activeDisposal = cleanup.finally(() => {
+      if (this.activeDisposal === activeDisposal) {
+        this.activeDisposal = undefined
+      }
+    })
+    this.activeDisposal = activeDisposal
+    return activeDisposal
   }
 
   private playerAnalyzerOptions(
@@ -1879,6 +1980,13 @@ export class AudioPlayer {
             }
             const lifecycleLoadRequestId = this.loadRequestId
             const lifecyclePlaybackIntentId = this.playbackIntentId
+            try {
+              // AI modified: the most recently confirmed playing player owns system media controls.
+              this.mediaSession?.activate()
+            }
+            catch {
+              // Optional browser presentation failures cannot interrupt confirmed audio playback.
+            }
             this.setState('playing')
             if (this.canPublishPlaybackLifecycleEvent('playing', lifecycleLoadRequestId, lifecyclePlaybackIntentId)) {
               this.events.emit(eventName, payload)
@@ -2076,9 +2184,11 @@ export class AudioPlayer {
     activeOperation.gate.reject(activeOperation.terminalError)
   }
 
-  private resolveActivePlaybackAttempts(): void {
+  private resolveActivePlaybackAttempts(
+    activePlaybackAttempts: Iterable<ActivePlaybackAttempt> = this.activePlaybackAttempts,
+  ): void {
     // AI modified: pause, stop, and source replacement preserve silent play supersession without engine cooperation.
-    for (const activePlaybackAttempt of this.activePlaybackAttempts) {
+    for (const activePlaybackAttempt of activePlaybackAttempts) {
       activePlaybackAttempt.gate.resolve()
     }
   }
@@ -2110,7 +2220,7 @@ export class AudioPlayer {
       }
       this.activeLoadEngineOperation = activeLoadEngineOperation
       observeEngineOperation(
-        () => this.engine.load(source),
+        () => this.engine.load(source, this.sourceLoadOptions),
         activeLoadEngineOperation.gate,
       )
 
@@ -2140,7 +2250,10 @@ export class AudioPlayer {
           throw error
         }
 
-        loadError = this.activeLoadError ?? error
+        // AI modified: fallback failures only consult fatal events owned by this load request.
+        loadError = this.activeLoadRequestId === loadRequestId
+          ? this.activeLoadError ?? error
+          : error
       }
       finally {
         if (this.activeLoadEngineOperation === activeLoadEngineOperation) {

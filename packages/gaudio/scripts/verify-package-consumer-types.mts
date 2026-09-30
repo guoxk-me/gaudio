@@ -1,4 +1,6 @@
 import type {
+  AudioEngine,
+  AudioEngineLoadOptions,
   AudioPlayerOptions,
   AudioSourceDescription,
 } from 'gaudio'
@@ -37,6 +39,7 @@ const playerOptions: AudioPlayerOptions = {
     dashAdapter,
   ],
   source,
+  crossOrigin: 'use-credentials',
 }
 
 // AI modified: a packed declaration must leave consumer-owned private names available to subclasses.
@@ -60,5 +63,21 @@ if (false) {
   blobSource.url = 'blob:https://example.com/consumer-owned'
 }
 
-// AI modified: compile public root and adaptive entry points from a real external TypeScript consumer.
-new AudioPlayer(playerOptions).dispose()
+// AI modified: compile the asynchronous public disposal contract from a real external TypeScript consumer.
+const disposal: Promise<void> = new AudioPlayer(playerOptions).dispose()
+void disposal
+
+// AI modified: packed declarations preserve optional browser capabilities and the per-load CORS contract.
+const browserCapabilities: Pick<AudioEngine, | 'fastSeek'
+  | 'setPreload'
+  | 'getPreload'
+  | 'setAutoplay'
+  | 'getAutoplay'
+  | 'getSeekableRanges'
+  | 'getPlayedRanges'
+  | 'canPlayType'> = {}
+const engineLoadOptions: AudioEngineLoadOptions = { crossOrigin: 'anonymous' }
+void browserCapabilities
+if (false) {
+  void new MediaElementAudioEngine().load(blobSource, engineLoadOptions)
+}

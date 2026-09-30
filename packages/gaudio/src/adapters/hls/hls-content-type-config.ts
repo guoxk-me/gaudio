@@ -1,6 +1,8 @@
 import type { AdaptiveContentType } from '../adaptive-audio-types'
+import type { HlsAdapterConfig } from './hls-audio-adapter'
 
-const hlsContentTypeChanges: Record<AdaptiveContentType, object> = {
+// AI modified: vendor setting types validate every preset and content override.
+const hlsContentTypeChanges = {
   'vod': {},
   'long-form': {
     maxBufferLength: 120,
@@ -42,8 +44,8 @@ const hlsContentTypeChanges: Record<AdaptiveContentType, object> = {
       },
     },
   },
-}
+} satisfies Record<AdaptiveContentType, HlsAdapterConfig>
 
-export function hlsContentTypeConfig(contentType: AdaptiveContentType): object {
+export function hlsContentTypeConfig(contentType: AdaptiveContentType): HlsAdapterConfig {
   return hlsContentTypeChanges[contentType]
 }

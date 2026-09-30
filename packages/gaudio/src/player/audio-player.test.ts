@@ -3,15 +3,143 @@ import type { AudioAnalyzer } from '../analysis/audio-analyzer'
 import type { AudioEngine, AudioEngineEvents } from '../engine/audio-engine'
 import type { AudioEngineAdapter } from '../engine/audio-engine-adapter'
 import type { AudioFormatSupport, PreloadMode, TimeRange } from '../engine/audio-engine-types'
+import type { AudioSource } from '../source/audio-source'
 import type { PlaybackState } from './audio-player-options'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { audioEngineEventNames } from '../engine/audio-engine'
+import { AudioEngineRouter } from '../engine/audio-engine-router'
 import { MediaElementAudioEngine } from '../engine/media-element-audio-engine'
 import { GAudioError } from '../errors/errors'
+import { EventEmitter } from '../events/event-emitter'
 import { FakeAudioEngine } from '../test-support/fake-audio-engine'
 import { FakeAudioElement } from '../test-support/fake-media'
 import { AudioPlayer } from './audio-player'
 import { BrowserMediaSession } from './browser-media-session'
+
+// AI modified: this engine implements only core controls so browser-only requirements cannot return unnoticed.
+class TimelineAudioEngine implements AudioEngine {
+  private readonly events = new EventEmitter<AudioEngineEvents>()
+  private currentTime = 0
+  private isPlaying = false
+  private volume = 1
+  private isOutputMuted = false
+  private isPlaybackLooping = false
+  private playbackRate = 1
+  private preservesPitch = true
+
+  readonly loadedSources: AudioSource[] = []
+  playCalls = 0
+  disposeCalls = 0
+
+  async load(source: AudioSource): Promise<void> {
+    this.loadedSources.push(source)
+    this.currentTime = 0
+    this.isPlaying = false
+  }
+
+  unload(): void {
+    this.currentTime = 0
+    this.isPlaying = false
+  }
+
+  async play(): Promise<void> {
+    this.playCalls += 1
+    this.isPlaying = true
+    this.events.emit('playing', undefined)
+  }
+
+  pause(): void {
+    this.isPlaying = false
+    this.events.emit('pause', undefined)
+  }
+
+  stop(): void {
+    this.currentTime = 0
+    this.isPlaying = false
+  }
+
+  async seek(seconds: number): Promise<void> {
+    this.currentTime = seconds
+    this.events.emit('seeked', { currentTime: seconds, duration: this.getDuration() })
+  }
+
+  setVolume(volume: number): void {
+    this.volume = volume
+  }
+
+  getVolume(): number {
+    return this.volume
+  }
+
+  setMuted(isMuted: boolean): void {
+    this.isOutputMuted = isMuted
+  }
+
+  isMuted(): boolean {
+    return this.isOutputMuted
+  }
+
+  setLoop(isLooping: boolean): void {
+    this.isPlaybackLooping = isLooping
+  }
+
+  isLooping(): boolean {
+    return this.isPlaybackLooping
+  }
+
+  setPlaybackRate(rate: number): void {
+    this.playbackRate = rate
+  }
+
+  getPlaybackRate(): number {
+    return this.playbackRate
+  }
+
+  setPreservesPitch(shouldPreservePitch: boolean): void {
+    this.preservesPitch = shouldPreservePitch
+  }
+
+  getPreservesPitch(): boolean {
+    return this.preservesPitch
+  }
+
+  getCurrentTime(): number {
+    return this.currentTime
+  }
+
+  getDuration(): number {
+    return 120
+  }
+
+  isPaused(): boolean {
+    return !this.isPlaying
+  }
+
+  isEnded(): boolean {
+    return this.currentTime >= this.getDuration()
+  }
+
+  isSeeking(): boolean {
+    return false
+  }
+
+  getBufferedRanges(): readonly TimeRange[] {
+    return []
+  }
+
+  on<EventName extends keyof AudioEngineEvents>(
+    eventName: EventName,
+    handler: (payload: AudioEngineEvents[EventName]) => void,
+  ): () => void {
+    return this.events.on(eventName, handler)
+  }
+
+  async dispose(): Promise<void> {
+    this.disposeCalls += 1
+    this.unload()
+    this.events.clear()
+  }
+}
 
 class FakeHlsAdapter implements AudioEngineAdapter {
   readonly protocol = 'hls'
@@ -200,8 +328,8 @@ class DisposalStrictAudioEngine extends FakeAudioEngine {
     return super.getActiveAdaptivePlayback()
   }
 
-  override dispose(): void {
-    super.dispose()
+  override async dispose(): Promise<void> {
+    await super.dispose()
     this.hasDisposedResources = true
     if (this.disposalError) {
       throw this.disposalError
@@ -213,6 +341,22 @@ class DisposalStrictAudioEngine extends FakeAudioEngine {
     if (this.hasDisposedResources) {
       throw new Error('Disposed engine cannot be queried')
     }
+  }
+}
+
+class DeferredDisposalAudioEngine extends FakeAudioEngine {
+  private finishCleanup: (() => void) | undefined
+  private readonly cleanup = new Promise<void>((resolve) => {
+    this.finishCleanup = resolve
+  })
+
+  override async dispose(): Promise<void> {
+    await super.dispose()
+    await this.cleanup
+  }
+
+  finishDisposal(): void {
+    this.finishCleanup?.()
   }
 }
 
@@ -251,9 +395,10 @@ class RetryableUnsubscribeAudioEngine extends FakeAudioEngine {
     }
   }
 
-  override dispose(): void {
+  override dispose(): Promise<void> {
     // AI modified: keep subscriptions observable so player-owned unsubscribe retries are tested independently.
     this.disposeCalls += 1
+    return Promise.resolve()
   }
 }
 
@@ -630,6 +775,113 @@ afterEach(() => {
 })
 
 describe('audioPlayer', () => {
+  it.each(['direct', 'router'] as const)('supports a %s engine with only the required playback contract', async (integration) => {
+    const engine = new TimelineAudioEngine()
+    const playerEngine = integration === 'direct'
+      ? engine
+      : new AudioEngineRouter({ mediaEngineFactory: () => engine })
+    if (playerEngine instanceof AudioEngineRouter) {
+      playerEngine.setAutoplay(true)
+      expect(playerEngine.getAutoplay()).toBe(true)
+    }
+    const player = new AudioPlayer({ source: 'https://example.com/audio.mp3' }, playerEngine)
+
+    expect(player.getPreload()).toBe('metadata')
+    expect(player.getAutoplay()).toBe(false)
+    expect(player.canPlayType('audio/mpeg')).toBe('')
+    player.setPreload('auto')
+    player.setAutoplay(true)
+    await player.load()
+
+    expect(player.getPreload()).toBe('auto')
+    expect(player.getAutoplay()).toBe(true)
+    expect(player.getState()).toBe('playing')
+    expect(engine.playCalls).toBe(1)
+    expect(engine.loadedSources).toHaveLength(1)
+    if (playerEngine instanceof AudioEngineRouter) {
+      expect(playerEngine.getAutoplay()).toBe(false)
+      playerEngine.setPreload('none')
+      expect(playerEngine.getPreload()).toBe('none')
+      player.setPreload('auto')
+    }
+    expect(player.getSeekableRanges()).toEqual([])
+    expect(player.getPlayedRanges()).toEqual([])
+    expect(player.canPlayType('audio/mpeg')).toBe('')
+    await player.fastSeek(35)
+    expect(player.getCurrentTime()).toBe(35)
+    expect(player.isPaused()).toBe(false)
+    player.pause()
+    expect(player.getState()).toBe('paused')
+    await player.seek(20)
+    expect(player.getCurrentTime()).toBe(20)
+    await player.play()
+    expect(player.getState()).toBe('playing')
+    player.stop()
+    expect(player.getState()).toBe('ready')
+    expect(player.getCurrentTime()).toBe(0)
+    await player.dispose()
+    expect(engine.disposeCalls).toBe(1)
+    expect(player.getPreload()).toBe('auto')
+  })
+
+  it.each(['direct', 'router'] as const)('cancels the %s exact-seek fallback without losing the newer position', async (integration) => {
+    const engine = new TimelineAudioEngine()
+    const playerEngine = integration === 'direct'
+      ? engine
+      : new AudioEngineRouter({ mediaEngineFactory: () => engine })
+    const player = new AudioPlayer({ source: 'https://example.com/audio.mp3' }, playerEngine)
+    const seekError = new Error('The exact seek failed')
+    let rejectSeek: ((error: Error) => void) | undefined
+    await player.load()
+    const seek = vi.spyOn(engine, 'seek').mockImplementationOnce(() => new Promise<void>((_resolve, reject) => {
+      rejectSeek = reject
+    }))
+
+    const optimizedSeek = player.fastSeek(35)
+    const seekExpectation = expect(optimizedSeek).rejects.toMatchObject({ code: 'LOAD_ABORTED' })
+    await player.seek(12)
+
+    await seekExpectation
+    expect(seek).toHaveBeenNthCalledWith(1, 35)
+    expect(seek).toHaveBeenNthCalledWith(2, 12)
+    expect(player.getCurrentTime()).toBe(12)
+    rejectSeek?.(seekError)
+    seek.mockRejectedValueOnce(seekError)
+    await expect(player.fastSeek(50)).rejects.toBe(seekError)
+    await player.dispose()
+  })
+
+  it.each([false, true])('retains a reentrant preload hint without an engine getter when the older setter throws=%s', (shouldThrow) => {
+    let onPreloadRequest: ((preload: PreloadMode) => void) | undefined
+    class SetterOnlyPreloadEngine extends TimelineAudioEngine {
+      setPreload(preload: PreloadMode): void {
+        onPreloadRequest?.(preload)
+      }
+    }
+    const engine = new SetterOnlyPreloadEngine()
+    const player = new AudioPlayer({}, engine)
+    const preloadError = new Error('The older preload request failed')
+    onPreloadRequest = (preload) => {
+      if (preload === 'auto') {
+        player.setPreload('none')
+        if (shouldThrow) {
+          throw preloadError
+        }
+      }
+    }
+
+    if (shouldThrow) {
+      expect(() => player.setPreload('auto')).toThrow(preloadError)
+    }
+    else {
+      player.setPreload('auto')
+    }
+
+    expect(player.getPreload()).toBe('none')
+    void player.dispose()
+    expect(player.getPreload()).toBe('none')
+  })
+
   it('applies media options and exposes engine capabilities', () => {
     const engine = new FakeAudioEngine()
     const player = new AudioPlayer({
@@ -807,6 +1059,51 @@ describe('audioPlayer', () => {
 
     expect(player.getAnalyzer()).toBe(engine.analyzers[0])
     expect(engine.analyzerFftSizes).toEqual([2048])
+  })
+
+  it.each(['anonymous', 'use-credentials'] as const)('passes explicit %s CORS policy to custom engine loads', async (crossOrigin) => {
+    const engine = new FakeAudioEngine()
+    const load = vi.spyOn(engine, 'load')
+    const player = new AudioPlayer({ source: 'https://example.com/audio.mp3', crossOrigin }, engine)
+
+    await player.load()
+    player.setSource('https://example.com/replacement.mp3')
+    await player.load()
+
+    expect(load).toHaveBeenNthCalledWith(1, expect.objectContaining({ url: 'https://example.com/audio.mp3' }), { crossOrigin })
+    expect(load).toHaveBeenNthCalledWith(2, expect.objectContaining({ url: 'https://example.com/replacement.mp3' }), { crossOrigin })
+    await player.dispose()
+  })
+
+  it.each([
+    { hasCustomEngine: false, hasCustomAnalyzer: false },
+    { hasCustomEngine: false, hasCustomAnalyzer: true },
+    { hasCustomEngine: true, hasCustomAnalyzer: false },
+    { hasCustomEngine: true, hasCustomAnalyzer: true },
+  ])('defaults CORS only for owned analysis with hasCustomEngine=$hasCustomEngine and hasCustomAnalyzer=$hasCustomAnalyzer', async ({ hasCustomEngine, hasCustomAnalyzer }) => {
+    const engine = new AnalyzerAudioEngine()
+    const load = vi.spyOn(engine as AudioEngine, 'load')
+    const player = new AudioPlayer({
+      source: 'https://example.com/audio.m3u8',
+      adapters: hasCustomEngine ? undefined : [new FakeHlsAdapter(engine)],
+      analyzer: hasCustomAnalyzer ? { createAnalyzer: () => undefined } : true,
+    }, hasCustomEngine ? engine : undefined)
+
+    await player.load()
+
+    // AI modified: custom transports and analyzer factories keep their existing request policy unless explicitly configured.
+    expect(load).toHaveBeenCalledOnce()
+    expect(load.mock.calls[0]?.[1]).toEqual(hasCustomEngine || hasCustomAnalyzer ? undefined : { crossOrigin: 'anonymous' })
+    await player.dispose()
+  })
+
+  it('rejects an invalid CORS policy before configuring a custom engine', () => {
+    const engine = new FakeAudioEngine()
+    const setPreload = vi.spyOn(engine, 'setPreload')
+
+    expect(() => new AudioPlayer({ crossOrigin: 'invalid' as 'anonymous' }, engine)).toThrow(TypeError)
+    expect(setPreload).not.toHaveBeenCalled()
+    expect(engine.disposeCalls).toBe(0)
   })
 
   it('supports custom analyzer factories for injected engines', async () => {
@@ -1850,6 +2147,62 @@ describe('audioPlayer', () => {
     expect(player.getState()).toBe('ready')
   })
 
+  it('preserves the latest engine-originated settings across repeated protocol switches', async () => {
+    const hlsEngine = new SynchronousSettingEventsAudioEngine()
+    const dashEngine = new SynchronousSettingEventsAudioEngine()
+    const player = new AudioPlayer({
+      adapters: [new FakeHlsAdapter(hlsEngine), new FakeDashAdapter(dashEngine)],
+    })
+    const volumeEvents: string[] = []
+    const rateEvents: number[] = []
+    player.on('volumechange', ({ volume, isMuted }) => volumeEvents.push(`${volume}:${isMuted}`))
+    player.on('ratechange', ({ playbackRate }) => rateEvents.push(playbackRate))
+
+    player.setSource({ url: 'https://example.com/audio.m3u8', protocol: 'hls' })
+    await player.load()
+    hlsEngine.volume = 0.4
+    hlsEngine.muted = true
+    hlsEngine.playbackRate = 1.25
+    hlsEngine.emit('volumechange', { volume: 0.4, isMuted: true })
+    hlsEngine.emit('ratechange', { playbackRate: 1.25 })
+    expect([player.getVolume(), player.isMuted(), player.getPlaybackRate()]).toEqual([0.4, true, 1.25])
+
+    player.setSource({ url: 'https://example.com/audio.mpd', protocol: 'dash' })
+    await player.load()
+    expect([dashEngine.volume, dashEngine.muted, dashEngine.playbackRate]).toEqual([0.4, true, 1.25])
+
+    player.setVolume(0.6)
+    player.setMuted(false)
+    player.setPlaybackRate(1.4)
+    dashEngine.volume = 0.7
+    dashEngine.muted = true
+    dashEngine.playbackRate = 1.5
+    dashEngine.emit('volumechange', { volume: 0.7, isMuted: true })
+    dashEngine.emit('ratechange', { playbackRate: 1.5 })
+    expect([player.getVolume(), player.isMuted(), player.getPlaybackRate()]).toEqual([0.7, true, 1.5])
+
+    player.setSource({ url: 'https://example.com/audio.m3u8', protocol: 'hls' })
+    await player.load()
+    expect([hlsEngine.volume, hlsEngine.muted, hlsEngine.playbackRate]).toEqual([0.7, true, 1.5])
+
+    player.setVolume(0.8)
+    player.setMuted(false)
+    player.setPlaybackRate(1.75)
+    player.setSource({ url: 'https://example.com/audio.mpd', protocol: 'dash' })
+    await player.load()
+
+    expect([dashEngine.volume, dashEngine.muted, dashEngine.playbackRate]).toEqual([0.8, false, 1.75])
+    expect(volumeEvents).toEqual([
+      '0.4:true',
+      '0.6:true',
+      '0.6:false',
+      '0.7:true',
+      '0.8:true',
+      '0.8:false',
+    ])
+    expect(rateEvents).toEqual([1.25, 1.4, 1.5, 1.75])
+  })
+
   it('does not transfer an adapter setting rejected through the public player API', async () => {
     const settingError = new Error('active engine rejected volume')
     const hlsEngine = new FakeAudioEngine()
@@ -1879,13 +2232,13 @@ describe('audioPlayer', () => {
     expect(() => new AudioPlayer({ adapters: [adapter] }, engine)).toThrow(TypeError)
   })
 
-  it('releases adapter ownership when player construction fails', () => {
+  it('releases adapter ownership when player construction fails', async () => {
     const adapter = new FakeHlsAdapter(new FakeAudioEngine())
 
     expect(() => new AudioPlayer({ adapters: [adapter], volume: 2 })).toThrow(RangeError)
 
     const player = new AudioPlayer({ adapters: [adapter] })
-    player.dispose()
+    await player.dispose()
   })
 
   it('forwards adaptive events and uses the error event for fatal state changes', () => {
@@ -1975,9 +2328,9 @@ describe('audioPlayer', () => {
     class DisposalRejectingAudioEngine extends DeferredPlayAudioEngine {
       readonly disposalError = new GAudioError('ENGINE_ERROR', 'Engine playback was disposed')
 
-      override dispose(): void {
+      override async dispose(): Promise<void> {
         this.failPlayback(this.disposalError)
-        super.dispose()
+        await super.dispose()
       }
     }
 
@@ -2146,6 +2499,69 @@ describe('audioPlayer', () => {
     await Promise.resolve()
     expect(player.getState()).toBe('paused')
     expect(errors).toEqual([])
+  })
+
+  it.each([
+    { integration: 'direct', control: 'pause', shouldThrow: false },
+    { integration: 'direct', control: 'pause', shouldThrow: true },
+    { integration: 'direct', control: 'stop', shouldThrow: false },
+    { integration: 'direct', control: 'stop', shouldThrow: true },
+    { integration: 'router', control: 'pause', shouldThrow: false },
+    { integration: 'router', control: 'pause', shouldThrow: true },
+    { integration: 'router', control: 'stop', shouldThrow: false },
+    { integration: 'router', control: 'stop', shouldThrow: true },
+  ] as const)('keeps $integration reentrant play pending after $control with shouldThrow=$shouldThrow', async ({ integration, control, shouldThrow }) => {
+    const engine = new ConcurrentDeferredPlayAudioEngine()
+    // AI modified: both orchestration layers must leave synchronous listener-created playback owned by the new request.
+    const playerEngine = integration === 'direct'
+      ? engine
+      : new AudioEngineRouter({ mediaEngineFactory: () => engine })
+    const player = new AudioPlayer({ source: 'https://example.com/audio.mp3' }, playerEngine)
+    const controlError = new Error(`${control} failed after its synchronous event`)
+    const playbackError = new GAudioError('PLAYBACK_BLOCKED', 'The newer playback was blocked')
+    const playbackFulfilled = vi.fn()
+    const playbackRejected = vi.fn()
+    const errors: GAudioError[] = []
+    let newerPlayback: Promise<void> | undefined
+    await player.load()
+    const olderPlayback = player.play()
+    player.on('error', error => errors.push(error))
+    player.once(control === 'pause' ? 'pause' : 'timeupdate', () => {
+      newerPlayback = player.play()
+      void newerPlayback.then(playbackFulfilled, playbackRejected)
+    })
+    vi.spyOn(engine, control).mockImplementation(() => {
+      engine.isPlaying = false
+      if (control === 'pause') {
+        engine.emit('pause', undefined)
+      }
+      else {
+        engine.currentTime = 0
+        engine.emit('timeupdate', { currentTime: 0, duration: engine.duration })
+      }
+      if (shouldThrow) {
+        throw controlError
+      }
+    })
+
+    if (shouldThrow) {
+      expect(() => player[control]()).toThrow(controlError)
+    }
+    else {
+      player[control]()
+    }
+    await expect(olderPlayback).resolves.toBeUndefined()
+    // AI modified: drain promise continuations before checking that the newer engine request still owns its result.
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(engine.playCalls).toBe(2)
+    expect(playbackFulfilled).not.toHaveBeenCalled()
+    expect(playbackRejected).not.toHaveBeenCalled()
+
+    engine.failPlaybackRequest(1, playbackError)
+    await expect(newerPlayback).rejects.toBe(playbackError)
+    expect(errors).toEqual([playbackError])
+    engine.failPlaybackRequest(0, new GAudioError('LOAD_ABORTED', 'The older playback was superseded'))
+    await player.dispose()
   })
 
   it('keeps a current playback failure from being overwritten by its queued pause event', async () => {
@@ -2800,6 +3216,45 @@ describe('audioPlayer', () => {
 
     expect(errors).toEqual([])
     expect(player.getState()).toBe('idle')
+  })
+
+  it('does not assign a replacement source error to an already-rejected load', async () => {
+    const engine = new FakeAudioEngine()
+    const player = new AudioPlayer({ source: 'https://example.com/first.mp3' }, engine)
+    const firstSourceError = new Error('The first source failed')
+    const replacementSourceError = new GAudioError('NETWORK_ERROR', 'The replacement source failed')
+    const errors: GAudioError[] = []
+    let rejectFirstSource: ((error: Error) => void) | undefined
+    vi.spyOn(engine, 'load').mockImplementation(async (source) => {
+      if (source.url === 'https://example.com/first.mp3') {
+        await new Promise<void>((_resolve, reject) => {
+          rejectFirstSource = reject
+        })
+      }
+      else {
+        engine.emit('error', replacementSourceError)
+      }
+    })
+    player.on('error', error => errors.push(error))
+    const firstLoad = player.load()
+    const firstExpectation = expect(firstLoad).rejects.toMatchObject({
+      code: 'ENGINE_ERROR',
+      cause: firstSourceError,
+    })
+    await vi.waitFor(() => expect(rejectFirstSource).toBeTypeOf('function'))
+
+    rejectFirstSource?.(firstSourceError)
+    // AI modified: replace after the engine rejection settles but before the player's outer load catch resumes.
+    await Promise.resolve()
+    await Promise.resolve()
+    player.setSource('https://example.com/replacement.mp3')
+    const replacementLoad = player.load()
+
+    await expect(replacementLoad).rejects.toBe(replacementSourceError)
+    await firstExpectation
+    expect(errors).toEqual([replacementSourceError])
+    expect(player.getSource()?.url).toBe('https://example.com/replacement.mp3')
+    await player.dispose()
   })
 
   it('does not let an obsolete fallback overwrite a newer source', async () => {
@@ -3766,6 +4221,92 @@ describe('audioPlayer', () => {
     expect(errors).toEqual([loadError])
   })
 
+  it.each([false, true])('rejects a fatal load handoff before readiness with autoplay %s', async (autoplay) => {
+    const loadError = new GAudioError('NETWORK_ERROR', 'Source failed during load handoff')
+    const engine = new AnalyzerAudioEngine()
+    const engineLoadCompletion = Promise.resolve()
+    vi.spyOn(engine, 'load').mockImplementation((source) => {
+      engine.loadedSources.push(source)
+      return engineLoadCompletion
+    })
+    const player = new AudioPlayer({
+      source: 'https://example.com/audio.mp3',
+      autoplay,
+      analyzer: true,
+    }, engine)
+    const states: PlaybackState[] = []
+    const publishedErrors: GAudioError[] = []
+    player.on('statechange', state => states.push(state))
+    player.on('error', error => publishedErrors.push(error))
+
+    const loading = player.load()
+    const loadingExpectation = expect(loading).rejects.toBe(loadError)
+    await Promise.resolve()
+    // AI modified: the gate observer runs first; this queues failure between candidate success and load finalization.
+    void engineLoadCompletion.then(() => {
+      queueMicrotask(() => engine.emit('error', loadError))
+    })
+
+    await loadingExpectation
+    expect(publishedErrors).toEqual([loadError])
+    expect(states).toEqual(['loading', 'error'])
+    expect(player.getState()).toBe('error')
+    expect(engine.analyzers).toEqual([])
+    expect(engine.playCalls).toBe(0)
+    await player.dispose()
+  })
+
+  it.each(['replaceSource', 'dispose'] as const)(
+    'preserves %s cancellation over a fatal load handoff',
+    async (cancellation) => {
+      const loadError = new GAudioError('NETWORK_ERROR', 'Obsolete source failed during load handoff')
+      const engine = new AnalyzerAudioEngine()
+      const engineLoadCompletion = Promise.resolve()
+      vi.spyOn(engine, 'load').mockImplementation((source) => {
+        engine.loadedSources.push(source)
+        return engineLoadCompletion
+      })
+      const player = new AudioPlayer({
+        source: 'https://example.com/audio.mp3',
+        autoplay: true,
+        analyzer: true,
+      }, engine)
+      const states: PlaybackState[] = []
+      const publishedErrors: GAudioError[] = []
+      player.on('statechange', state => states.push(state))
+      player.on('error', error => publishedErrors.push(error))
+
+      const loading = player.load()
+      const loadingExpectation = expect(loading).rejects.toMatchObject({
+        code: cancellation === 'replaceSource' ? 'LOAD_ABORTED' : 'ENGINE_ERROR',
+      })
+      await Promise.resolve()
+      // AI modified: cancellation in the same handoff must retain ownership over the buffered source error.
+      void engineLoadCompletion.then(() => {
+        queueMicrotask(() => {
+          engine.emit('error', loadError)
+          if (cancellation === 'replaceSource') {
+            player.setSource('https://example.com/replacement.mp3')
+          }
+          else {
+            void player.dispose()
+          }
+        })
+      })
+
+      await loadingExpectation
+      expect(publishedErrors).toEqual([])
+      expect(states).not.toContain('ready')
+      expect(engine.analyzers).toEqual([])
+      expect(engine.playCalls).toBe(0)
+      if (cancellation === 'replaceSource') {
+        expect(player.getSource()?.url).toBe('https://example.com/replacement.mp3')
+        expect(player.getState()).toBe('idle')
+      }
+      await player.dispose()
+    },
+  )
+
   it('publishes no fatal error when a playlist fallback succeeds after an emitted load error', async () => {
     class EmittingFallbackAudioEngine extends FakeAudioEngine {
       override async load(source: Parameters<FakeAudioEngine['load']>[0]): Promise<void> {
@@ -3904,6 +4445,82 @@ describe('audioPlayer', () => {
     expect(mediaSession.actionHandlers.size).toBe(0)
   })
 
+  it('gives Media Session ownership to the last-playing or explicitly activated player', async () => {
+    const mediaSession = new FakeMediaSession()
+    vi.stubGlobal('navigator', { mediaSession })
+    vi.stubGlobal('MediaMetadata', FakeMediaMetadata)
+    const firstEngine = new FakeAudioEngine()
+    const secondEngine = new FakeAudioEngine()
+    const firstPlayer = new AudioPlayer({
+      source: 'https://example.com/first.mp3',
+      mediaSession: { metadata: { title: 'First player' } },
+    }, firstEngine)
+    const secondPlayer = new AudioPlayer({
+      source: 'https://example.com/second.mp3',
+      mediaSession: { metadata: { title: 'Second player' } },
+    }, secondEngine)
+
+    firstPlayer.activateMediaSession()
+    expect(mediaSession.metadata).toMatchObject({ title: 'First player' })
+    expect(firstEngine.playCalls).toBe(0)
+
+    await secondPlayer.load()
+    await secondPlayer.play()
+    secondEngine.currentTime = 20
+    secondEngine.emit('playing', undefined)
+    expect(mediaSession.metadata).toMatchObject({ title: 'Second player' })
+    expect(mediaSession.playbackState).toBe('playing')
+
+    secondPlayer.pause()
+    secondEngine.emit('pause', undefined)
+    await firstPlayer.load()
+    await firstPlayer.play()
+    firstEngine.currentTime = 30
+    firstEngine.emit('playing', undefined)
+    expect(mediaSession.metadata).toMatchObject({ title: 'First player' })
+    expect(mediaSession.positionState).toMatchObject({ position: 30 })
+
+    secondPlayer.activateMediaSession()
+    expect(mediaSession.metadata).toMatchObject({ title: 'Second player' })
+    expect(mediaSession.playbackState).toBe('paused')
+    expect(mediaSession.positionState).toMatchObject({ position: 20 })
+
+    secondPlayer.dispose()
+    expect(mediaSession.metadata).toMatchObject({ title: 'First player' })
+    expect(mediaSession.playbackState).toBe('playing')
+    expect(mediaSession.positionState).toMatchObject({ position: 30 })
+    mediaSession.runAction('pause')
+    expect(firstEngine.isPlaying).toBe(false)
+
+    firstPlayer.dispose()
+    expect(mediaSession.actionHandlers.size).toBe(0)
+  })
+
+  it('keeps a last-playing Media Session owner active when a paused player is created', async () => {
+    const mediaSession = new FakeMediaSession()
+    vi.stubGlobal('navigator', { mediaSession })
+    vi.stubGlobal('MediaMetadata', FakeMediaMetadata)
+    const firstEngine = new FakeAudioEngine()
+    const firstPlayer = new AudioPlayer({
+      source: 'https://example.com/first.mp3',
+      mediaSession: { metadata: { title: 'First player' } },
+    }, firstEngine)
+    await firstPlayer.load()
+    await firstPlayer.play()
+    firstEngine.emit('playing', undefined)
+
+    const secondPlayer = new AudioPlayer({
+      mediaSession: { metadata: { title: 'Second player' } },
+    }, new FakeAudioEngine())
+
+    expect(mediaSession.metadata).toMatchObject({ title: 'First player' })
+    secondPlayer.activateMediaSession()
+    expect(mediaSession.metadata).toMatchObject({ title: 'Second player' })
+
+    secondPlayer.dispose()
+    firstPlayer.dispose()
+  })
+
   it('restores the previous Media Session owner after the latest player is disposed', async () => {
     const mediaSession = new FakeMediaSession()
     vi.stubGlobal('navigator', { mediaSession })
@@ -3933,6 +4550,38 @@ describe('audioPlayer', () => {
     expect(secondEngine.playCalls).toBe(0)
 
     firstPlayer.dispose()
+    expect(mediaSession.actionHandlers.size).toBe(0)
+  })
+
+  it('retries a failed Media Session owner restoration on repeated disposal', async () => {
+    const mediaSession = new FakeMediaSession()
+    vi.stubGlobal('navigator', { mediaSession })
+    vi.stubGlobal('MediaMetadata', FakeMediaMetadata)
+    const firstEngine = new FakeAudioEngine()
+    const secondEngine = new FakeAudioEngine()
+    const firstPlayer = new AudioPlayer({
+      source: 'https://example.com/first.mp3',
+      mediaSession: { metadata: { title: 'First player' } },
+    }, firstEngine)
+    const secondPlayer = new AudioPlayer({
+      source: 'https://example.com/second.mp3',
+      mediaSession: { metadata: { title: 'Second player' } },
+    }, secondEngine)
+    const restorationError = new Error('Media Session metadata restoration failed')
+    mediaSession.metadataErrors.push(restorationError, restorationError)
+
+    await expect(secondPlayer.dispose()).rejects.toBe(restorationError)
+    expect(mediaSession.metadata).toMatchObject({ title: 'Second player' })
+
+    await expect(secondPlayer.dispose()).resolves.toBeUndefined()
+    expect(mediaSession.metadata).toMatchObject({ title: 'First player' })
+    mediaSession.runAction('play')
+    await waitForMediaSessionAction()
+    expect(firstEngine.playCalls).toBe(1)
+    expect(secondEngine.playCalls).toBe(0)
+
+    await expect(secondPlayer.dispose()).resolves.toBeUndefined()
+    await firstPlayer.dispose()
     expect(mediaSession.actionHandlers.size).toBe(0)
   })
 
@@ -4333,7 +4982,30 @@ describe('audioPlayer', () => {
     expect(engine.disposeCalls).toBe(0)
   })
 
-  it('attempts every cleanup and retries only unfinished engine disposal', async () => {
+  it('waits for custom engine cleanup while making the player unusable immediately', async () => {
+    const engine = new DeferredDisposalAudioEngine()
+    const player = new AudioPlayer({}, engine)
+
+    const disposal = player.dispose()
+
+    expect(disposal).toBeInstanceOf(Promise)
+    expect(() => player.setVolume(0.5)).toThrow('disposed')
+
+    let hasFinishedDisposal = false
+    if (disposal instanceof Promise) {
+      void disposal.then(() => {
+        hasFinishedDisposal = true
+      })
+    }
+    await Promise.resolve()
+    expect(hasFinishedDisposal).toBe(false)
+
+    engine.finishDisposal()
+    await expect(disposal).resolves.toBeUndefined()
+    expect(hasFinishedDisposal).toBe(true)
+  })
+
+  it('attempts every cleanup and retries only unfinished disposal', async () => {
     const analyzerFailure = new Error('analyzer disposal failed')
     const mediaSessionFailure = new Error('Media Session disposal failed')
     const engineFailure = new Error('engine disposal failed')
@@ -4348,8 +5020,8 @@ describe('audioPlayer', () => {
     class FailingEngine extends FakeAudioEngine {
       private shouldFailDisposal = true
 
-      override dispose(): void {
-        super.dispose()
+      override async dispose(): Promise<void> {
+        await super.dispose()
         if (this.shouldFailDisposal) {
           this.shouldFailDisposal = false
           throw engineFailure
@@ -4371,22 +5043,18 @@ describe('audioPlayer', () => {
     }, engine)
     await player.load()
     const originalMediaSessionDispose = BrowserMediaSession.prototype.dispose
+    let shouldFailMediaSessionDisposal = true
     const mediaSessionDisposeSpy = vi
       .spyOn(BrowserMediaSession.prototype, 'dispose')
       .mockImplementation(function (this: BrowserMediaSession): void {
         originalMediaSessionDispose.call(this)
-        throw mediaSessionFailure
+        if (shouldFailMediaSessionDisposal) {
+          // AI modified: a transient browser cleanup failure is retried without repeating completed resources.
+          shouldFailMediaSessionDisposal = false
+          throw mediaSessionFailure
+        }
       })
-    let observedDisposalFailure: unknown
-
-    try {
-      player.dispose()
-    }
-    catch (error) {
-      observedDisposalFailure = error
-    }
-
-    expect(observedDisposalFailure).toBe(analyzerFailure)
+    await expect(player.dispose()).rejects.toBe(analyzerFailure)
     expect(analyzer.disposeCalls).toBe(1)
     expect(player.getAnalyzer()).toBeUndefined()
     expect(mediaSessionDisposeSpy).toHaveBeenCalledTimes(1)
@@ -4398,12 +5066,13 @@ describe('audioPlayer', () => {
     engine.emit('playing', undefined)
     expect(player.getState()).toBe('idle')
 
-    expect(() => player.dispose()).not.toThrow()
+    await expect(player.dispose()).resolves.toBeUndefined()
     expect(analyzer.disposeCalls).toBe(1)
-    expect(mediaSessionDisposeSpy).toHaveBeenCalledTimes(1)
+    expect(mediaSessionDisposeSpy).toHaveBeenCalledTimes(2)
     expect(engine.disposeCalls).toBe(2)
 
-    player.dispose()
+    await player.dispose()
+    expect(mediaSessionDisposeSpy).toHaveBeenCalledTimes(2)
     expect(engine.disposeCalls).toBe(2)
   })
 
@@ -4412,8 +5081,8 @@ describe('audioPlayer', () => {
     class RetryableAdapterEngine extends FakeAudioEngine {
       private shouldFailDisposal = true
 
-      override dispose(): void {
-        super.dispose()
+      override async dispose(): Promise<void> {
+        await super.dispose()
         if (this.shouldFailDisposal) {
           this.shouldFailDisposal = false
           throw disposalError
@@ -4428,24 +5097,24 @@ describe('audioPlayer', () => {
     })
     await player.load()
 
-    expect(() => player.dispose()).toThrow(disposalError)
+    await expect(player.dispose()).rejects.toBe(disposalError)
     expect(adapterEngine.disposeCalls).toBe(1)
 
-    expect(() => player.dispose()).not.toThrow()
+    await expect(player.dispose()).resolves.toBeUndefined()
     expect(adapterEngine.disposeCalls).toBe(2)
 
-    player.dispose()
+    await player.dispose()
     expect(adapterEngine.disposeCalls).toBe(2)
   })
 
-  it('retries a failed custom-engine unsubscribe after the remaining player cleanup finishes', () => {
+  it('retries a failed custom-engine unsubscribe after the remaining player cleanup finishes', async () => {
     const engine = new RetryableUnsubscribeAudioEngine()
     const player = new AudioPlayer({}, engine)
 
-    expect(() => player.dispose()).toThrow(engine.unsubscribeError)
+    await expect(player.dispose()).rejects.toBe(engine.unsubscribeError)
     expect(engine.disposeCalls).toBe(1)
 
-    expect(() => player.dispose()).not.toThrow()
+    await expect(player.dispose()).resolves.toBeUndefined()
     expect(engine.disposeCalls).toBe(1)
     expect(engine.unsubscribeCalls).toBe(audioEngineEventNames.length + 1)
 
@@ -4453,19 +5122,19 @@ describe('audioPlayer', () => {
     expect(player.getState()).toBe('idle')
   })
 
-  it('keeps disposed query snapshots immutable while a failed engine unsubscribe awaits retry', () => {
+  it('keeps disposed query snapshots immutable while a failed engine unsubscribe awaits retry', async () => {
     const engine = new RetryableUnsubscribeAudioEngine('volumechange')
     const player = new AudioPlayer({}, engine)
     player.setVolume(0.4)
     player.setMuted(false)
 
-    expect(() => player.dispose()).toThrow(engine.unsubscribeError)
+    await expect(player.dispose()).rejects.toBe(engine.unsubscribeError)
 
     engine.emit('volumechange', { volume: 0.9, isMuted: true })
 
     expect(player.getVolume()).toBe(0.4)
     expect(player.isMuted()).toBe(false)
-    expect(() => player.dispose()).not.toThrow()
+    await expect(player.dispose()).resolves.toBeUndefined()
   })
 
   it('rechecks router cleanup when a stale factory finishes after player disposal', async () => {
@@ -4473,8 +5142,8 @@ describe('audioPlayer', () => {
     class LateAdapterEngine extends FakeAudioEngine {
       private shouldFailDisposal = true
 
-      override dispose(): void {
-        super.dispose()
+      override async dispose(): Promise<void> {
+        await super.dispose()
         if (this.shouldFailDisposal) {
           this.shouldFailDisposal = false
           throw disposalError
@@ -4494,16 +5163,17 @@ describe('audioPlayer', () => {
       expect(adapter.createCalls).toBe(1)
     })
 
-    expect(() => player.dispose()).not.toThrow()
+    const disposal = player.dispose()
     adapter.finishCreation()
     await loadingExpectation
     expect(adapterEngine.disposeCalls).toBe(1)
+    await expect(disposal).rejects.toBe(disposalError)
 
-    expect(() => player.dispose()).not.toThrow()
+    await expect(player.dispose()).resolves.toBeUndefined()
     expect(adapterEngine.disposeCalls).toBe(2)
   })
 
-  it('keeps every read-only player query safe without touching a disposed custom engine', () => {
+  it('keeps every read-only player query safe without touching a disposed custom engine', async () => {
     const disposalError = new Error('strict engine disposal failed')
     const engine = new DisposalStrictAudioEngine()
     engine.currentTime = 45
@@ -4540,7 +5210,7 @@ describe('audioPlayer', () => {
       ],
     }])
 
-    expect(() => player.dispose()).toThrow(disposalError)
+    await expect(player.dispose()).rejects.toBe(disposalError)
     const queryCallsAfterDisposal = engine.queryCalls
 
     expect(player.getState()).toBe('idle')
@@ -4582,7 +5252,7 @@ describe('audioPlayer', () => {
     expect(engine.queryCalls).toBe(queryCallsAfterDisposal)
 
     engine.disposalError = undefined
-    expect(() => player.dispose()).not.toThrow()
+    await expect(player.dispose()).resolves.toBeUndefined()
     expect(engine.disposeCalls).toBe(2)
     expect(engine.queryCalls).toBe(queryCallsAfterDisposal)
   })
@@ -4591,8 +5261,9 @@ describe('audioPlayer', () => {
     const engine = new FakeAudioEngine()
     const player = new AudioPlayer({ source: 'https://example.com/audio.mp3' }, engine)
 
-    player.dispose()
-    player.dispose()
+    const firstDisposal = player.dispose()
+    const repeatedDisposal = player.dispose()
+    await Promise.all([firstDisposal, repeatedDisposal])
 
     expect(() => player.setSource('https://example.com/replacement.mp3')).toThrow('disposed')
     expect(() => player.on('play', () => {})).toThrow('disposed')

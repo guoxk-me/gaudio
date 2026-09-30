@@ -1,6 +1,8 @@
 import type { AdaptiveContentType } from '../adaptive-audio-types'
+import type { DashSettingsChanges } from './dashjs-types'
 
-const dashContentTypeChanges: Record<AdaptiveContentType, object> = {
+// AI modified: vendor setting types validate every preset and content override.
+const dashContentTypeChanges = {
   'vod': {},
   'long-form': {
     streaming: {
@@ -46,8 +48,8 @@ const dashContentTypeChanges: Record<AdaptiveContentType, object> = {
       },
     },
   },
-}
+} satisfies Record<AdaptiveContentType, DashSettingsChanges>
 
-export function dashContentTypeSettings(contentType: AdaptiveContentType): object {
+export function dashContentTypeSettings(contentType: AdaptiveContentType): DashSettingsChanges {
   return dashContentTypeChanges[contentType]
 }

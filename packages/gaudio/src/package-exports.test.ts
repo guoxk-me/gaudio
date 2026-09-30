@@ -39,6 +39,7 @@ describe('package exports', () => {
       readFile(resolve(projectRoot, 'src/adapters/hls/hls-audio-engine.ts'), 'utf8'),
     ])
     const packageJson = JSON.parse(packageJsonText) as {
+      devDependencies: Record<string, string>
       exports: Record<string, unknown>
       peerDependencies: Record<string, string>
       peerDependenciesMeta: Record<string, { optional?: boolean }>
@@ -46,7 +47,9 @@ describe('package exports', () => {
 
     expect(packageJson.exports).toHaveProperty('./hls')
     expect(packageJson.exports).toHaveProperty('./dash')
-    expect(packageJson.peerDependencies['hls.js']).toMatch(/^\^1\./)
+    // AI modified: hls.js 1.7 publishes types that are not compatible with the supported consumer matrix.
+    expect(packageJson.peerDependencies['hls.js']).toBe('>=1.6.16 <1.7.0')
+    expect(packageJson.devDependencies['hls.js']).toBe('~1.6.16')
     expect(packageJson.peerDependencies.dashjs).toMatch(/^\^5\./)
     expect(packageJson.peerDependenciesMeta['hls.js']?.optional).toBe(true)
     expect(packageJson.peerDependenciesMeta.dashjs?.optional).toBe(true)

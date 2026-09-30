@@ -11,6 +11,7 @@ import { afterEach, describe, expect, expectTypeOf, it, vi } from 'vitest'
 import { HttpAudioSource } from '../../source/http-audio-source'
 import { FakeAudioElement } from '../../test-support/fake-media'
 import { AdaptivePlaybackPreset } from '../adaptive-audio-types'
+import { settingsWithChanges } from '../settings-with-changes'
 import { DashAudioAdapterImpl } from './dash-audio-adapter'
 import { createDashAdapter } from './index'
 
@@ -23,6 +24,7 @@ const dashEvents: MediaPlayerEvents = {
   MANIFEST_LOADED: 'manifestLoaded',
   QUALITY_CHANGE_RENDERED: 'qualityChangeRendered',
   STREAM_INITIALIZED: 'streamInitialized',
+  STREAM_UPDATED: 'streamUpdated',
 } as MediaPlayerEvents
 
 const dashErrorCodes = {
@@ -39,6 +41,7 @@ const dashErrorCodes = {
   MANIFEST_LOADER_LOADING_FAILURE_ERROR_CODE: 11,
   MANIFEST_LOADER_PARSING_FAILURE_ERROR_CODE: 10,
   SEGMENT_BASE_LOADER_ERROR_CODE: 15,
+  TIME_SYNC_FAILED_ERROR_CODE: 16,
   XLINK_LOADER_LOADING_FAILURE_ERROR_CODE: 12,
 } as const satisfies DashErrorCodes
 
@@ -48,6 +51,9 @@ class FakeDashPlayer {
   readonly settingsUpdates: MediaPlayerSettingClass[] = []
   readonly representationSelections: Array<{ type: string, id: string, shouldSwitch: boolean }> = []
   representations: Representation[] = []
+  activeStreamId = 'stream-1'
+  currentRepresentation: Representation | null = null
+  private settings: MediaPlayerSettingClass = {}
   resetCalls = 0
   resetError?: Error
   initializationError?: unknown
@@ -68,10 +74,23 @@ class FakeDashPlayer {
 
   updateSettings(settings: MediaPlayerSettingClass): void {
     this.settingsUpdates.push(settings)
+    this.settings = settingsWithChanges(this.settings, settings)
+  }
+
+  getSettings(): MediaPlayerSettingClass {
+    return settingsWithChanges({}, this.settings)
+  }
+
+  getCurrentRepresentationForType(_type: string): Representation | null {
+    return this.currentRepresentation
   }
 
   getRepresentationsByType(_type: string): Representation[] {
     return this.representations
+  }
+
+  getActiveStream(): { getStreamId: () => string } {
+    return { getStreamId: () => this.activeStreamId }
   }
 
   setRepresentationForTypeById(type: string, id: string, shouldSwitch: boolean): void {
@@ -580,6 +599,70 @@ describe('dashAudioAdapter', () => {
     engine.dispose()
   })
 
+  it('keeps manual DASH quality when an unrelated playback setting changes', async () => {
+    const harness = dashHarness()
+    const engine = await loadDashEngine(harness)
+    const dashPlayer = harness.dashPlayers[0]
+    dashPlayer.representations = [
+      { id: 'audio-low', bandwidth: 64_000 } as Representation,
+      { id: 'audio-high', bandwidth: 192_000 } as Representation,
+    ]
+    dashPlayer.emit(dashEvents.STREAM_INITIALIZED, { streamInfo: { id: 'stream-1' } })
+    await engine.setAdaptiveQuality?.('audio-high')
+
+    harness.adapter.updateSettings({ streaming: { buffer: { bufferToKeep: 15 } } })
+
+    expect(engine.getAdaptiveQualitySelection?.()).toBe('audio-high')
+    expect(dashPlayer.getSettings()).toMatchObject({
+      streaming: { abr: { autoSwitchBitrate: { audio: false } }, buffer: { bufferToKeep: 15 } },
+    })
+    await engine.dispose()
+  })
+
+  it('reflects explicit DASH ABR mode changes in the public quality selection', async () => {
+    const harness = dashHarness()
+    const engine = await loadDashEngine(harness)
+    const dashPlayer = harness.dashPlayers[0]
+    const variantChanges: AudioEngineEvents['variantchange'][] = []
+    engine.on('variantchange', variant => variantChanges.push(variant))
+    const highRepresentation = { id: 'audio-high', bandwidth: 192_000 } as Representation
+    dashPlayer.representations = [highRepresentation]
+    dashPlayer.currentRepresentation = highRepresentation
+    dashPlayer.emit(dashEvents.STREAM_INITIALIZED, { streamInfo: { id: 'stream-1' } })
+
+    harness.adapter.updateSettings({ streaming: { abr: { autoSwitchBitrate: { audio: false } } } })
+    expect(engine.getAdaptiveQualitySelection?.()).toBe('audio-high')
+
+    await engine.setAdaptiveQuality?.('audio-high')
+    harness.adapter.updateSettings({ streaming: { abr: { autoSwitchBitrate: { audio: true } } } })
+    expect(engine.getAdaptiveQualitySelection?.()).toBe('auto')
+    expect(dashPlayer.getSettings()).toMatchObject({
+      streaming: { abr: { autoSwitchBitrate: { audio: true } } },
+    })
+    dashPlayer.emit(dashEvents.QUALITY_CHANGE_RENDERED, {
+      mediaType: 'audio',
+      oldRepresentation: highRepresentation,
+      newRepresentation: highRepresentation,
+    })
+    expect(variantChanges.at(-1)).toMatchObject({ variantId: 'audio-high', reason: 'automatic' })
+    await engine.dispose()
+  })
+
+  it('reports an initially fixed DASH representation once the stream is initialized', async () => {
+    const harness = dashHarness({
+      settings: { streaming: { abr: { autoSwitchBitrate: { audio: false } } } },
+    })
+    const engine = await loadDashEngine(harness)
+    const dashPlayer = harness.dashPlayers[0]
+    const representation = { id: 'auto', bandwidth: 128_000 } as Representation
+    dashPlayer.representations = [representation]
+    dashPlayer.currentRepresentation = representation
+    dashPlayer.emit(dashEvents.STREAM_INITIALIZED, { streamInfo: { id: 'stream-1' } })
+
+    expect(engine.getAdaptiveQualitySelection?.()).toBe('auto:0')
+    await engine.dispose()
+  })
+
   it('accepts sparse nested settings while retaining vendor atomic value types', () => {
     const sparseSettings = {
       streaming: {
@@ -759,6 +842,46 @@ describe('dashAudioAdapter', () => {
     expect(fatalErrors).toEqual([])
   })
 
+  it('publishes segmentloaded only after a failed DASH fragment is successfully retried', async () => {
+    const harness = dashHarness()
+    const engine = await loadDashEngine(harness)
+    const segmentLoads: AudioEngineEvents['segmentloaded'][] = []
+    engine.on('segmentloaded', segment => segmentLoads.push(segment))
+    const request = {
+      url: '/retried-segment.m4s',
+      representationId: 'audio-128',
+      duration: 4,
+      mediaType: 'audio',
+    }
+    const dashPlayer = harness.dashPlayers[0]
+
+    try {
+      // AI modified: dash.js publishes completion for both failed requests and successful retries.
+      dashPlayer.emit(dashEvents.FRAGMENT_LOADING_COMPLETED, {
+        request,
+        response: null,
+        error: { code: dashErrorCodes.FRAGMENT_LOADER_LOADING_FAILURE_ERROR_CODE, message: '404' },
+      })
+      expect(segmentLoads).toEqual([])
+
+      dashPlayer.emit(dashEvents.FRAGMENT_LOADING_COMPLETED, {
+        request,
+        response: new ArrayBuffer(8),
+        error: null,
+      })
+      expect(segmentLoads).toEqual([{
+        protocol: 'dash',
+        implementation: 'dash.js',
+        url: request.url,
+        variantId: request.representationId,
+        duration: request.duration,
+      }])
+    }
+    finally {
+      await engine.dispose()
+    }
+  })
+
   it('selects DASH variants through the unified adaptive quality API', async () => {
     const harness = dashHarness()
     const engine = await harness.adapter.createEngine()
@@ -903,7 +1026,8 @@ describe('dashAudioAdapter', () => {
       { id: 'audio-high', bandwidth: 192_000, codecs: 'mp4a.40.2' } as Representation,
       { id: 'auto', bandwidth: 64_000, codecs: 'mp4a.40.2' } as Representation,
     ]
-    dashPlayer.emit(dashEvents.STREAM_INITIALIZED, { error: null, streamInfo: { id: 'stream-1-refresh' } })
+    // AI modified: dash.js refreshes an existing Period through STREAM_UPDATED, not initialization.
+    dashPlayer.emit(dashEvents.STREAM_UPDATED, { streamInfo: { id: 'stream-1' } })
 
     expect(engine.getAdaptiveVariants?.()).toEqual([
       { id: 'auto:1:0', bitrate: 96_000, codecs: 'mp4a.40.2' },
@@ -947,7 +1071,7 @@ describe('dashAudioAdapter', () => {
       { id: 'auto:1', bandwidth: 96_000, codecs: 'mp4a.40.2' } as Representation,
       { id: 'auto', bandwidth: 64_000, codecs: 'mp4a.40.2' } as Representation,
     ]
-    dashPlayer.emit(dashEvents.STREAM_INITIALIZED, { error: null, streamInfo: { id: 'stream-1-refresh-2' } })
+    dashPlayer.emit(dashEvents.STREAM_UPDATED, { streamInfo: { id: 'stream-1' } })
 
     expect(engine.getAdaptiveQualitySelection?.()).toBe('auto')
     expect(dashPlayer.settingsUpdates.at(-1)).toMatchObject({
@@ -974,6 +1098,32 @@ describe('dashAudioAdapter', () => {
         },
       },
     })
+  })
+
+  it('ignores DASH updates before initialization and for an inactive Period', async () => {
+    const harness = dashHarness({ contentType: 'live' })
+    const engine = await loadDashEngine(harness)
+    const dashPlayer = harness.dashPlayers[0]
+    const manifests: AudioEngineEvents['manifestloaded'][] = []
+    engine.on('manifestloaded', manifest => manifests.push(manifest))
+    dashPlayer.representations = [
+      { id: 'audio-low', bandwidth: 64_000 } as Representation,
+    ]
+
+    dashPlayer.emit(dashEvents.STREAM_UPDATED, { streamInfo: { id: 'stream-1' } })
+    expect(manifests).toHaveLength(0)
+
+    dashPlayer.emit(dashEvents.STREAM_INITIALIZED, { streamInfo: { id: 'stream-1' } })
+    dashPlayer.representations = [
+      { id: 'audio-high', bandwidth: 192_000 } as Representation,
+    ]
+    dashPlayer.emit(dashEvents.STREAM_UPDATED, { streamInfo: { id: 'future-period' } })
+    expect(manifests).toHaveLength(1)
+    expect(engine.getAdaptiveVariants?.()).toMatchObject([{ id: 'audio-low' }])
+
+    dashPlayer.emit(dashEvents.STREAM_UPDATED, { streamInfo: { id: 'stream-1' } })
+    expect(engine.getAdaptiveVariants?.()).toMatchObject([{ id: 'audio-high' }])
+    await engine.dispose()
   })
 
   it('isolates DASH variant query and manifest snapshots from selection state', async () => {
@@ -1070,6 +1220,62 @@ describe('dashAudioAdapter', () => {
     await loadExpectation
 
     expect(errorCodes).toEqual(['MANIFEST_ERROR'])
+  })
+
+  // AI modified: failed UTC synchronization and XLink defaults can recover during initialization or later manifest work.
+  it.each([
+    ['loading', 'UTC synchronization', dashErrorCodes.TIME_SYNC_FAILED_ERROR_CODE],
+    ['playing', 'UTC synchronization', dashErrorCodes.TIME_SYNC_FAILED_ERROR_CODE],
+    ['loading', 'XLink download', dashErrorCodes.DOWNLOAD_ERROR_ID_XLINK_CODE],
+    ['playing', 'XLink download', dashErrorCodes.DOWNLOAD_ERROR_ID_XLINK_CODE],
+  ] as const)('keeps DASH %s usable after %s fails', async (phase, operation, vendorErrorCode) => {
+    const harness = dashHarness({ contentType: 'live' })
+    const engine = await harness.adapter.createEngine()
+    const streamErrors: AudioEngineEvents['streamerror'][] = []
+    const fatalErrors: AudioEngineEvents['error'][] = []
+    engine.on('streamerror', error => streamErrors.push(error))
+    engine.on('error', error => fatalErrors.push(error))
+    const loadCompletion = engine.load(new HttpAudioSource('/live.mpd')).then(
+      () => undefined,
+      (error: unknown) => error,
+    )
+    await vi.waitFor(() => {
+      expect(engine.getActiveAdaptivePlayback?.()).toBeDefined()
+    })
+    if (phase === 'playing') {
+      harness.audioElements[0].dispatchEvent(new Event('loadedmetadata'))
+      expect(await loadCompletion).toBeUndefined()
+      await engine.play()
+    }
+
+    const dashPlayer = harness.dashPlayers[0]
+    const vendorError = {
+      error: {
+        code: vendorErrorCode,
+        message: `${operation} failed`,
+      },
+    }
+    dashPlayer.emit(dashEvents.ERROR, vendorError)
+    if (phase === 'loading') {
+      harness.audioElements[0].dispatchEvent(new Event('loadedmetadata'))
+    }
+
+    try {
+      expect(await loadCompletion).toBeUndefined()
+      expect(streamErrors).toMatchObject([{
+        isFatal: false,
+        code: String(vendorErrorCode),
+        cause: vendorError,
+      }])
+      expect(fatalErrors).toEqual([])
+      expect(dashPlayer.resetCalls).toBe(0)
+      expect(harness.adapter.dashInstance).toBe(dashPlayer)
+      await engine.play()
+      expect(engine.isPaused()).toBe(false)
+    }
+    finally {
+      await engine.dispose()
+    }
   })
 
   it.each([
@@ -1234,12 +1440,12 @@ describe('dashAudioAdapter', () => {
     const disposalError = new Error('dash reset failed')
     harness.dashPlayers[0].resetError = disposalError
 
-    expect(() => engine.dispose()).toThrow(disposalError)
+    await expect(engine.dispose()).rejects.toBe(disposalError)
 
     expect(harness.adapter.dashInstance).toBeUndefined()
 
     harness.dashPlayers[0].resetError = undefined
-    expect(() => engine.dispose()).not.toThrow()
+    await expect(engine.dispose()).resolves.toBeUndefined()
     expect(harness.dashPlayers[0].resetCalls).toBe(2)
     expect(harness.adapter.dashInstance).toBeUndefined()
     expect(closeSource).toHaveBeenCalledOnce()
@@ -1271,22 +1477,19 @@ describe('dashAudioAdapter', () => {
     const vendorCleanupError = new Error('dash reset failed')
     dashPlayer.resetError = vendorCleanupError
 
-    expect(() => engine.dispose()).toThrow(vendorCleanupError)
-    await Promise.resolve()
-    await Promise.resolve()
+    await expect(engine.dispose()).rejects.toBe(vendorCleanupError)
     expect(dashPlayer.resetCalls).toBe(1)
     expect(closeSource).toHaveBeenCalledOnce()
     const browserLoadCalls = harness.audioElements[0].loadCalls
 
     // AI modified: a repeated vendor failure cannot short-circuit the base source retry.
-    expect(() => engine.dispose()).toThrow(vendorCleanupError)
-    await Promise.resolve()
+    await expect(engine.dispose()).rejects.toBe(vendorCleanupError)
     expect(dashPlayer.resetCalls).toBe(2)
     expect(closeSource).toHaveBeenCalledTimes(2)
     expect(harness.audioElements[0].loadCalls).toBe(browserLoadCalls)
 
     dashPlayer.resetError = undefined
-    expect(() => engine.dispose()).not.toThrow()
+    await expect(engine.dispose()).resolves.toBeUndefined()
     expect(dashPlayer.resetCalls).toBe(3)
     expect(closeSource).toHaveBeenCalledTimes(2)
     expect(harness.audioElements[0].loadCalls).toBe(browserLoadCalls)
@@ -1310,17 +1513,17 @@ describe('dashAudioAdapter', () => {
       removeAttribute(name)
     })
 
-    expect(() => engine.dispose()).toThrow(vendorCleanupError)
+    await expect(engine.dispose()).rejects.toBe(vendorCleanupError)
     expect(dashPlayer.resetCalls).toBe(1)
     expect(removeAttributeSpy).toHaveBeenCalledOnce()
 
     dashPlayer.resetError = undefined
-    expect(() => engine.dispose()).not.toThrow()
+    await expect(engine.dispose()).resolves.toBeUndefined()
     expect(dashPlayer.resetCalls).toBe(2)
     expect(removeAttributeSpy).toHaveBeenCalledTimes(2)
     const browserLoadCallsAfterCleanup = audioElement.loadCalls
 
-    engine.dispose()
+    await engine.dispose()
     expect(dashPlayer.resetCalls).toBe(2)
     expect(removeAttributeSpy).toHaveBeenCalledTimes(2)
     expect(audioElement.loadCalls).toBe(browserLoadCallsAfterCleanup)

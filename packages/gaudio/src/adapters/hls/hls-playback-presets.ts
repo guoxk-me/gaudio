@@ -1,6 +1,8 @@
+import type { HlsAdapterConfig } from './hls-audio-adapter'
 import { AdaptivePlaybackPreset } from '../adaptive-audio-types'
 
-const hlsPresetChanges: Record<AdaptivePlaybackPreset, object> = {
+// AI modified: vendor setting types validate every preset and content override.
+const hlsPresetChanges = {
   [AdaptivePlaybackPreset.FastStart]: {
     maxBufferLength: 12,
     maxMaxBufferLength: 30,
@@ -88,8 +90,8 @@ const hlsPresetChanges: Record<AdaptivePlaybackPreset, object> = {
       },
     },
   },
-}
+} satisfies Record<AdaptivePlaybackPreset, HlsAdapterConfig>
 
-export function hlsPresetConfig(preset: AdaptivePlaybackPreset): object {
+export function hlsPresetConfig(preset: AdaptivePlaybackPreset): HlsAdapterConfig {
   return hlsPresetChanges[preset]
 }

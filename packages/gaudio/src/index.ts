@@ -3,7 +3,7 @@
  *
  * @module core
  */
-// AI modified: an explicit TypeDoc module name avoids VitePress /api/index route ambiguity.
+// AI modified: an explicit TypeDoc module name avoids generated /api/index route ambiguity.
 export { AdaptivePlaybackPreset } from './adapters/adaptive-audio-types'
 export type {
   AdaptiveAudioProtocol,
@@ -26,6 +26,8 @@ export type {
 export type { AudioEngine, AudioEngineEvents } from './engine/audio-engine'
 export type { AudioEngineAdapter } from './engine/audio-engine-adapter'
 export type {
+  AudioCrossOriginMode,
+  AudioEngineLoadOptions,
   AudioFormatSupport,
   BufferUpdate,
   DurationUpdate,

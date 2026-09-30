@@ -1,4 +1,6 @@
 import type {
+  AudioEngine,
+  AudioEngineLoadOptions,
   AudioPlayerOptions,
   AudioSourceDescription,
 } from 'gaudio'
@@ -37,6 +39,7 @@ const playerOptions: AudioPlayerOptions = {
     dashAdapter,
   ],
   source,
+  crossOrigin: 'use-credentials',
 }
 
 // AI modified: the CommonJS declaration must preserve the supported subclass contract.
@@ -60,5 +63,21 @@ if (false) {
   blobSource.url = 'blob:https://example.com/consumer-owned'
 }
 
-// AI modified: compile the CommonJS declaration conditions from a real external consumer.
-new AudioPlayer(playerOptions).dispose()
+// AI modified: compile the CommonJS asynchronous disposal contract from a real external consumer.
+const disposal: Promise<void> = new AudioPlayer(playerOptions).dispose()
+void disposal
+
+// AI modified: packed declarations preserve optional browser capabilities and the per-load CORS contract.
+const browserCapabilities: Pick<AudioEngine, | 'fastSeek'
+  | 'setPreload'
+  | 'getPreload'
+  | 'setAutoplay'
+  | 'getAutoplay'
+  | 'getSeekableRanges'
+  | 'getPlayedRanges'
+  | 'canPlayType'> = {}
+const engineLoadOptions: AudioEngineLoadOptions = { crossOrigin: 'anonymous' }
+void browserCapabilities
+if (false) {
+  void new MediaElementAudioEngine().load(blobSource, engineLoadOptions)
+}

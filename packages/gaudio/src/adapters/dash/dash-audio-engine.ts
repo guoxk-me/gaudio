@@ -9,16 +9,17 @@ import type {
 } from '../adaptive-audio-types'
 import type {
   DashErrorEvent,
+  DashSettingsChanges,
   FragmentLoadingCompletedEvent,
   MediaPlayerClass,
   MediaPlayerErrors,
   MediaPlayerEvents,
   MediaPlayerSettingClass,
   QualityChangeRenderedEvent,
-  StreamInitializedEvent,
 } from './dashjs-types'
 import { MediaElementAudioEngine } from '../../engine/media-element-audio-engine'
 import { GAudioError } from '../../errors/errors'
+import { settingsWithChanges } from '../settings-with-changes'
 
 interface DashAudioEngineOptions {
   settings: MediaPlayerSettingClass
@@ -54,6 +55,7 @@ export type DashErrorCodes = Pick<
   | 'MANIFEST_LOADER_LOADING_FAILURE_ERROR_CODE'
   | 'MANIFEST_LOADER_PARSING_FAILURE_ERROR_CODE'
   | 'SEGMENT_BASE_LOADER_ERROR_CODE'
+  | 'TIME_SYNC_FAILED_ERROR_CODE'
   | 'XLINK_LOADER_LOADING_FAILURE_ERROR_CODE'
 >
 
@@ -73,6 +75,9 @@ export class DashAudioEngine extends MediaElementAudioEngine {
   private adaptiveQualitySelection: AdaptiveQualitySelection = 'auto'
   private pendingManualVariantId?: string
   private hasStartedDisposal = false
+  private hasFinishedDisposal = false
+  private hasCompletedDisposeCallback = false
+  private activeDisposal?: Promise<void>
 
   constructor(options: DashAudioEngineOptions) {
     super(options.audioElement)
@@ -84,10 +89,14 @@ export class DashAudioEngine extends MediaElementAudioEngine {
     this.onDispose = options.onDispose
   }
 
-  updateSettings(settings: MediaPlayerSettingClass): void {
+  updateSettings(settings: MediaPlayerSettingClass, settingChanges: DashSettingsChanges): void {
     // AI modified: a reused engine must apply the latest adapter settings to every future dash.js instance.
     this.settings = settings
-    this.dashPlayer?.updateSettings(settings)
+    if (this.dashPlayer) {
+      // AI modified: runtime ABR choices survive unrelated adapter settings while future loads retain their defaults.
+      this.dashPlayer.updateSettings(settingsWithChanges(this.dashPlayer.getSettings(), settingChanges))
+      this.followDashQualityMode()
+    }
   }
 
   getActiveAdaptivePlayback(): AdaptivePlaybackInfo | undefined {
@@ -175,11 +184,17 @@ export class DashAudioEngine extends MediaElementAudioEngine {
     }
   }
 
-  override dispose(): void {
+  override dispose(): Promise<void> {
+    if (this.hasFinishedDisposal) {
+      return Promise.resolve()
+    }
+    if (this.activeDisposal) {
+      return this.activeDisposal
+    }
+
     const isRepeatedDisposal = this.hasStartedDisposal
     this.hasStartedDisposal = true
-    let firstCleanupError: unknown
-    let hasCleanupError = false
+    const cleanupErrors: unknown[] = []
 
     if (isRepeatedDisposal || this.pendingDashCleanup) {
       try {
@@ -187,32 +202,43 @@ export class DashAudioEngine extends MediaElementAudioEngine {
         this.resetDashInstance()
       }
       catch (error) {
-        hasCleanupError = true
-        firstCleanupError = error
+        cleanupErrors.push(error)
       }
     }
 
+    let baseDisposal = Promise.resolve()
     try {
-      super.dispose()
+      baseDisposal = super.dispose()
     }
     catch (error) {
-      if (!hasCleanupError) {
-        hasCleanupError = true
-        firstCleanupError = error
+      cleanupErrors.push(error)
+    }
+    if (!this.hasCompletedDisposeCallback) {
+      try {
+        this.onDispose()
+        this.hasCompletedDisposeCallback = true
+      }
+      catch (error) {
+        cleanupErrors.push(error)
       }
     }
-    try {
-      this.onDispose()
-    }
-    catch (error) {
-      if (!hasCleanupError) {
-        hasCleanupError = true
-        firstCleanupError = error
+
+    const cleanup = baseDisposal.catch((error: unknown) => {
+      cleanupErrors.push(error)
+    }).then(() => {
+      if (cleanupErrors.length > 0) {
+        throw cleanupErrors[0]
       }
-    }
-    if (hasCleanupError) {
-      throw firstCleanupError
-    }
+      this.hasFinishedDisposal = true
+    })
+    // AI modified: vendor, browser, and adapter cleanup share one observable disposal attempt.
+    const activeDisposal = cleanup.finally(() => {
+      if (this.activeDisposal === activeDisposal) {
+        this.activeDisposal = undefined
+      }
+    })
+    this.activeDisposal = activeDisposal
+    return activeDisposal
   }
 
   protected override attachSourceUrl(url: string): void {
@@ -231,10 +257,26 @@ export class DashAudioEngine extends MediaElementAudioEngine {
     const dashPlayer = this.createDashPlayer()
     this.dashPlayer = dashPlayer
     this.onDashInstanceChange(dashPlayer)
+    let hasInitializedStream = false
     // AI modified: instance-bound listeners ignore queued events from a reset player after source replacement.
-    dashPlayer.on(this.dashEvents.STREAM_INITIALIZED, (payload: StreamInitializedEvent) => {
+    dashPlayer.on(this.dashEvents.STREAM_INITIALIZED, () => {
       if (this.dashPlayer === dashPlayer) {
-        this.handleStreamInitialized(payload)
+        hasInitializedStream = true
+        this.refreshAdaptiveVariants()
+      }
+    })
+    dashPlayer.on(this.dashEvents.STREAM_UPDATED, (payload) => {
+      // AI modified: live MPD refreshes update only the active Period's public representations.
+      if (
+        this.dashPlayer === dashPlayer
+        && hasInitializedStream
+        && 'streamInfo' in payload
+        && typeof payload.streamInfo === 'object'
+        && payload.streamInfo !== null
+        && 'id' in payload.streamInfo
+        && payload.streamInfo.id === dashPlayer.getActiveStream()?.getStreamId()
+      ) {
+        this.refreshAdaptiveVariants()
       }
     })
     dashPlayer.on(this.dashEvents.QUALITY_CHANGE_RENDERED, (payload: QualityChangeRenderedEvent) => {
@@ -370,7 +412,7 @@ export class DashAudioEngine extends MediaElementAudioEngine {
     }
   }
 
-  private readonly handleStreamInitialized = (_payload: StreamInitializedEvent): void => {
+  private refreshAdaptiveVariants(): void {
     const variants = this.dashPlayer?.getRepresentationsByType('audio') ?? []
     const unassignedVendorVariantIds = new Set(
       variants
@@ -430,16 +472,13 @@ export class DashAudioEngine extends MediaElementAudioEngine {
       this.adaptiveQualitySelection = 'auto'
       this.pendingManualVariantId = undefined
     }
+    this.followDashQualityMode()
     this.events.emit('manifestloaded', {
       protocol: 'dash',
       implementation: 'dash.js',
       url: this.activeUrl ?? '',
       // AI modified: event consumers receive a snapshot isolated from the engine's selection metadata.
-      variants: this.adaptiveVariants.map(variant => ({
-        id: variant.id,
-        bitrate: variant.bitrate,
-        codecs: variant.codecs,
-      })),
+      variants: this.getAdaptiveVariants(),
     })
   }
 
@@ -447,6 +486,8 @@ export class DashAudioEngine extends MediaElementAudioEngine {
     if (payload.mediaType !== 'audio') {
       return
     }
+
+    this.followDashQualityMode()
 
     const variantId = this.publicVariantIdForVendorId(payload.newRepresentation?.id)
     const isManualSelection = variantId !== undefined && variantId === this.pendingManualVariantId
@@ -483,7 +524,8 @@ export class DashAudioEngine extends MediaElementAudioEngine {
   }
 
   private readonly handleFragmentLoadingCompleted = (payload: FragmentLoadingCompletedEvent): void => {
-    if (payload.request.mediaType !== 'audio') {
+    // AI modified: dash.js also completes failed requests; its declarations omit the runtime error field.
+    if (payload.request.mediaType !== 'audio' || ('error' in payload && payload.error)) {
       return
     }
 
@@ -499,9 +541,12 @@ export class DashAudioEngine extends MediaElementAudioEngine {
   private readonly handleDashError = (payload: DashErrorEvent): void => {
     const dashPlayer = this.dashPlayer
     const category = this.errorCategory(payload)
-    const isStructuredFatalError = typeof payload.error === 'object' && payload.error !== null
-    // AI modified: dash.js structured error codes are terminal even when they identify a segment resource.
-    const isFatal = isStructuredFatalError || (category !== 'segment' && category !== 'network')
+    // AI modified: dash.js continues after UTC timing failures and falls back to MPD defaults after failed XLink downloads.
+    const isRecoverable = typeof payload.error === 'object' && payload.error !== null
+      ? payload.error.code === this.dashErrorCodes.TIME_SYNC_FAILED_ERROR_CODE
+      || payload.error.code === this.dashErrorCodes.DOWNLOAD_ERROR_ID_XLINK_CODE
+      : category === 'segment' || category === 'network'
+    const isFatal = !isRecoverable
     const vendorErrorCode = this.dashErrorCode(payload)
     const streamError: AdaptiveStreamError = {
       protocol: 'dash',
@@ -531,6 +576,26 @@ export class DashAudioEngine extends MediaElementAudioEngine {
       return undefined
     }
     return this.publicVariantIdsByVendorVariantId.get(vendorVariantId) ?? vendorVariantId
+  }
+
+  private followDashQualityMode(): void {
+    const dashPlayer = this.dashPlayer
+    if (!dashPlayer) {
+      return
+    }
+    // AI modified: explicit ABR settings report the actual mode, including an initially fixed representation.
+    if (dashPlayer.getSettings().streaming?.abr?.autoSwitchBitrate?.audio !== false) {
+      this.adaptiveQualitySelection = 'auto'
+      this.pendingManualVariantId = undefined
+      return
+    }
+    if (this.adaptiveQualitySelection === 'auto' && this.adaptiveVariants.length > 0) {
+      const currentRepresentation = dashPlayer.getCurrentRepresentationForType('audio')
+      const variantId = this.publicVariantIdForVendorId(currentRepresentation?.id)
+      if (variantId !== undefined && this.adaptiveVariants.some(variant => variant.id === variantId)) {
+        this.adaptiveQualitySelection = variantId
+      }
+    }
   }
 
   private errorCategory(payload: DashErrorEvent): AdaptiveStreamError['category'] {

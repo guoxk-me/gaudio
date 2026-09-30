@@ -11,6 +11,7 @@ import type { AudioAnalyzer, AudioAnalyzerOptions } from '../analysis/audio-anal
 import type { GAudioError } from '../errors/errors'
 import type { AudioSource } from '../source/audio-source'
 import type {
+  AudioEngineLoadOptions,
   AudioFormatSupport,
   BufferUpdate,
   DurationUpdate,
@@ -95,14 +96,22 @@ export const audioEngineEventNames = [
   'error',
 ] as const satisfies readonly (keyof AudioEngineEvents)[]
 
-/** Playback engine contract used by {@link AudioPlayer} and adaptive adapters. */
+/**
+ * Playback engine contract used by {@link AudioPlayer} and adaptive adapters.
+ *
+ * Optional members describe browser hints and extra capabilities. Core playback controls,
+ * lifecycle events, source cancellation, and resource disposal remain the engine's responsibility:
+ * superseded work must not alter a newer source, and disposal must finish owned asynchronous cleanup.
+ */
 export interface AudioEngine {
   /**
    * Loads a source and resolves when its metadata is available.
    *
    * @param source Source to open and attach to the engine.
+   * @param options Optional request policy for this load.
    */
-  load: (source: AudioSource) => Promise<void>
+  // AI modified: per-load request policy reaches browser engines without adding required media-only setters.
+  load: (source: AudioSource, options?: AudioEngineLoadOptions) => Promise<void>
   /** Cancels loading and detaches the current source. */
   unload: () => void
   /** Starts or resumes playback. */
@@ -119,26 +128,31 @@ export interface AudioEngine {
   seek: (seconds: number) => Promise<void>
   /**
    * Uses an optimized browser seek path when the runtime provides one.
+   * Players and routers call {@link seek} when this method is omitted.
    *
    * @param seconds Target playback position in seconds for the optimized seek path.
    */
-  fastSeek: (seconds: number) => Promise<void>
+  // AI modified: browser-only capabilities are optional where the player and router provide explicit fallbacks.
+  fastSeek?: (seconds: number) => Promise<void>
   /**
    * Applies the browser's media-fetch hint to current and future source loads.
+   * When omitted, players and routers retain the requested hint without changing engine fetching.
    *
    * @param preload Browser preload hint for current and future sources.
    */
-  setPreload: (preload: PreloadMode) => void
-  /** Returns the current browser preload hint. */
-  getPreload: () => PreloadMode
+  setPreload?: (preload: PreloadMode) => void
+  /** Returns the current browser preload hint. When omitted, the configured hint is retained by the caller. */
+  getPreload?: () => PreloadMode
   /**
    * Controls native media autoplay for engines that delegate the policy to the browser.
+   * Engines that omit this method must keep loaded sources paused until {@link play} is requested.
+   * AudioPlayer manages its own autoplay flow independently of this browser hint.
    *
    * @param shouldAutoplay Whether engine-native autoplay should be enabled.
    */
-  setAutoplay: (shouldAutoplay: boolean) => void
-  /** Returns whether engine-native autoplay is enabled. */
-  getAutoplay: () => boolean
+  setAutoplay?: (shouldAutoplay: boolean) => void
+  /** Returns native autoplay configuration. Routers retain their configured hint when this query is omitted. */
+  getAutoplay?: () => boolean
   /**
    * Changes output gain without altering the configured mute state.
    *
@@ -191,16 +205,17 @@ export interface AudioEngine {
   isSeeking: () => boolean
   /** Returns currently buffered media ranges in seconds. */
   getBufferedRanges: () => readonly TimeRange[]
-  /** Returns currently seekable media ranges in seconds. */
-  getSeekableRanges: () => readonly TimeRange[]
-  /** Returns media ranges played during the current source lifecycle. */
-  getPlayedRanges: () => readonly TimeRange[]
+  /** Returns seekable media ranges in seconds. Omission means unknown ranges and is exposed as an empty array. */
+  getSeekableRanges?: () => readonly TimeRange[]
+  /** Returns ranges played during this source lifecycle. Omission means unknown history and is exposed as an empty array. */
+  getPlayedRanges?: () => readonly TimeRange[]
   /**
    * Reports whether the engine can play a MIME type.
+   * Omission means unknown support and is exposed as an empty string.
    *
    * @param mimeType MIME type with optional codec parameters.
    */
-  canPlayType: (mimeType: string) => AudioFormatSupport
+  canPlayType?: (mimeType: string) => AudioFormatSupport
   /** Returns the active adaptive playback implementation, when one is loaded. */
   getActiveAdaptivePlayback?: () => AdaptivePlaybackInfo | undefined
   /** Returns currently known adaptive variants for the active source. */
@@ -237,6 +252,7 @@ export interface AudioEngine {
    * Releases listeners, active loads, sources, and vendor resources.
    *
    * Implementations do not need to support other engine methods after disposal.
+   * The returned promise settles only after every owned asynchronous cleanup attempt finishes.
    */
-  dispose: () => void
+  dispose: () => Promise<void>
 }

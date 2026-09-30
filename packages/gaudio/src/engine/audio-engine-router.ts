@@ -5,14 +5,14 @@ import type { AudioAnalyzer, AudioAnalyzerOptions } from '../analysis/audio-anal
 import type { AudioProtocol, AudioSource } from '../source/audio-source'
 import type { AudioEngine, AudioEngineEvents } from './audio-engine'
 import type { AudioEngineAdapter } from './audio-engine-adapter'
-import type { AudioFormatSupport, PreloadMode, TimeRange } from './audio-engine-types'
+import type { AudioEngineLoadOptions, AudioFormatSupport, PreloadMode, TimeRange } from './audio-engine-types'
 import type { EngineOperationGate } from './engine-operation-gate'
 import { GAudioError } from '../errors/errors'
 import { EventEmitter } from '../events/event-emitter'
 import { audioProtocolForMimeType, resolveAudioProtocol } from '../source/audio-protocol'
 import { audioEngineEventNames } from './audio-engine'
 import { createEngineOperationGate, observeEngineOperation } from './engine-operation-gate'
-import { MediaElementAudioEngine, mediaElementCleanupStatus } from './media-element-audio-engine'
+import { MediaElementAudioEngine } from './media-element-audio-engine'
 
 interface AudioEngineRouterOptions {
   adapters?: readonly AudioEngineAdapter[]
@@ -78,9 +78,11 @@ export class AudioEngineRouter implements AudioEngine {
   private activeOperation?: RouterOperation
   private isDisposed = false
   private readonly pendingEngineDisposals = new Set<AudioEngine>()
-  private readonly failedEngineDisposals = new Set<AudioEngine>()
+  private readonly activeEngineDisposals = new Map<AudioEngine, Promise<void>>()
+  private readonly pendingEngineFactories = new Set<Promise<AudioEngine>>()
+  private readonly pendingFactoryCleanupErrors: unknown[] = []
+  private activeDisposal?: Promise<void>
   private readonly activeControls = new Set<ActiveRouterControl>()
-  private pendingAdapterFactoryCount = 0
   private removeEngineListeners: Array<() => void> = []
 
   constructor(options: AudioEngineRouterOptions = {}) {
@@ -111,7 +113,7 @@ export class AudioEngineRouter implements AudioEngine {
     }
   }
 
-  async load(source: AudioSource): Promise<void> {
+  async load(source: AudioSource, options?: AudioEngineLoadOptions): Promise<void> {
     if (this.isDisposed) {
       throw new GAudioError('ENGINE_ERROR', 'Audio engine router has been disposed')
     }
@@ -131,10 +133,7 @@ export class AudioEngineRouter implements AudioEngine {
         loadStartErrors.push(error)
       }
       const pendingEngines = [...this.pendingEngineDisposals]
-      loadStartErrors.push(...this.disposeEngines(pendingEngines))
-      if (pendingEngines.length > 0) {
-        loadStartErrors.push(...await this.waitForEngineCleanups(pendingEngines, operation))
-      }
+      loadStartErrors.push(...await this.disposeEngines(pendingEngines))
       if (!this.isCurrentOperation(operation) || this.isDisposed) {
         throw this.loadAbortedError()
       }
@@ -161,7 +160,8 @@ export class AudioEngineRouter implements AudioEngine {
       // AI modified: every source load gets a fresh event generation, including same-protocol reuse.
       this.bindEngineSession(engine)
       try {
-        await this.waitForOperation(engine.load(source), operation)
+        // AI modified: per-load request policy reaches the selected engine without becoming router state.
+        await this.waitForOperation(engine.load(source, options), operation)
       }
       catch (error) {
         if (operation.terminalError) {
@@ -200,8 +200,8 @@ export class AudioEngineRouter implements AudioEngine {
     catch (error) {
       unloadErrors.push(error)
     }
-    // AI modified: later lifecycle operations retry engines whose earlier disposal could not finish.
-    unloadErrors.push(...this.disposeEngines([...this.pendingEngineDisposals]))
+    // AI modified: unload starts retryable cleanup; the next asynchronous load or disposal waits for it.
+    void this.disposeEngines([...this.pendingEngineDisposals])
     try {
       this.activeEngine?.unload()
     }
@@ -220,6 +220,8 @@ export class AudioEngineRouter implements AudioEngine {
   }
 
   pause(): void {
+    // AI modified: synchronous engine listeners can create new controls that this older pause must not cancel.
+    const supersededControls = [...this.activeControls]
     try {
       this.activeEngine?.pause()
     }
@@ -227,11 +229,14 @@ export class AudioEngineRouter implements AudioEngine {
       this.rejectActiveControls(
         new GAudioError('LOAD_ABORTED', 'Audio playback was superseded by pause'),
         ['play'],
+        { controls: supersededControls },
       )
     }
   }
 
   stop(): void {
+    // AI modified: capture older work before engine callbacks can issue a newer play or seek.
+    const supersededControls = [...this.activeControls]
     try {
       this.activeEngine?.stop()
     }
@@ -239,6 +244,7 @@ export class AudioEngineRouter implements AudioEngine {
       this.rejectActiveControls(
         new GAudioError('LOAD_ABORTED', 'Audio playback or seeking was superseded by stop'),
         ['play', 'position'],
+        { controls: supersededControls },
       )
     }
   }
@@ -258,27 +264,28 @@ export class AudioEngineRouter implements AudioEngine {
       new GAudioError('LOAD_ABORTED', 'Audio seek was superseded by a newer seek'),
       ['position'],
     )
-    await this.runControl('position', engine, () => engine.fastSeek(seconds))
+    // AI modified: routed engines may provide exact seeking without a browser-specific optimized path.
+    await this.runControl('position', engine, () => engine.fastSeek ? engine.fastSeek(seconds) : engine.seek(seconds))
   }
 
   setPreload(preload: PreloadMode): void {
     this.updateMediaSetting('preload', preload, (engine, nextPreload) => {
-      engine.setPreload(nextPreload)
+      engine.setPreload?.(nextPreload)
     })
   }
 
   getPreload(): PreloadMode {
-    return this.activeEngine?.getPreload() ?? this.settings.preload
+    return this.activeEngine?.getPreload?.() ?? this.settings.preload
   }
 
   setAutoplay(shouldAutoplay: boolean): void {
     this.updateMediaSetting('autoplay', shouldAutoplay, (engine, nextAutoplay) => {
-      engine.setAutoplay(nextAutoplay)
+      engine.setAutoplay?.(nextAutoplay)
     })
   }
 
   getAutoplay(): boolean {
-    return this.activeEngine?.getAutoplay() ?? this.settings.autoplay
+    return this.activeEngine?.getAutoplay?.() ?? this.settings.autoplay
   }
 
   setVolume(volume: number): void {
@@ -360,14 +367,14 @@ export class AudioEngineRouter implements AudioEngine {
   }
 
   getSeekableRanges(): readonly TimeRange[] {
-    return this.activeEngine?.getSeekableRanges().map(range => ({
+    return this.activeEngine?.getSeekableRanges?.().map(range => ({
       start: range.start,
       end: range.end,
     })) ?? []
   }
 
   getPlayedRanges(): readonly TimeRange[] {
-    return this.activeEngine?.getPlayedRanges().map(range => ({
+    return this.activeEngine?.getPlayedRanges?.().map(range => ({
       start: range.start,
       end: range.end,
     })) ?? []
@@ -399,7 +406,7 @@ export class AudioEngineRouter implements AudioEngine {
     if (activeEngine) {
       let activeSupport: AudioFormatSupport
       try {
-        activeSupport = activeEngine.canPlayType(mimeType)
+        activeSupport = activeEngine.canPlayType?.(mimeType) ?? ''
       }
       catch {
         return ''
@@ -419,14 +426,14 @@ export class AudioEngineRouter implements AudioEngine {
         const mediaCapabilityEngine = this.mediaEngineFactory()
         if (this.isDisposed) {
           // AI modified: a reentrant factory cannot install browser resources after permanent disposal.
-          this.disposeEngines([mediaCapabilityEngine])
+          void this.disposeEngines([mediaCapabilityEngine])
           this.releaseAdapterOwnersIfReady()
           return ''
         }
         this.mediaCapabilityEngine = mediaCapabilityEngine
       }
       const mediaCapabilityEngine = this.mediaCapabilityEngine
-      const mediaSupport = mediaCapabilityEngine.canPlayType(mimeType)
+      const mediaSupport = mediaCapabilityEngine.canPlayType?.(mimeType) ?? ''
       return !this.isDisposed && this.mediaCapabilityEngine === mediaCapabilityEngine
         ? mediaSupport
         : ''
@@ -486,55 +493,61 @@ export class AudioEngineRouter implements AudioEngine {
     return this.events.on(eventName, handler)
   }
 
-  dispose(): void {
+  dispose(): Promise<void> {
+    if (this.activeDisposal) {
+      return this.activeDisposal
+    }
+
+    const disposalErrors: unknown[] = []
+    let engines: AudioEngine[]
     if (this.isDisposed) {
-      const retryErrors: unknown[] = []
       try {
         // AI modified: repeated disposal also retries transient engine-listener cleanup failures.
         this.invalidateEngineSession()
       }
       catch (error) {
-        retryErrors.push(error)
+        disposalErrors.push(error)
       }
-      retryErrors.push(...this.disposeEngines([...this.pendingEngineDisposals]))
+      engines = [...this.pendingEngineDisposals]
+    }
+    else {
+      // AI modified: permanent disposal invalidates in-flight adapter factories before releasing ownership.
+      this.isDisposed = true
+      this.cancelActiveOperation()
+      this.rejectActiveControls(new GAudioError('ENGINE_ERROR', 'Audio engine router has been disposed'))
+      try {
+        this.invalidateEngineSession()
+      }
+      catch (error) {
+        disposalErrors.push(error)
+      }
+
+      const activeEngine = this.activeEngine
+      const mediaCapabilityEngine = this.mediaCapabilityEngine
+      this.activeEngine = undefined
+      this.activeProtocol = undefined
+      this.mediaCapabilityEngine = undefined
+      engines = [
+        ...this.pendingEngineDisposals,
+        ...(activeEngine ? [activeEngine] : []),
+        ...(mediaCapabilityEngine ? [mediaCapabilityEngine] : []),
+      ]
+      this.events.clear()
+    }
+
+    const engineFactories = [...this.pendingEngineFactories]
+    if (engines.length === 0 && engineFactories.length === 0) {
       this.releaseAdapterOwnersIfReady()
-      if (retryErrors.length > 0) {
-        // AI modified: logical disposal stays permanent while unfinished engine cleanup remains retryable.
-        throw retryErrors[0]
+    }
+    const cleanup = this.finishDisposal(engines, engineFactories, disposalErrors)
+    // AI modified: concurrent router disposal shares factories and engine cleanup without duplicate vendor teardown.
+    const activeDisposal = cleanup.finally(() => {
+      if (this.activeDisposal === activeDisposal) {
+        this.activeDisposal = undefined
       }
-      return
-    }
-
-    // AI modified: permanent disposal invalidates in-flight adapter factories before releasing ownership.
-    this.isDisposed = true
-    this.cancelActiveOperation()
-    this.rejectActiveControls(new GAudioError('ENGINE_ERROR', 'Audio engine router has been disposed'))
-    const disposalErrors: unknown[] = []
-    try {
-      this.invalidateEngineSession()
-    }
-    catch (error) {
-      disposalErrors.push(error)
-    }
-
-    const activeEngine = this.activeEngine
-    const mediaCapabilityEngine = this.mediaCapabilityEngine
-    this.activeEngine = undefined
-    this.activeProtocol = undefined
-    this.mediaCapabilityEngine = undefined
-
-    // AI modified: one failing engine cannot prevent remaining cleanup, and every failed owner stays retryable.
-    disposalErrors.push(...this.disposeEngines([
-      ...this.pendingEngineDisposals,
-      ...(activeEngine ? [activeEngine] : []),
-      ...(mediaCapabilityEngine ? [mediaCapabilityEngine] : []),
-    ]))
-    this.releaseAdapterOwnersIfReady()
-    this.events.clear()
-
-    if (disposalErrors.length > 0) {
-      throw disposalErrors[0]
-    }
+    })
+    this.activeDisposal = activeDisposal
+    return activeDisposal
   }
 
   private async engineForProtocol(protocol: AudioProtocol, operation: RouterOperation): Promise<AudioEngine> {
@@ -548,42 +561,33 @@ export class AudioEngineRouter implements AudioEngine {
       throw this.loadAbortedError()
     }
 
-    let engine: AudioEngine
     if (protocol === 'media') {
-      engine = this.mediaCapabilityEngine ?? this.mediaEngineFactory()
-      this.mediaCapabilityEngine = undefined
-    }
-    else {
-      const adapter = this.adapters.get(protocol)
-      if (!adapter) {
-        throw new GAudioError('ADAPTER_UNAVAILABLE', `No ${protocol.toUpperCase()} adapter is registered`)
+      const mediaCapabilityEngine = this.mediaCapabilityEngine
+      if (mediaCapabilityEngine) {
+        this.mediaCapabilityEngine = undefined
+        this.activateEngine(mediaCapabilityEngine, protocol, operation)
+        return mediaCapabilityEngine
       }
-      const isSupported = adapter.isSupported()
-      if (
-        !this.isCurrentOperation(operation)
-        || this.isDisposed
-        || adapterOwners.get(adapter) !== this
-      ) {
-        // AI modified: a reentrant support check cannot create through an adapter whose ownership changed.
-        throw this.loadAbortedError()
-      }
-      if (!isSupported) {
-        throw new GAudioError('PROTOCOL_UNSUPPORTED', `${protocol.toUpperCase()} playback is not supported in this browser`)
-      }
-      // AI modified: DASH loads dash.js lazily so importing gaudio/dash is SSR-safe.
-      engine = await this.createAdapterEngine(adapter, operation)
+      return this.createProtocolEngine(this.mediaEngineFactory, protocol, operation)
     }
 
-    if (!this.isCurrentOperation(operation) || this.isDisposed) {
-      if (engine !== this.activeEngine) {
-        // AI modified: stale factories retain failed cleanup for the next router lifecycle operation.
-        this.disposeEngines([engine])
-      }
+    const adapter = this.adapters.get(protocol)
+    if (!adapter) {
+      throw new GAudioError('ADAPTER_UNAVAILABLE', `No ${protocol.toUpperCase()} adapter is registered`)
+    }
+    const isSupported = adapter.isSupported()
+    if (
+      !this.isCurrentOperation(operation)
+      || this.isDisposed
+      || adapterOwners.get(adapter) !== this
+    ) {
+      // AI modified: a reentrant support check cannot create through an adapter whose ownership changed.
       throw this.loadAbortedError()
     }
-
-    await this.replaceActiveEngine(engine, protocol, operation)
-    return engine
+    if (!isSupported) {
+      throw new GAudioError('PROTOCOL_UNSUPPORTED', `${protocol.toUpperCase()} playback is not supported in this browser`)
+    }
+    return this.createProtocolEngine(() => adapter.createEngine(), protocol, operation)
   }
 
   private async retireActiveEngine(operation: RouterOperation): Promise<void> {
@@ -601,8 +605,7 @@ export class AudioEngineRouter implements AudioEngine {
     catch (error) {
       retirementErrors.push(error)
     }
-    retirementErrors.push(...this.disposeEngines([previousEngine]))
-    retirementErrors.push(...await this.waitForEngineCleanups([previousEngine], operation))
+    retirementErrors.push(...await this.waitForOperation(this.disposeEngines([previousEngine]), operation))
     if (!this.isCurrentOperation(operation) || this.isDisposed) {
       throw this.loadAbortedError()
     }
@@ -611,48 +614,12 @@ export class AudioEngineRouter implements AudioEngine {
     }
   }
 
-  private async replaceActiveEngine(
+  private activateEngine(
     engine: AudioEngine,
     protocol: AudioProtocol,
     operation: RouterOperation,
-  ): Promise<void> {
-    // AI modified: advance the generation before disposal so late vendor events cannot reach the player.
-    const previousEngine = this.activeEngine
-    this.activeEngine = undefined
-    this.activeProtocol = undefined
-    let replacementError: unknown
-    let hasReplacementError = false
-    try {
-      this.invalidateEngineSession()
-    }
-    catch (error) {
-      replacementError = error
-      hasReplacementError = true
-    }
-    const previousEngines = previousEngine ? [previousEngine] : []
-    const previousDisposalErrors = this.disposeEngines(previousEngines)
-    if (!hasReplacementError && previousDisposalErrors.length > 0) {
-      replacementError = previousDisposalErrors[0]
-      hasReplacementError = true
-    }
-    if (previousEngines.length > 0) {
-      const previousCleanupErrors = await this.waitForEngineCleanups(previousEngines, operation)
-      if (!hasReplacementError && previousCleanupErrors.length > 0) {
-        replacementError = previousCleanupErrors[0]
-        hasReplacementError = true
-      }
-    }
-    if (!this.isCurrentOperation(operation) || this.isDisposed) {
-      // AI modified: a superseding operation owns the transition while the uncommitted engine is retired.
-      this.disposeEngines([engine])
-      throw this.loadAbortedError()
-    }
-    if (hasReplacementError) {
-      // AI modified: a failed engine transition disposes the uncommitted replacement instead of leaking it.
-      this.disposeEngines([engine])
-      throw replacementError
-    }
-
+  ): void {
+    // AI modified: creation transfers ownership synchronously after the previous engine has already retired.
     this.activeEngine = engine
     this.activeProtocol = protocol
     try {
@@ -667,7 +634,7 @@ export class AudioEngineRouter implements AudioEngine {
         this.activeEngine = undefined
         this.activeProtocol = undefined
         // AI modified: only the current transition may retire an engine after a settings failure.
-        this.disposeEngines([engine])
+        void this.disposeEngines([engine])
       }
       throw error
     }
@@ -684,8 +651,9 @@ export class AudioEngineRouter implements AudioEngine {
   }
 
   private applySettings(engine: AudioEngine): void {
-    engine.setPreload(this.settings.preload)
-    engine.setAutoplay(this.settings.autoplay)
+    // AI modified: browser-fetch and native-autoplay hints do not add requirements to core custom engines.
+    engine.setPreload?.(this.settings.preload)
+    engine.setAutoplay?.(this.settings.autoplay)
     engine.setVolume(this.settings.volume)
     engine.setMuted(this.settings.isMuted)
     engine.setLoop(this.settings.isLooping)
@@ -724,6 +692,19 @@ export class AudioEngineRouter implements AudioEngine {
     const forward = <EventName extends keyof AudioEngineEvents>(eventName: EventName): void => {
       const removeListener = engine.on(eventName, (payload) => {
         if (generation === this.engineGeneration) {
+          // AI modified: observable engine changes become the settings applied to the next protocol engine.
+          if (eventName === 'volumechange') {
+            const volumeUpdate = payload as AudioEngineEvents['volumechange']
+            this.settings.volume = volumeUpdate.volume
+            this.settings.isMuted = volumeUpdate.isMuted
+            this.settingGenerations.volume += 1
+            this.settingGenerations.isMuted += 1
+          }
+          else if (eventName === 'ratechange') {
+            const rateUpdate = payload as AudioEngineEvents['ratechange']
+            this.settings.playbackRate = rateUpdate.playbackRate
+            this.settingGenerations.playbackRate += 1
+          }
           const activeOperation = this.activeOperation
           this.events.emit(eventName, payload)
           if (eventName === 'error') {
@@ -731,8 +712,7 @@ export class AudioEngineRouter implements AudioEngine {
             this.rejectActiveControls(
               payload as AudioEngineEvents['error'],
               undefined,
-              engine,
-              generation,
+              { engine, engineGeneration: generation },
             )
             if (
               activeOperation
@@ -806,111 +786,93 @@ export class AudioEngineRouter implements AudioEngine {
     }
   }
 
-  private disposeEngines(engines: readonly AudioEngine[]): unknown[] {
-    const disposalErrors: unknown[] = []
-    for (const engine of new Set(engines)) {
-      let hasDisposalError = false
-      try {
-        engine.dispose()
-        this.failedEngineDisposals.delete(engine)
-      }
-      catch (error) {
-        // AI modified: cleanup failures remain strongly owned until a later lifecycle operation succeeds.
-        hasDisposalError = true
-        this.failedEngineDisposals.add(engine)
-        this.pendingEngineDisposals.add(engine)
-        disposalErrors.push(error)
-      }
-
-      const cleanupStatus = mediaElementCleanupStatus(engine)
-      if (cleanupStatus) {
-        // AI modified: pending and contained failures retain the engine until every built-in resource settles.
-        this.pendingEngineDisposals.add(engine)
-        this.observeEngineCleanup(engine, cleanupStatus.completion)
-        if (cleanupStatus.state === 'failed' && !hasDisposalError) {
-          // AI modified: cleanup that failed synchronously is observable by the initiating router lifecycle call.
-          disposalErrors.push(cleanupStatus.error)
-        }
-      }
-      else if (!hasDisposalError) {
-        this.pendingEngineDisposals.delete(engine)
-      }
-    }
-    return disposalErrors
+  private async disposeEngines(engines: readonly AudioEngine[]): Promise<unknown[]> {
+    const disposalOutcomes = await Promise.allSettled(
+      [...new Set(engines)].map(engine => this.disposeEngine(engine)),
+    )
+    return disposalOutcomes.flatMap(disposalOutcome =>
+      disposalOutcome.status === 'rejected' ? [disposalOutcome.reason] : [],
+    )
   }
 
-  private async createAdapterEngine(
-    adapter: AudioEngineAdapter,
-    operation: RouterOperation,
-  ): Promise<AudioEngine> {
-    this.pendingAdapterFactoryCount += 1
-    let factory: Promise<AudioEngine>
-    try {
-      factory = Promise.resolve(adapter.createEngine())
-    }
-    catch (error) {
-      this.pendingAdapterFactoryCount -= 1
-      this.releaseAdapterOwnersIfReady()
-      throw error
+  private disposeEngine(engine: AudioEngine): Promise<void> {
+    const activeDisposal = this.activeEngineDisposals.get(engine)
+    if (activeDisposal) {
+      return activeDisposal
     }
 
-    const observedFactory = factory.then(
-      (engine) => {
-        this.pendingAdapterFactoryCount -= 1
+    this.pendingEngineDisposals.add(engine)
+    let engineDisposal: Promise<void>
+    try {
+      engineDisposal = Promise.resolve(engine.dispose())
+    }
+    catch (error) {
+      engineDisposal = Promise.reject(error)
+    }
+
+    const observedDisposal = engineDisposal.then(() => {
+      this.pendingEngineDisposals.delete(engine)
+    }).finally(() => {
+      if (this.activeEngineDisposals.get(engine) === observedDisposal) {
+        this.activeEngineDisposals.delete(engine)
+      }
+      this.releaseAdapterOwnersIfReady()
+    })
+    // AI modified: the engine contract itself is the only cleanup completion signal the router observes.
+    this.activeEngineDisposals.set(engine, observedDisposal)
+    void observedDisposal.catch(() => {})
+    return observedDisposal
+  }
+
+  private async finishDisposal(
+    engines: readonly AudioEngine[],
+    engineFactories: readonly Promise<AudioEngine>[],
+    disposalErrors: unknown[],
+  ): Promise<void> {
+    disposalErrors.push(...await this.disposeEngines(engines))
+    await Promise.allSettled(engineFactories)
+    disposalErrors.push(...this.pendingFactoryCleanupErrors.splice(0))
+    this.releaseAdapterOwnersIfReady()
+    if (disposalErrors.length > 0) {
+      // AI modified: logical disposal stays permanent while unfinished engine cleanup remains retryable.
+      throw disposalErrors[0]
+    }
+  }
+
+  private createProtocolEngine(
+    createEngine: () => AudioEngine | Promise<AudioEngine>,
+    protocol: AudioProtocol,
+    operation: RouterOperation,
+  ): Promise<AudioEngine> {
+    const creationGate = createEngineOperationGate<AudioEngine>()
+    const observedFactory = creationGate.completion.then(
+      async (engine) => {
         if (!this.isCurrentOperation(operation) || this.isDisposed) {
           // AI modified: late factory results remain observed and owned through their complete retirement.
-          this.disposeEngines([engine])
+          const cleanupErrors = await this.disposeEngines([engine])
+          this.pendingFactoryCleanupErrors.push(...cleanupErrors)
           this.releaseAdapterOwnersIfReady()
           throw this.loadAbortedError()
         }
-        this.releaseAdapterOwnersIfReady()
+        // AI modified: the factory keeps ownership until the active slot accepts its result without another await.
+        this.activateEngine(engine, protocol, operation)
         return engine
       },
-      (error) => {
-        this.pendingAdapterFactoryCount -= 1
+    )
+    this.pendingEngineFactories.add(observedFactory)
+    void observedFactory.then(
+      () => {
+        this.pendingEngineFactories.delete(observedFactory)
         this.releaseAdapterOwnersIfReady()
-        throw error
+      },
+      () => {
+        this.pendingEngineFactories.delete(observedFactory)
+        this.releaseAdapterOwnersIfReady()
       },
     )
-    void observedFactory.catch(() => {})
+    // AI modified: reentrant disposal can wait for this factory before user factory code creates resources.
+    observeEngineOperation(() => Promise.resolve(createEngine()), creationGate)
     return this.waitForOperation(observedFactory, operation)
-  }
-
-  private async waitForEngineCleanups(
-    engines: readonly AudioEngine[],
-    operation: RouterOperation,
-  ): Promise<unknown[]> {
-    const cleanupWaits = [...new Set(engines)].map(async (engine) => {
-      while (true) {
-        const cleanupStatus = mediaElementCleanupStatus(engine)
-        if (!cleanupStatus) {
-          return
-        }
-        await cleanupStatus.completion
-      }
-    })
-    if (cleanupWaits.length === 0) {
-      return []
-    }
-
-    const cleanupOutcomes = await this.waitForOperation(Promise.allSettled(cleanupWaits), operation)
-    return cleanupOutcomes.flatMap(cleanupOutcome =>
-      cleanupOutcome.status === 'rejected' ? [cleanupOutcome.reason] : [],
-    )
-  }
-
-  private observeEngineCleanup(engine: AudioEngine, cleanup: Promise<void>): void {
-    void cleanup.then(
-      () => {
-        if (!mediaElementCleanupStatus(engine) && !this.failedEngineDisposals.has(engine)) {
-          this.pendingEngineDisposals.delete(engine)
-        }
-        this.releaseAdapterOwnersIfReady()
-      },
-      () => {
-        // The retained engine is retried by the next load, unload, or dispose.
-      },
-    )
   }
 
   private startOperation(): RouterOperation {
@@ -974,7 +936,7 @@ export class AudioEngineRouter implements AudioEngine {
   }
 
   private releaseAdapterOwnersIfReady(): void {
-    if (!this.isDisposed || this.pendingAdapterFactoryCount > 0) {
+    if (!this.isDisposed || this.pendingEngineFactories.size > 0) {
       return
     }
     if (this.pendingEngineDisposals.size > 0 || this.removeEngineListeners.length > 0) {
@@ -1024,14 +986,17 @@ export class AudioEngineRouter implements AudioEngine {
   private rejectActiveControls(
     error: unknown,
     kinds?: readonly RouterControlKind[],
-    engine?: AudioEngine,
-    engineGeneration?: number,
+    controlScope: {
+      controls?: readonly ActiveRouterControl[]
+      engine?: AudioEngine
+      engineGeneration?: number
+    } = {},
   ): void {
-    for (const activeControl of this.activeControls) {
+    for (const activeControl of controlScope.controls ?? this.activeControls) {
       if (
         (kinds && !kinds.includes(activeControl.kind))
-        || (engine && activeControl.engine !== engine)
-        || (engineGeneration !== undefined && activeControl.engineGeneration !== engineGeneration)
+        || (controlScope.engine && activeControl.engine !== controlScope.engine)
+        || (controlScope.engineGeneration !== undefined && activeControl.engineGeneration !== controlScope.engineGeneration)
       ) {
         continue
       }

@@ -85,6 +85,8 @@ export class BrowserMediaSession {
   private readonly seekOffset: number
   private metadata?: AudioMediaSessionMetadata
   private playbackState: PlaybackState = 'idle'
+  private hasClaimedOwnership = false
+  private isDisposalRequested = false
   private isDisposed = false
 
   constructor(options: AudioMediaSessionOptions, context: BrowserMediaSessionContext) {
@@ -115,6 +117,13 @@ export class BrowserMediaSession {
 
     // AI modified: retain live players in ownership order so disposing the latest can restore its predecessor.
     const registrations = mediaSessionRegistrations.get(this.mediaSession) ?? []
+    const currentOwner = registrations.at(-1)
+    if (currentOwner?.hasClaimedOwnership) {
+      // AI modified: constructing a paused player cannot displace the last played or explicitly activated owner.
+      registrations.unshift(this)
+      mediaSessionRegistrations.set(this.mediaSession, registrations)
+      return
+    }
     registrations.push(this)
     mediaSessionRegistrations.set(this.mediaSession, registrations)
     try {
@@ -146,7 +155,7 @@ export class BrowserMediaSession {
   }
 
   setMetadata(metadata: AudioMediaSessionMetadata | undefined): void {
-    if (this.isDisposed || !this.mediaSession) {
+    if (this.isDisposalRequested || this.isDisposed || !this.mediaSession) {
       return
     }
 
@@ -177,7 +186,7 @@ export class BrowserMediaSession {
   }
 
   setPlaybackState(state: PlaybackState): void {
-    if (this.isDisposed || !this.mediaSession) {
+    if (this.isDisposalRequested || this.isDisposed || !this.mediaSession) {
       return
     }
 
@@ -195,7 +204,12 @@ export class BrowserMediaSession {
   }
 
   setPositionState(): void {
-    if (this.isDisposed || !this.ownsMediaSession() || !this.mediaSession?.setPositionState) {
+    if (
+      this.isDisposalRequested
+      || this.isDisposed
+      || !this.ownsMediaSession()
+      || !this.mediaSession?.setPositionState
+    ) {
       return
     }
 
@@ -224,6 +238,44 @@ export class BrowserMediaSession {
     }
   }
 
+  activate(): void {
+    if (this.isDisposalRequested || this.isDisposed || !this.mediaSession) {
+      return
+    }
+
+    const registrations = mediaSessionRegistrations.get(this.mediaSession)
+    const registrationIndex = registrations?.lastIndexOf(this) ?? -1
+    if (!registrations || registrationIndex < 0) {
+      return
+    }
+
+    const previousOwner = registrations.at(-1)
+    if (previousOwner === this) {
+      this.restoreMediaSession()
+      this.hasClaimedOwnership = true
+      return
+    }
+
+    // AI modified: ownership order changes only after browser presentation restoration succeeds.
+    registrations.splice(registrationIndex, 1)
+    registrations.push(this)
+    try {
+      this.restoreMediaSession()
+      this.hasClaimedOwnership = true
+    }
+    catch (error) {
+      registrations.pop()
+      registrations.splice(registrationIndex, 0, this)
+      try {
+        previousOwner?.restoreMediaSession()
+      }
+      catch {
+        // Preserve the activation failure while leaving the previous internal owner eligible for retry.
+      }
+      throw error
+    }
+  }
+
   dispose(): void {
     if (this.isDisposed) {
       return
@@ -231,21 +283,25 @@ export class BrowserMediaSession {
 
     const mediaSession = this.mediaSession
     const wasOwner = this.ownsMediaSession()
-    this.isDisposed = true
+    this.isDisposalRequested = true
     if (!mediaSession) {
+      this.isDisposed = true
       return
     }
 
     const registrations = mediaSessionRegistrations.get(mediaSession)
     const registrationIndex = registrations?.lastIndexOf(this) ?? -1
-    if (registrations && registrationIndex >= 0) {
+    if (!registrations || registrationIndex < 0) {
+      this.isDisposed = true
+      return
+    }
+
+    if (!wasOwner) {
       registrations.splice(registrationIndex, 1)
       if (registrations.length === 0) {
         mediaSessionRegistrations.delete(mediaSession)
       }
-    }
-
-    if (!wasOwner) {
+      this.isDisposed = true
       return
     }
 
@@ -253,30 +309,44 @@ export class BrowserMediaSession {
       this.setActionHandler(action, null)
     }
 
-    const previousOwner = registrations?.at(-1)
-    if (previousOwner) {
-      previousOwner.restoreMediaSession()
-      return
-    }
-
-    const disposalErrors: unknown[] = []
+    // AI modified: browser restoration succeeds before the internal ownership removal is committed.
+    registrations.splice(registrationIndex, 1)
     try {
-      mediaSession.metadata = null
+      const previousOwner = registrations.at(-1)
+      if (previousOwner) {
+        previousOwner.restoreMediaSession()
+      }
+      else {
+        const disposalErrors: unknown[] = []
+        try {
+          mediaSession.metadata = null
+        }
+        catch (error) {
+          disposalErrors.push(error)
+        }
+        try {
+          mediaSession.playbackState = 'none'
+        }
+        catch (error) {
+          disposalErrors.push(error)
+        }
+        this.clearPositionState()
+
+        if (disposalErrors.length > 0) {
+          throw disposalErrors[0]
+        }
+      }
     }
     catch (error) {
-      disposalErrors.push(error)
+      // AI modified: retain the pending owner so repeated disposal can retry a transient browser failure.
+      registrations.splice(registrationIndex, 0, this)
+      throw error
     }
-    try {
-      mediaSession.playbackState = 'none'
-    }
-    catch (error) {
-      disposalErrors.push(error)
-    }
-    this.clearPositionState()
 
-    if (disposalErrors.length > 0) {
-      throw disposalErrors[0]
+    if (registrations.length === 0) {
+      mediaSessionRegistrations.delete(mediaSession)
     }
+    this.isDisposed = true
   }
 
   private attachActionHandlers(): void {
@@ -310,7 +380,7 @@ export class BrowserMediaSession {
 
   private dispatchOwnedMediaAction(action: () => void | Promise<unknown>): void {
     // AI modified: browser-retained handlers become inert immediately after ownership changes or disposal.
-    if (this.isDisposed || !this.ownsMediaSession()) {
+    if (this.isDisposalRequested || this.isDisposed || !this.ownsMediaSession()) {
       return
     }
 
@@ -325,7 +395,7 @@ export class BrowserMediaSession {
   }
 
   private reportActionFailure(error: unknown, errorPublicationSequence: number): void {
-    if (this.isDisposed || !this.ownsMediaSession()) {
+    if (this.isDisposalRequested || this.isDisposed || !this.ownsMediaSession()) {
       // AI modified: a late action from a released owner cannot report expected cancellation into the host.
       return
     }
@@ -378,7 +448,7 @@ export class BrowserMediaSession {
   }
 
   private restoreMediaSession(): void {
-    if (this.isDisposed || !this.ownsMediaSession()) {
+    if (this.isDisposalRequested || this.isDisposed || !this.ownsMediaSession()) {
       return
     }
 

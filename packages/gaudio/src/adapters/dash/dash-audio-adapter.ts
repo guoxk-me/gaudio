@@ -124,7 +124,7 @@ export class DashAudioAdapterImpl implements DashAudioAdapter {
 
   updateSettings(settings: DashSettingsChanges): void {
     this.settings = settingsWithChanges(this.settings, settings)
-    // AI modified: reused engines receive the complete merged settings used by their next dash.js player.
-    this.activeEngine?.updateSettings(structuredClone(this.settings))
+    // AI modified: future defaults and explicit changes remain separate from current playback's ABR state.
+    this.activeEngine?.updateSettings(structuredClone(this.settings), settings)
   }
 }

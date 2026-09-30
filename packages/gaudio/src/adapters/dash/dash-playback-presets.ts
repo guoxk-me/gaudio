@@ -1,6 +1,8 @@
+import type { DashSettingsChanges } from './dashjs-types'
 import { AdaptivePlaybackPreset } from '../adaptive-audio-types'
 
-const dashPresetChanges: Record<AdaptivePlaybackPreset, object> = {
+// AI modified: vendor setting types validate every preset and content override.
+const dashPresetChanges = {
   [AdaptivePlaybackPreset.FastStart]: {
     streaming: {
       abandonLoadTimeout: 5_000,
@@ -99,8 +101,8 @@ const dashPresetChanges: Record<AdaptivePlaybackPreset, object> = {
       },
     },
   },
-}
+} satisfies Record<AdaptivePlaybackPreset, DashSettingsChanges>
 
-export function dashPresetSettings(preset: AdaptivePlaybackPreset): object {
+export function dashPresetSettings(preset: AdaptivePlaybackPreset): DashSettingsChanges {
   return dashPresetChanges[preset]
 }
