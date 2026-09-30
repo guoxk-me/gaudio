@@ -9,6 +9,9 @@ test-results
 .playwright-cli
 # AI modified: coverage reports are reproducible CI artifacts, not source files.
 **/coverage/
-apps/docs/.vitepress/cache
-apps/docs/.vitepress/dist
+# AI modified: Nuxt's generated development and deployment artifacts stay reproducible.
+apps/docs/.nuxt
+apps/docs/.output
+apps/docs/.data
+apps/docs/.vercel
 apps/docs/api

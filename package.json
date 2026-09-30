@@ -16,6 +16,7 @@
     "lint": "pnpm run lint:workspace && eslint --no-ignore eslint.config.mjs playwright.config.ts",
     "lint:workspace": "turbo run lint",
     "test": "turbo run test",
+    "test:browser:core": "pnpm --filter gaudio run build && playwright test --config packages/gaudio/playwright.config.ts",
     "typecheck": "turbo run typecheck"
   },
   "devDependencies": {

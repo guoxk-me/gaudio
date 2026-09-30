@@ -112,6 +112,8 @@ jobs:
       - run: pnpm run build
       # AI modified: release verification covers Chromium, Firefox, and WebKit projects.
       - run: pnpm exec playwright install --with-deps chromium firefox webkit
+      # AI modified: core media regressions run independently of documentation UI tests.
+      - run: pnpm run test:browser:core
       - run: pnpm run e2e
         env:
           DOCS_E2E_USE_EXISTING_BUILD: "true"
@@ -124,6 +126,8 @@ jobs:
           path: |
             output/playwright/report
             output/playwright/results
+            output/playwright/core-report
+            output/playwright/core-results
           if-no-files-found: ignore
           retention-days: 7
       - run: pnpm --filter gaudio run pack:dry-run

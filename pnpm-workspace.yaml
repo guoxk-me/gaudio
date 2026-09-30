@@ -2,19 +2,23 @@ packages:
   - apps/*
   - packages/*
 overrides:
-  # AI modified: keep VitePress and docs on one Vue runtime to avoid cross-version type conflicts.
+  # AI modified: keep the Nuxt application and library workspaces on one Vue runtime.
   vue: 3.5.40
-  # AI modified: VitePress 1.x still requests Vite 5, so pin its compatible plugin chain to the patched Vite 6 line.
-  "vitepress>vite": 6.4.3
   # AI modified: constrain only vulnerable modern brace-expansion versions without changing legacy consumers.
   "brace-expansion@>=3.0.0 <5.0.9": 5.0.9
   # AI modified: keep transitive build tooling off PostCSS releases affected by current parsing and source-map advisories.
-  "postcss@<8.5.23": 8.5.25
+  "postcss@<8.5.26": 8.5.26
+  # AI modified: satisfy Nuxt's context transform peer without widening unrelated parser dependencies.
+  "oxc-parser@<0.140.0": 0.140.0
+  # AI modified: Nuxt component metadata needs the current unplugin API under pnpm's strict resolver.
+  "nuxt-component-meta>unplugin": 3.3.0
   # AI modified: keep PostCSS tooling off nanoid releases affected by zero-size custom generator hangs.
-  "nanoid@<3.3.17": 3.3.17
+  "nanoid@<3.3.18": 3.3.18
   # AI modified: close the markdown linkifier denial-of-service advisory in the generated docs toolchain.
   "linkify-it@<5.0.2": 5.0.2
 allowBuilds:
+  # AI modified: Nuxt Content needs the native SQLite adapter during generation and client index creation.
+  better-sqlite3: true
   # AI modified: esbuild needs its install script to provide platform binaries.
   esbuild: true
   # AI modified: vue-demi needs its postinstall bridge for Vue 3 consumers.

@@ -58,7 +58,7 @@ export default defineConfig({
     },
   ],
   webServer: {
-    // AI modified: browser checks exercise the same optimized VitePress output deployed to GitHub Pages.
+    // AI modified: browser checks exercise the same optimized Nuxt output deployed to GitHub Pages.
     command: docsPreviewCommand,
     cwd: docsRoot,
     url: `${docsPreviewOrigin}${docsRoute('examples/')}`,

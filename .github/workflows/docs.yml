@@ -1,6 +1,7 @@
 name: Deploy documentation
 
 on:
+  pull_request:
   push:
     branches:
       - main
@@ -10,21 +11,17 @@ permissions:
   contents: read
 
 concurrency:
-  group: pages
-  cancel-in-progress: false
+  group: docs-vercel-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  # AI modified: explicit names keep Pages checks recognizable in deployment history.
-  build:
-    name: Build documentation
+  verify:
+    name: Verify documentation
     runs-on: ubuntu-latest
-    # AI modified: configure-pages reads site metadata, while build dependencies receive no write or OIDC access.
-    permissions:
-      contents: read
-      pages: read # Reads the configured Pages site metadata.
     steps:
-      # AI modified: manual documentation deployments must use the reviewed main branch.
+      # AI modified: manual production deployments must use the reviewed main branch.
       - name: Validate deployment ref
+        if: github.event_name == 'workflow_dispatch'
         run: |
           if [ "$GITHUB_REF" != "refs/heads/main" ]; then
             echo "Documentation deployment requires refs/heads/main." >&2
@@ -33,9 +30,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-          # AI modified: documentation builds do not need authenticated Git access.
           persist-credentials: false
-      # AI modified: keep pnpm version sourced only from packageManager.
       - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
         with:
           run_install: false
@@ -43,24 +38,26 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
-      - uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
       - run: pnpm install --frozen-lockfile
-      # AI modified: documentation deploys must satisfy the same quality gates as accepted package changes.
+      # AI modified: Vercel deployments retain the repository's complete acceptance gate.
       - run: pnpm audit --audit-level high
       - run: pnpm run typecheck
       - run: pnpm run lint
       - run: pnpm run test
       - run: pnpm run coverage
+      - run: pnpm --filter @gaudio/docs build:ssr
+        env:
+          DOCS_BASE: /
       - run: pnpm run build
         env:
-          DOCS_BASE: /gaudio/
+          DOCS_BASE: /
       - run: pnpm exec playwright install --with-deps chromium firefox webkit
-      # AI modified: E2E previews the verified Pages artifact instead of rebuilding documentation.
+      # AI modified: core media regressions run independently of documentation UI tests.
+      - run: pnpm run test:browser:core
       - run: pnpm --filter @gaudio/docs e2e
         env:
-          DOCS_BASE: /gaudio/
+          DOCS_BASE: /
           DOCS_E2E_USE_EXISTING_BUILD: "true"
-      # AI modified: deployed-doc verification keeps browser diagnostics independently of the Pages artifact.
       - name: Upload Playwright diagnostics
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -69,35 +66,84 @@ jobs:
           path: |
             output/playwright/report
             output/playwright/results
+            output/playwright/core-report
+            output/playwright/core-results
           if-no-files-found: ignore
           retention-days: 7
-      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
-        with:
-          path: apps/docs/.vitepress/dist
 
   deploy:
-    name: Deploy documentation
-    # AI modified: only the deployment job can publish Pages and request its identity token.
-    permissions:
-      pages: write # Publishes the verified Pages artifact.
-      id-token: write # Authenticates the Pages deployment.
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    outputs:
-      page_url: ${{ steps.deployment.outputs.page_url }}
+    name: Deploy documentation to Vercel
+    needs: verify
+    # AI modified: fork pull requests verify safely without receiving deployment credentials.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
-    needs: build
+    env:
+      DOCS_BASE: /
+      DOCS_SITE_URL: ${{ vars.DOCS_SITE_URL }}
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+    outputs:
+      deployment_url: ${{ steps.deploy_production.outputs.deployment_url || steps.deploy_preview.outputs.deployment_url }}
     steps:
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5.0.0
+      - name: Validate Vercel configuration
+        run: |
+          for variable_name in DOCS_SITE_URL VERCEL_ORG_ID VERCEL_PROJECT_ID VERCEL_TOKEN; do
+            if [ -z "${!variable_name}" ]; then
+              echo "Missing required GitHub Actions configuration: $variable_name" >&2
+              exit 1
+            fi
+          done
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+        with:
+          run_install: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Pull Vercel project settings
+        run: >-
+          pnpm dlx vercel@59.1.4 pull
+          --yes
+          --environment=${{ github.ref == 'refs/heads/main' && 'production' || 'preview' }}
+          --token="$VERCEL_TOKEN"
+          --cwd apps/docs
+      - name: Build Vercel production artifact
+        if: github.ref == 'refs/heads/main'
+        run: pnpm dlx vercel@59.1.4 build --prod --token="$VERCEL_TOKEN" --cwd apps/docs
+      - name: Build Vercel preview artifact
+        if: github.ref != 'refs/heads/main'
+        run: pnpm dlx vercel@59.1.4 build --token="$VERCEL_TOKEN" --cwd apps/docs
+      - name: Deploy Vercel production artifact
+        if: github.ref == 'refs/heads/main'
+        id: deploy_production
+        run: |
+          deployment_url="$(pnpm dlx vercel@59.1.4 deploy --prebuilt --prod --yes --token="$VERCEL_TOKEN" --cwd apps/docs)"
+          echo "deployment_url=$deployment_url" >> "$GITHUB_OUTPUT"
+      - name: Deploy Vercel preview artifact
+        if: github.ref != 'refs/heads/main'
+        id: deploy_preview
+        run: |
+          deployment_url="$(pnpm dlx vercel@59.1.4 deploy --prebuilt --yes --token="$VERCEL_TOKEN" --cwd apps/docs)"
+          echo "deployment_url=$deployment_url" >> "$GITHUB_OUTPUT"
+      - name: Publish deployment summary
+        env:
+          DEPLOYMENT_URL: ${{ steps.deploy_production.outputs.deployment_url || steps.deploy_preview.outputs.deployment_url }}
+        run: |
+          echo "### Vercel documentation deployment" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "$DEPLOYMENT_URL" >> "$GITHUB_STEP_SUMMARY"
 
   smoke:
     name: Smoke deployed documentation
     needs: deploy
+    if: needs.deploy.result == 'success'
     runs-on: ubuntu-latest
-    # AI modified: the post-deployment probe only reads the committed smoke script and public Pages origin.
     permissions:
       contents: read
     steps:
@@ -107,7 +153,8 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
-      - name: Smoke deployed Pages origin
+      # AI modified: every preview and production deployment must satisfy the public HTTP contract.
+      - name: Smoke deployed Vercel origin
         run: node apps/docs/scripts/smoke-deployed-site.mjs "$DEPLOYED_PAGE_URL"
         env:
-          DEPLOYED_PAGE_URL: ${{ needs.deploy.outputs.page_url }}
+          DEPLOYED_PAGE_URL: ${{ needs.deploy.outputs.deployment_url }}
