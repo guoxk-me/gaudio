@@ -33,7 +33,7 @@ pnpm add gaudio@next
 Install only the adaptive dependency your application uses:
 
 ```bash
-pnpm add gaudio@next hls.js
+pnpm add gaudio@next hls.js@~1.6.16
 pnpm add gaudio@next dashjs
 ```
 
@@ -52,17 +52,25 @@ The root entry does not import `hls.js` or `dashjs`.
 | Surface | Supported environment |
 | --- | --- |
 | `gaudio` core runtime and package imports | Node.js 18 or newer; playback APIs require browser media globals |
-| `gaudio/hls` | Browser-native HLS or Media Source Extensions with optional `hls.js ^1.6.16`; SSR import and capability checks are safe |
+| `gaudio/hls` | Browser-native HLS or Media Source Extensions with optional `hls.js >=1.6.16 <1.7.0`; SSR import and capability checks are safe |
 | `gaudio/dash` | Media Source Extensions with optional `dashjs ^5.2.0`; dash.js tooling itself declares Node.js 20 or newer |
 | Type declarations | TypeScript 5.8 or newer; verified with TypeScript 5.8.3 and the current project compiler |
 
 Node.js 18 CI intentionally consumes the packed artifact without optional adaptive peers. This is an SSR/package-import compatibility floor only: Node.js 18 is EOL and is not recommended for new secure deployments. Maintained Node.js 24 is the development and release baseline. HLS and DASH playback are browser capabilities and are not advertised as server-side media engines.
+
+`hls.js` 1.7 is currently outside the supported peer range because its published declarations do not pass GAudio's Node16, NodeNext, and Bundler TypeScript consumer matrix.
 
 Browser support is capability-based. CI exercises the current Playwright-bundled Chromium, Firefox, and WebKit desktop engines plus a Pixel 5 Chromium emulation project; this is a tested-current matrix, not a minimum-version or real-device guarantee. Core playback requires `HTMLAudioElement`, and analysis requires Web Audio. HLS requires native HLS or Media Source Extensions compatible with hls.js. DASH requires Media Source Extensions compatible with dash.js and native `globalThis.structuredClone()`. GAudio does not ship browser polyfills.
 
 TypeScript consumers of `gaudio/dash` must use `node16`, `nodenext`, or `bundler` module resolution. Legacy `node10` resolution cannot resolve dash.js's transitive type packages.
 
 `MediaElementAudioEngine` is the only exported class with a supported inheritance contract; subclasses may rely on its public and protected members. Use `AudioPlayer`, `AudioAnalyzer`, and `EventEmitter` directly or through composition rather than subclassing them.
+
+An `HTMLAudioElement` passed directly to `MediaElementAudioEngine` may be empty or use its own `src`, but it must not contain child `<source>` elements. Pass ordered source candidates through `AudioPlayer` source and fallback APIs so browser-native selection cannot reactivate an old resource after engine cleanup.
+
+Playback settings use last-accepted-change precedence. A successful `AudioPlayer` setting call becomes current immediately; later `volumechange` or `ratechange` events from the active native, adaptive, or custom engine become current before listeners are notified. Those current values are applied when playback changes protocol. Settings without an engine event—preload, autoplay, loop, and pitch preservation—change only through the player API.
+
+When multiple players enable Media Session, the most recently confirmed playing player owns system controls. Call `activateMediaSession()` to give a paused player ownership without starting playback. Awaiting owner disposal restores the previous eligible player; if the browser rejects that restoration, repeat `dispose()` to retry the unfinished handoff.
 
 ## Quick Start
 

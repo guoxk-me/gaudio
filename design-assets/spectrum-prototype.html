@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>gaudio · 基础柱状频谱</title>
+  <link rel="icon" href="data:,">
+  <style>
+    *{box-sizing:border-box}body{margin:0;background:#0b0a10;color:#f4f0ff;font-family:Inter,system-ui,sans-serif}button,select,input{font:inherit}button,select{color:inherit;background:#211a30;border:1px solid #3d2d52;border-radius:8px;padding:12px 18px;cursor:pointer}button:hover{background:#36234c}button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid #cfb4ff;outline-offset:5px}main{max-width:1160px;margin:0 auto;padding:48px 28px 130px}header{display:flex;justify-content:space-between;align-items:center;padding-bottom:36px;border-bottom:1px solid #292332}.wordmark{font-size:25px;font-weight:600;letter-spacing:-1px}.label{font:11px ui-monospace,monospace;letter-spacing:1.5px;color:#b09bc9}h1{font-size:clamp(28px,4vw,44px);letter-spacing:-1.5px;font-weight:500;margin:40px 0 12px}.intro{font-size:15px;line-height:1.8;color:#a99eb9;margin:0 0 32px}.stage{background:#0e0b15;border:1px solid #30243e;border-radius:18px;overflow:hidden;position:relative}.stage-top{position:absolute;top:24px;left:26px;right:26px;display:flex;justify-content:space-between;z-index:1;pointer-events:none}canvas{display:block;width:100%;height:440px}.frequencies{display:flex;justify-content:space-between;margin:-32px 32px 20px;font:10px ui-monospace,monospace;letter-spacing:1px;color:#80708f;position:relative}.transport{padding:22px 26px;display:flex;gap:20px;align-items:center;border-top:1px solid #30243e;background:#141019}.cover{width:48px;height:48px;border-radius:8px}.track{flex:1;min-width:0}.track strong{display:block;font-size:15px;font-weight:500}.track span{display:block;color:#94889f;font-size:11px;margin-top:6px}.primary{background:#8353e2;border-color:#9569e8;min-width:94px}.primary:hover{background:#9968ef}.time{font:12px ui-monospace,monospace;color:#baafc8}input[type=range]{width:120px;accent-color:#bfa0ff}.details{display:flex;gap:22px;align-items:center;flex-wrap:wrap;margin-top:18px;font:11px ui-monospace,monospace;color:#b1a0c3}.details output{color:#dbcbf0}.status{color:#b6dac8}#error{color:#f2a9b7;font-size:14px}.note{color:#81758e;font-size:12px;line-height:1.7;margin-top:24px}select{padding:8px 10px;font-size:12px;max-width:170px}.volume-label{font-size:11px;color:#a99eb9;display:flex;gap:8px;align-items:center}@media(max-width:600px){main{padding:24px 18px 130px}header{padding-bottom:24px}.label{font-size:9px}h1{margin-top:30px}canvas{height:320px}.stage-top{left:18px;right:18px;top:18px}.transport{padding:18px;gap:12px;flex-wrap:wrap}.track{min-width:140px}.primary{padding:11px 16px}.time{margin-left:auto}.volume-label input{width:100px}.details{gap:14px}.frequencies{margin-left:18px;margin-right:18px}}
+    /* AI modified: keep the basic spectrum compact, at player scale. */
+    main{padding-bottom:60px}canvas{height:260px}
+    @media(max-width:600px){main{padding-bottom:40px}canvas{height:220px}}
+  </style>
+</head>
+<body>
+<main>
+  <header><div class="wordmark">gaudio</div><span class="label">MOTION STUDY / REAL AUDIO</span></header>
+  <h1>基础柱状频谱。</h1>
+  <p class="intro">32 根紫色柱条，从左到右对应低频到高频。数值越高，柱条越亮，光晕越明显；暂停后平滑回落。</p>
+  <section class="stage" aria-label="真实频谱播放器">
+    <div class="stage-top"><span class="label" id="scene-label">AUDIO SPECTRUM / 32 BANDS</span><span class="label status" id="playback-state" aria-live="polite">idle</span></div>
+    <canvas id="spectrum" aria-label="音频频谱可视化"></canvas>
+    <div class="frequencies"><span>低频</span><span>中频</span><span>高频</span></div>
+    <div class="transport">
+      <img class="cover" src="../apps/docs/public/cover/aurora-loop.png" alt="Aurora Loop 封面">
+      <div class="track"><strong id="track-title">Aurora Loop</strong><span>GAUDIO ORIGINALS · 8 SECOND LOOP</span></div>
+      <button type="button" class="primary" id="play">播放</button>
+      <span class="time" id="time">0:00 / 0:08</span>
+      <label class="volume-label">音量 <input id="volume" aria-label="音量" type="range" min="0" max="1" step="0.01" value="0.6"></label>
+    </div>
+  </section>
+  <div class="details">
+    <select id="track-select" aria-label="选择样例音频"><option value="aurora-loop">Aurora Loop</option><option value="city-lantern">City Lantern</option><option value="signal-bloom">Signal Bloom</option><option value="warm-current">Warm Current</option></select>
+    <span>FFT <output id="fft-readout">0</output> / 255</span><span>BASS <output id="bass-readout">0</output></span><span>FRAME <output id="frame-readout">—</output></span>
+    <button id="motion" type="button" aria-pressed="false">减少动态</button>
+  </div>
+  <p class="note">使用 gaudio 的真实音频频谱，以 Canvas 2D 绘制。可以切换样例、调节音量，或启用减少动态。</p>
+  <p id="error" role="alert"></p>
+</main>
+<script type="importmap">{"imports":{"gaudio":"../packages/gaudio/dist/index.js"}}</script>
+<script type="module" src="./spectrum-prototype.mjs"></script>
+</body>
+</html>

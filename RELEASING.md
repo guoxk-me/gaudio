@@ -6,17 +6,22 @@ Do not assume any external setting is already configured. Confirm each prerequis
 
 ## One-time prerequisites
 
-### GitHub Pages
+### Vercel documentation project
 
-In the repository settings, configure Pages to use **GitHub Actions** as its source. The documentation workflow deliberately separates responsibilities:
+<!-- AI modified: GitHub Actions owns preview and production publication, so Vercel receives only verified prebuilt artifacts. -->
+Create a Vercel project for `apps/docs` and keep automatic Git deployments disabled to avoid publishing the same commit twice. Link the project once with Vercel CLI, then copy the `orgId` and `projectId` from the ignored `apps/docs/.vercel/project.json` file.
 
-- The `build` job can read repository and Pages metadata and upload the generated artifact.
-- The `deploy` job is the only job with `pages: write` and `id-token: write`.
+Configure these repository Actions values:
 
-Keep that permission boundary intact. After enabling Pages, run the documentation workflow and confirm the package homepage returns the generated site rather than a GitHub 404 page.
+- Secret `VERCEL_TOKEN`: a scoped Vercel token that can deploy this project.
+- Secret `VERCEL_ORG_ID`: the linked project's `orgId`.
+- Secret `VERCEL_PROJECT_ID`: the linked project's `projectId`.
+- Variable `DOCS_SITE_URL`: the canonical production URL, including `https://` (normally the Vercel project or custom domain root).
+
+The documentation workflow verifies pull requests, publishes same-repository pull requests as Vercel previews, publishes `main` as production, and then probes the deployed URL. Fork pull requests run verification without receiving deployment credentials. Keep those credential and job boundaries intact.
 
 <!-- AI modified: HTTP probes cannot prove that each browser can initialize and play adaptive media from the deployed CDN. -->
-For the first Pages enablement, and after any Pages/CDN or media-generation change, open the deployed interactive demo in current Chromium, Firefox, and Safari. Play both the HLS and DASH sample through a segment transition and confirm audio, seeking, and pause/resume work. The automated post-deploy smoke verifies routes, MIME families, manifests, media segments, byte ranges, and license attribution, but it does not replace this real-browser first-release check.
+For the first Vercel deployment, and after any CDN or media-generation change, open the deployed interactive demo in current Chromium, Firefox, and Safari. Play both the HLS and DASH sample through a segment transition and confirm audio, seeking, and pause/resume work. The automated post-deploy smoke verifies routes, MIME families, manifests, media segments, byte ranges, and license attribution, but it does not replace this real-browser first-release check.
 
 ### Protected npm environment
 

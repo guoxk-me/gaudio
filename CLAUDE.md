@@ -13,7 +13,7 @@ pnpm run typecheck      # Type-check all packages
 pnpm run e2e            # Playwright e2e tests (docs site)
 
 # Scoped / single-package
-pnpm run docs:dev       # VitePress docs dev server
+pnpm run docs:dev       # Nuxt docs dev server
 pnpm run docs:build     # Build docs site (includes typedoc API generation)
 
 # In packages/gaudio:
@@ -23,14 +23,14 @@ pnpm run typecheck      # tsc --noEmit
 pnpm run build          # tsdown
 
 # In apps/docs:
-pnpm run test           # vitest run (excludes e2e and .vitepress)
+pnpm run test           # vitest run (excludes e2e and generated Nuxt output)
 pnpm run e2e            # playwright test
 pnpm run api            # typedoc (generates API reference markdown)
 ```
 
 ## Architecture
 
-GAudio is a browser-first TypeScript audio streaming library (`packages/gaudio`), with a VitePress documentation site (`apps/docs`). The monorepo uses pnpm workspaces + Turborepo.
+GAudio is a browser-first TypeScript audio streaming library (`packages/gaudio`), with a Nuxt documentation site (`apps/docs`). The monorepo uses pnpm workspaces + Turborepo.
 
 ### Engine Layer (strategy pattern)
 
