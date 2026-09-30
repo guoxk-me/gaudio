@@ -32,7 +32,7 @@ Source APIs:
 | `setSource(source)` | `void` | Accepts `AudioSourceInput`, unloads the active engine, and resets state to `idle`. Analyzer-disposal and engine-unload errors retain their original identity. |
 | `load()` | `Promise<void>` | Opens the current source and resolves after metadata is available. Non-`GAudioError` adapter/analyzer creation failures become `ENGINE_ERROR` with the original `cause`; pre-load analyzer cleanup retains its original error. |
 | `play()` | `Promise<void>` | Starts or resumes playback; loads first when state is `idle`. |
-| `dispose()` | `void` | Permanently disables the player and starts cleanup. Cleanup may continue after return; the first cleanup error can throw, and repeated `dispose()` retries retained work. |
+| `dispose()` | `Promise<void>` | Permanently disables the player immediately and resolves after owned cleanup finishes. It rejects with the first cleanup failure after attempting independent resources; a later call retries only retained work. |
 
 Playlist APIs:
 
@@ -170,6 +170,7 @@ Variant order is implementation-owned. Sort by `bitrate` before selecting a qual
 | Field | Type | Default |
 | --- | --- | --- |
 | `source` | `AudioSourceInput` | `undefined` |
+| `crossOrigin` | `AudioCrossOriginMode` | `anonymous` for built-in default analysis; otherwise engine-owned |
 | `adapters` | `readonly AudioEngineAdapter[]` | `[]` |
 | `analyzer` | `boolean \| AudioPlayerAnalyzerOptions` | `undefined` |
 | `mediaSession` | `boolean \| AudioMediaSessionOptions` | `undefined` |
@@ -282,6 +283,21 @@ Playlist types:
 At the `AudioPlayer` boundary, non-`GAudioError` adapter `createEngine()` and analyzer-factory failures are wrapped as `ENGINE_ERROR`; the original value is available as `cause`, and the player publishes the same wrapper through its `error` event. Direct adapter `createEngine()` calls and direct `MediaElementAudioEngine` extension hooks can expose their own errors unchanged. Source-replacement cleanup and explicit pre-load analyzer cleanup also preserve their original errors.
 
 Direct calls into an injected custom `AudioEngine` preserve original thrown values for constructor setup and subscriptions, `pause()`, `stop()`, engine-backed settings and queries, and `canPlayType()`. Failures from those listed direct calls are not automatically player `error` events.
+
+<!-- AI modified: distinguish required custom-engine playback from optional browser capabilities. -->
+Custom engines are supported both through constructor injection and adapters. Core playback, events, cancellation, and cleanup remain required. Browser-specific members have these fallbacks:
+
+| Optional engine members | Behavior when omitted |
+| --- | --- |
+| `fastSeek` | Delegates to `seek`, preserving cancellation and original errors. |
+| `setPreload`, `getPreload` | Player/router retains the requested hint; no setter means engine-owned fetching policy. |
+| `setAutoplay`, `getAutoplay` | Router retains the native hint; player autoplay remains independent. Without the setter, `load()` must remain paused until `play()`. |
+| `getSeekableRanges`, `getPlayedRanges` | Returns `[]` for unknown ranges/history. |
+| `canPlayType` | Returns `''` for unknown format support. |
+
+Analyzer and adaptive-quality methods are optional as well. `AudioEngine.load(source, options?: AudioEngineLoadOptions)` accepts an optional `crossOrigin?: AudioCrossOriginMode` (`'anonymous'` or `'use-credentials'`). Built-in media engines apply it before attaching the URL; omission preserves the element policy. This controls media-element requests; HLS/DASH manifest and segment credentials use their vendor adapter configuration.
+
+Every custom `AudioEngine.dispose()` must return `Promise<void>` and settle only after its source, browser, Web Audio, and vendor resources finish their cleanup attempt. This lets player disposal and protocol replacement wait on one implementation-independent lifecycle contract.
 
 <!-- AI modified: document the lifecycle race that guarantees injected-engine operations always terminate. -->
 For player-owned asynchronous operations, the first engine or lifecycle outcome wins. A current `load()` or `play()` publishes its preserved or wrapped engine failure, while `seek()`, `fastSeek()`, and `setAdaptiveQuality()` keep ordinary engine rejections delegated-only. Disposal rejects every in-flight operation immediately with `ENGINE_ERROR` and `Audio operation was interrupted by player disposal`; disposal and cancellation do not publish a new player `error`. A terminal engine `error` rejects with the exact `GAudioError` instance published once to listeners (for `load()`, only after source fallbacks are exhausted).

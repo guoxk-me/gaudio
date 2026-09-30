@@ -43,7 +43,6 @@ let isDocumentVisible = true
 let shouldReduceMotion = false
 let lastSummaryUpdate = 0
 let intersectionObserver: IntersectionObserver | undefined
-let resizeObserver: ResizeObserver | undefined
 let themeObserver: MutationObserver | undefined
 let motionPreference: MediaQueryList | undefined
 
@@ -322,11 +321,8 @@ onMounted(() => {
   })
   intersectionObserver.observe(canvas)
 
-  resizeObserver = new ResizeObserver(() => {
-    refreshCanvasPresentation()
-    requestAnalyzerFrame()
-  })
-  resizeObserver.observe(canvas)
+  // AI modified: window resize avoids WebKit's canvas ResizeObserver feedback loop.
+  window.addEventListener('resize', handleCanvasResize, { passive: true })
 
   themeObserver = new MutationObserver(() => {
     analyzerPaletteCache = undefined
@@ -345,11 +341,16 @@ onUnmounted(() => {
   }
 
   intersectionObserver?.disconnect()
-  resizeObserver?.disconnect()
   themeObserver?.disconnect()
   motionPreference?.removeEventListener('change', handleMotionPreferenceChange)
   document.removeEventListener('visibilitychange', handleDocumentVisibilityChange)
+  window.removeEventListener('resize', handleCanvasResize)
 })
+
+function handleCanvasResize(): void {
+  refreshCanvasPresentation()
+  requestAnalyzerFrame()
+}
 
 function handleMotionPreferenceChange(event: MediaQueryListEvent): void {
   shouldReduceMotion = event.matches

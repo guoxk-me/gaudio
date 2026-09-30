@@ -20,10 +20,11 @@ describe('interactive audio example', () => {
       demoComposable,
       demoSamples,
       demoI18n,
-      homeMiniPlayer,
+      homeHero,
       homeMiniPlayerComposable,
+      demoUiStyles,
     ] = await Promise.all([
-      readFile(resolve(examplesRoot, 'index.md'), 'utf8'),
+      readFile(resolve(examplesRoot, '../app/components/ExamplesPage.vue'), 'utf8'),
       readFile(resolve(examplesRoot, 'AudioPlayerDemo.vue'), 'utf8'),
       readFile(resolve(examplesRoot, 'DemoLibrarySidebar.vue'), 'utf8'),
       readFile(resolve(examplesRoot, 'DemoNowPlayingStage.vue'), 'utf8'),
@@ -35,13 +36,15 @@ describe('interactive audio example', () => {
       readFile(resolve(examplesRoot, 'use-gaudio-demo.ts'), 'utf8'),
       readFile(resolve(examplesRoot, 'demo-samples.ts'), 'utf8'),
       readFile(resolve(examplesRoot, 'demo-i18n.ts'), 'utf8'),
-      readFile(resolve(examplesRoot, '../.vitepress/theme/components/HomeMiniPlayer.vue'), 'utf8'),
-      readFile(resolve(examplesRoot, '../.vitepress/theme/composables/use-home-mini-player.ts'), 'utf8'),
+      readFile(resolve(examplesRoot, '../app/components/HomeHero.vue'), 'utf8'),
+      readFile(resolve(examplesRoot, '../app/composables/use-home-mini-player.ts'), 'utf8'),
+      readFile(resolve(examplesRoot, '../assets/css/demo-ui.css'), 'utf8'),
     ])
 
     expect(examplePage).toContain('<ClientOnly>')
     expect(examplePage).toContain('AudioPlayerDemo')
-    expect(examplePage).toContain('API Surface In This Demo')
+    expect(examplePage).toContain('GAudio Player Studio')
+    expect(examplePage).toContain('useDocumentationHead')
     expect(demoComponent).toContain('gaudio-studio')
     expect(demoComponent).toContain('DemoLibrarySidebar')
     expect(demoComponent).toContain('DemoNowPlayingStage')
@@ -70,7 +73,9 @@ describe('interactive audio example', () => {
     expect(demoComposable).not.toContain('packages/gaudio/src')
     expect(demoComposable).toContain('onMounted')
     expect(demoComposable).toContain('new AudioPlayer')
-    expect(demoSamples).toContain('import.meta.env.BASE_URL')
+    // AI modified: public media URLs must use Nuxt's runtime base on subpath deployments.
+    expect(demoSamples).toContain('publicAssetBase')
+    expect(demoSamples).not.toContain('import.meta.env.BASE_URL')
     expect(demoSamples).toContain('coverThumb')
     expect(demoSamples).toContain('demoCoverThumbUrl')
     expect(demoSamples).toContain('demoCoverArtUrl')
@@ -106,7 +111,9 @@ describe('interactive audio example', () => {
     expect(demoNowPlaying).toContain('activeCoverThumbUrl')
     expect(demoNowPlaying).toContain('alt=""')
     expect(demoNowPlaying).not.toContain('activeTrack.title} cover art`')
-    expect(homeMiniPlayer).toContain('alt=""')
+    // AI modified: the homepage proof now uses the real lazy-loaded GAudio mini player from the approved wireframe.
+    expect(homeHero).toContain('<HomeMiniPlayer :controller="player" />')
+    expect(homeHero).not.toContain('home-audio-reactor.png')
     expect(demoCapabilities).toContain('capabilityRows')
     expect(demoCapabilities).toContain('browserSupportRows')
     expect(demoCapabilities).toContain('role="region"')
@@ -118,7 +125,10 @@ describe('interactive audio example', () => {
     expect(demoVisualization).toContain('analyzerCanvas')
     expect(demoVisualization).toContain('IntersectionObserver')
     expect(demoVisualization).toContain('prefers-reduced-motion')
-    expect(demoVisualization).toContain('ResizeObserver')
+    expect(demoVisualization).toContain('window.addEventListener(\'resize\', handleCanvasResize')
+    expect(demoUiStyles).toContain('@source "../../components"')
+    expect(demoUiStyles).toContain('@source "../../examples"')
+    expect(demoUiStyles).toContain('transition-duration: 0s')
     expect(demoVisualization).not.toContain('createOscillator')
     expect(demoComposable).toContain('response.ok')
     expect(demoComposable).toContain('sourceDescription')

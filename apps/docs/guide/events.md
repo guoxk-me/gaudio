@@ -104,7 +104,7 @@ Adaptive events use protocol-neutral payloads for HLS and DASH.
 | `manifestloaded` | `AdaptiveManifestUpdate` | A vendor manifest loads and exposes variants. |
 | `variantchange` | `AdaptiveVariantUpdate` | An initial selection, automatic ABR switch, or confirmed manual quality request changes variant. |
 | `segmentloadstart` | `AdaptiveSegmentUpdate` | A media segment request starts, when the vendor exposes it. |
-| `segmentloaded` | `AdaptiveSegmentUpdate` | A media segment request completes, when the vendor exposes it. |
+| `segmentloaded` | `AdaptiveSegmentUpdate` | A media segment request succeeds, when the vendor exposes it. Failed attempts do not emit this event. |
 | `streamerror` | `AdaptiveStreamError` | A recoverable or fatal adaptive-stream failure is reported by the vendor. |
 
 ```ts
@@ -115,6 +115,8 @@ player.on('segmentloadstart', update => console.log(update.url))
 player.on('segmentloaded', update => console.log(update.url, update.duration))
 player.on('streamerror', update => console.log(update.category, update.isFatal, update.code))
 ```
+
+For DASH, failed UTC synchronization and failed XLink downloads are reported through `streamerror` with `isFatal: false`. dash.js can continue synchronization or use the MPD's default XLink content, so these failures do not emit the player's fatal `error` event.
 
 `AdaptiveVariant` fields:
 

@@ -4,7 +4,8 @@ export default defineConfig({
   test: {
     exclude: [
       '**/node_modules/**',
-      '**/.vitepress/**',
+      '**/.nuxt/**',
+      '**/.output/**',
       '**/dist/**',
       '**/e2e/**',
     ],

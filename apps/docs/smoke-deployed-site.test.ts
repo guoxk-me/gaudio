@@ -100,7 +100,7 @@ function stubDeployedSite(options: FixtureOptions = {}): StubbedSite {
       return new Response(`GAudio documentation third-party licenses
 Package: dashjs@5.2.0
 Package: hls.js@1.6.16
-${options.isLicenseRecordIncomplete ? '' : 'Package: vitepress@1.6.4'}
+${options.isLicenseRecordIncomplete ? '' : 'Package: nuxt@4.5.2\nPackage: @nuxt/content@3.15.2'}
 `, {
         // AI modified: exercise the generic binary MIME GitHub Pages may use for generated text assets.
         headers: { 'Content-Type': 'application/octet-stream' },
@@ -169,19 +169,19 @@ afterEach(() => {
 })
 
 describe('deployed documentation smoke', () => {
-  it('runs after Pages deployment with only read access', async () => {
+  it('runs after Vercel deployment with only read access', async () => {
     const documentationWorkflow = await readFile(resolve(import.meta.dirname, '../../.github/workflows/docs.yml'), 'utf8')
     const deployJobIndex = documentationWorkflow.indexOf('  deploy:')
     const smokeJobIndex = documentationWorkflow.indexOf('  smoke:')
     const smokeJob = documentationWorkflow.slice(smokeJobIndex)
 
-    // AI modified: keep the real-origin probe downstream of deploy and isolated from Pages write credentials.
+    // AI modified: keep the real-origin probe downstream of deploy and isolated from Vercel credentials.
     expect(smokeJobIndex).toBeGreaterThan(deployJobIndex)
-    expect(documentationWorkflow).toMatch(/page_url: \$\{\{ steps\.deployment\.outputs\.page_url \}\}/)
+    expect(documentationWorkflow).toMatch(/deployment_url: \$\{\{ steps\.deploy_production\.outputs\.deployment_url/)
     expect(smokeJob).toContain('needs: deploy')
     expect(smokeJob).toContain('contents: read')
     expect(smokeJob).toContain('node apps/docs/scripts/smoke-deployed-site.mjs "$DEPLOYED_PAGE_URL"')
-    expect(smokeJob).toMatch(/DEPLOYED_PAGE_URL: \$\{\{ needs\.deploy\.outputs\.page_url \}\}/)
+    expect(smokeJob).toMatch(/DEPLOYED_PAGE_URL: \$\{\{ needs\.deploy\.outputs\.deployment_url \}\}/)
     expect(smokeJob).not.toContain('pages: write')
     expect(smokeJob).not.toContain('id-token: write')
     expect(smokeJob).not.toContain('secrets.')
@@ -263,7 +263,7 @@ describe('deployed documentation smoke', () => {
     stubDeployedSite({ isLicenseRecordIncomplete: true })
     const smokeCheck = runDeployedSmoke('https://docs.example.test/review/')
 
-    await expect(smokeCheck).rejects.toThrow('third-party license record response body did not include vitepress@')
+    await expect(smokeCheck).rejects.toThrow('third-party license record response body did not include nuxt@')
   })
 
   it('rejects a deployed SPA fallback that turns an unknown route into HTTP 200', async () => {

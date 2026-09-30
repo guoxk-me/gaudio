@@ -104,7 +104,7 @@ player.on('ratechange', ({ playbackRate }) => {
 | `manifestloaded` | `AdaptiveManifestUpdate` | Vendor manifest 加载完成并暴露 variants。 |
 | `variantchange` | `AdaptiveVariantUpdate` | 初始选择、自动 ABR 切换或已确认的手动音质请求切换 variant。 |
 | `segmentloadstart` | `AdaptiveSegmentUpdate` | Vendor 暴露的媒体分段请求开始。 |
-| `segmentloaded` | `AdaptiveSegmentUpdate` | Vendor 暴露的媒体分段请求完成。 |
+| `segmentloaded` | `AdaptiveSegmentUpdate` | Vendor 暴露的媒体分段请求成功；失败的请求不会触发此事件。 |
 | `streamerror` | `AdaptiveStreamError` | Vendor 报告可恢复或 fatal 的自适应流错误。 |
 
 ```ts
@@ -115,6 +115,8 @@ player.on('segmentloadstart', update => console.log(update.url))
 player.on('segmentloaded', update => console.log(update.url, update.duration))
 player.on('streamerror', update => console.log(update.category, update.isFatal, update.code))
 ```
+
+DASH 的 UTC 时间同步失败和 XLink 下载失败通过 `streamerror` 报告，`isFatal` 为 `false`。dash.js 可以继续同步或使用 MPD 中的 XLink 默认内容，因此这些失败不会触发播放器的致命 `error` 事件。
 
 `AdaptiveVariant` 字段：
 

@@ -9,7 +9,7 @@ GAudio 把自适应流作为可选能力。导入根入口 `gaudio` 不会加载
 只安装实际使用的协议依赖：
 
 ```bash
-pnpm add gaudio@next hls.js
+pnpm add gaudio@next hls.js@~1.6.16
 pnpm add gaudio@next dashjs
 ```
 
@@ -268,6 +268,8 @@ await hlsAdapter.updateConfig(
 
 `reload` 可能重新下载 manifest 和 segment，可能中断播放，并且不会保留 buffered 数据、retry state 或带宽估计。
 
+重载开始后发出的播放器控制优先于重载保存的状态。暂停会阻止自动续播；停止还会阻止恢复旧位置。新的定位操作保留其请求的位置，新的播放操作接管播放且不会重复续播。如果控制操作取消了已经开始的位置或播放恢复，重载会以 `LOAD_ABORTED` 拒绝，但保留已创建的替代引擎。
+
 DASH settings 使用 dash.js 运行时更新：
 
 ```ts
@@ -299,7 +301,7 @@ dashAdapter.getSettings()
 
 `isSupported()` 是同步的浏览器能力探测，不会加载可选的 `hls.js` 或 `dashjs` peer。因此，返回 `true` 并不等于依赖预检通过：如果所选 peer 无法 import，创建 engine 仍会以 `ADAPTER_UNAVAILABLE` reject；如果 vendor runtime 检查失败，则会以 `PROTOCOL_UNSUPPORTED` reject。
 
-一个 adapter instance 由一个 player router 独占，直到该 router 的清理全部完成。`dispose()` 会立即让 player 不再可用，但 source 与 vendor 清理可能在这个 `void` 调用返回后继续异步执行。清理仍 pending 时，把同一个 adapter 注册给另一个 player 会抛出 `TypeError`；替换 player 时请创建新的 adapter instance。
+一个 adapter instance 由一个 player router 独占，直到该 router 的清理全部完成。`dispose()` 会立即让 player 不再可用，并返回等待 source 与 vendor 清理的 Promise。在该 Promise resolve 前把同一个 adapter 注册给另一个 player 会抛出 `TypeError`；替换 player 时请创建新的 adapter instance。
 
 ## 范围
 

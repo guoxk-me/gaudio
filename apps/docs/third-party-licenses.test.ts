@@ -42,9 +42,18 @@ describe('documentation third-party attribution', () => {
     'Apache-2.0',
     'BSD-2-Clause',
     'BSD-3-Clause',
+    '(BSD-3-Clause OR GPL-2.0)',
+    'BlueOak-1.0.0',
+    'CC0-1.0',
+    'CC-BY-4.0',
     'ISC',
     'MIT',
+    '(MIT AND Zlib)',
+    '(MIT AND BSD-3-Clause)',
+    '(MIT OR CC0-1.0)',
     'MPL-2.0',
+    'OFL-1.1',
+    'Python-2.0',
   ])('accepts the reviewed license expression %s', (licenseExpression) => {
     expect(() => assertReviewedLicense('fixture@1.0.0', licenseExpression)).not.toThrow()
   })
@@ -134,18 +143,26 @@ second
     expect(firstGeneration.generation.stderr).toBe('')
     expect(firstGeneration.attribution).toBe(secondGeneration.attribution)
     expect(firstGeneration.attribution).toBe(committedAttribution)
+    // AI modified: generated attribution stays diff-clean even when upstream files contain trailing spaces.
+    expect(firstGeneration.attribution).not.toMatch(/[ \t]+$/m)
     const attributedPackages = attributedPackageIdentities(firstGeneration.attribution)
     expect(attributedPackages.size).toBe(Number(firstGeneration.attribution.match(/^Packages: (\d+)$/m)?.[1]))
-    expect(attributedPackages.has('@docsearch/css@3.8.2')).toBe(true)
+    expect(attributedPackages.has('@nuxt/content@3.15.2')).toBe(true)
     expect(firstGeneration.attribution).toContain('Package: @svta/cml-dash@')
-    expect(firstGeneration.attribution).toContain('Package: @docsearch/css@3.8.2')
-    expect(firstGeneration.attribution).toContain('https://github.com/algolia/docsearch/blob/v3.8.2/LICENSE')
-    expect(firstGeneration.attribution).toContain('Copyright (c) 2015-present Algolia, Inc.')
+    // AI modified: the generated notice covers Nuxt's shipped runtime, local search, and reviewed fonts.
+    expect(firstGeneration.attribution).toContain('Package: @fontsource-variable/geist@5.3.0')
+    expect(firstGeneration.attribution).toContain('Package: @fontsource-variable/geist-mono@5.3.0')
+    expect(firstGeneration.attribution).toContain('Package: @nuxt/content@3.15.2')
+    expect(firstGeneration.attribution).toContain('Package: @nuxtjs/sitemap@8.3.4')
+    expect(firstGeneration.attribution).toContain('Package: @sqlite.org/sqlite-wasm@3.53.0-build1')
+    expect(firstGeneration.attribution).toContain('https://github.com/sqlite/sqlite-wasm/blob/3.53.0-build1/README.md#license')
     expect(firstGeneration.attribution).toContain('Package: @vueuse/shared@')
     expect(firstGeneration.attribution).toContain('Package: hls.js@')
     expect(firstGeneration.attribution).toContain('Package: dashjs@')
     expect(firstGeneration.attribution).toContain('Package: tw-animate-css@')
-    expect(firstGeneration.attribution).toContain('Package: vitepress@')
+    expect(firstGeneration.attribution).toContain('Package: nuxt@4.5.2')
+    expect(firstGeneration.attribution).not.toContain('Package: vitepress@')
+    expect(firstGeneration.attribution).not.toContain('Package: @docsearch/css@')
     expect(firstGeneration.attribution).toContain('Package: vue@')
     expect(firstGeneration.attribution).not.toContain('Package: gaudio@')
     expect(firstGeneration.attribution).not.toContain(docsRoot)

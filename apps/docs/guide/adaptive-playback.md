@@ -9,7 +9,7 @@ The commands below target npm's `next` dist-tag. Before the first registry relea
 Install only the protocol dependency you use:
 
 ```bash
-pnpm add gaudio@next hls.js
+pnpm add gaudio@next hls.js@~1.6.16
 pnpm add gaudio@next dashjs
 ```
 
@@ -268,6 +268,8 @@ await hlsAdapter.updateConfig(
 
 `reload` may re-download the manifest and segments, interrupt playback, and lose buffered data, retry state, and bandwidth estimates.
 
+Player controls issued after a reload starts take precedence over its saved state. Pausing prevents automatic resume; stopping also prevents restoring the old position. A newer seek keeps its requested position, and a newer play owns playback without a duplicate resume. If a control cancels position or playback restoration after it has begun, the reload rejects with `LOAD_ABORTED` while retaining the replacement engine.
+
 DASH settings use dash.js runtime updates:
 
 ```ts
@@ -299,7 +301,7 @@ dashAdapter.getSettings()
 
 `isSupported()` is a synchronous browser-capability probe. It does not load the optional `hls.js` or `dashjs` peer, so `true` is not a dependency preflight: engine creation can still reject with `ADAPTER_UNAVAILABLE` if the selected peer cannot be imported, or `PROTOCOL_UNSUPPORTED` if its runtime check fails.
 
-An adapter instance has exclusive ownership by one player router until that router's cleanup has completely finished. `dispose()` makes the player unusable immediately, but source and vendor cleanup can continue asynchronously after the `void` call returns. Registering the same adapter with another player while cleanup is pending throws `TypeError`; create fresh adapter instances for a replacement player.
+An adapter instance has exclusive ownership by one player router until that router's cleanup has completely finished. `dispose()` makes the player unusable immediately and returns a promise that waits for source and vendor cleanup. Registering the same adapter with another player before that promise resolves throws `TypeError`; create fresh adapter instances for a replacement player.
 
 ## Scope
 

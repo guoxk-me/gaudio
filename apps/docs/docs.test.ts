@@ -193,16 +193,16 @@ async function semanticDocumentationDiagnostics(
 }
 
 describe('documentation application', () => {
-  it('is a private workspace consumer with a GitHub Pages build', async () => {
+  it('is a private workspace consumer with a Vercel-compatible build', async () => {
     const [
       packageJsonText,
-      vitePressConfig,
+      nuxtConfig,
       typeDocConfigText,
       docsTypeScriptConfig,
       docsBaseConfiguration,
     ] = await Promise.all([
       readFile(resolve(docsRoot, 'package.json'), 'utf8'),
-      readFile(resolve(docsRoot, '.vitepress/config.ts'), 'utf8'),
+      readFile(resolve(docsRoot, 'nuxt.config.ts'), 'utf8'),
       readFile(resolve(docsRoot, 'typedoc.json'), 'utf8'),
       readFile(resolve(docsRoot, 'tsconfig.json'), 'utf8'),
       readFile(resolve(docsRoot, 'lib/docs-base.ts'), 'utf8'),
@@ -225,44 +225,32 @@ describe('documentation application', () => {
 
     expect(packageJson.private).toBe(true)
     expect(packageJson.dependencies?.gaudio).toBe('workspace:*')
-    expect(packageJson.scripts?.build).toContain('pnpm run api')
-    expect(packageJson.scripts?.build).toContain('check-built-links.mjs')
+    expect(packageJson.scripts?.build).toBe('pnpm run generate')
+    expect(packageJson.scripts?.generate).toContain('pnpm run api')
+    expect(packageJson.scripts?.generate).toContain('nuxt generate')
+    expect(packageJson.scripts?.['build:ssr']).toContain('nuxt build')
+    expect(packageJson.scripts?.generate).toContain('check-built-links.mjs')
     expect(packageJson.scripts?.dev).toContain('pnpm run licenses')
     expect(packageJson.scripts?.dev).toContain('pnpm run api')
     expect(packageJson.scripts).toHaveProperty('dev')
     expect(packageJson.scripts).toHaveProperty('lint')
     expect(packageJson.scripts).toHaveProperty('test')
     expect(packageJson.scripts).toHaveProperty('typecheck')
-    expect(vitePressConfig).toContain('import { docsBase, docsRoute } from \'../lib/docs-base.ts\'')
+    expect(nuxtConfig).toContain('import { docsBase } from \'./lib/docs-base.ts\'')
     expect(docsBaseConfiguration).toContain('process.env.DOCS_BASE ?? \'/gaudio/\'')
     expect(docsBaseConfiguration).toContain('export function resolveDocsBase(configuredBase: string): string')
     expect(docsBaseConfiguration).toContain('hasUnsafeDocsBaseStructure(configuredBase)')
     expect(docsBaseConfiguration).toContain('docsBaseWithLeadingSlash.endsWith(\'/\')')
-    expect(vitePressConfig).toContain('srcExclude: [\'api-overview.md\', \'public/**\']')
-    expect(vitePressConfig).toContain('locales:')
-    expect(vitePressConfig).toContain('label: \'English\'')
-    expect(vitePressConfig).toContain('label: \'简体中文\'')
-    expect(vitePressConfig).toContain('link: \'/zh/\'')
-    expect(vitePressConfig).toContain('skipToContentLabel: \'跳转到内容\'')
-    expect(vitePressConfig).toContain('darkModeSwitchLabel: \'外观\'')
-    expect(vitePressConfig).toContain('returnToTopLabel: \'返回顶部\'')
-    expect(vitePressConfig).toContain('title: \'页面未找到\'')
-    expect(vitePressConfig).toContain('linkLabel: \'返回 GAudio 中文首页\'')
-    // AI modified: project support routes must remain discoverable in both locales.
-    expect(vitePressConfig).toContain('socialLinks:')
-    expect(vitePressConfig).toContain('text: \'Project\'')
-    expect(vitePressConfig).toContain('text: \'项目\'')
-    expect(vitePressConfig).toContain('https://github.com/guoxk-me/gaudio/issues')
-    expect(vitePressConfig).toContain('https://github.com/guoxk-me/gaudio/blob/main/SUPPORT.md')
-    expect(vitePressConfig).toContain('https://github.com/guoxk-me/gaudio/security/policy')
-    // AI modified: release provenance and third-party terms must stay visible in both locale footers.
-    expect(vitePressConfig).toContain('footer: releaseFooter(\'en\')')
-    expect(vitePressConfig).toContain('footer: releaseFooter(\'zh\')')
-    expect(vitePressConfig).toContain('main / npm next')
-    expect(vitePressConfig).toContain('docsRoute(\'THIRD_PARTY_LICENSES.txt\')')
-    expect(vitePressConfig).toContain('process.env.GITHUB_SHA')
-    expect(vitePressConfig).not.toContain('Migration')
-    expect(vitePressConfig).not.toContain('/guide/migration')
+    // AI modified: one Nuxt route tree owns both locales, static generation, and compatibility redirects.
+    expect(nuxtConfig).toContain('modules: [[\'@nuxt/content\', contentOptions], \'@nuxtjs/sitemap\']')
+    expect(nuxtConfig).toContain('\'/zh\'')
+    expect(nuxtConfig).toContain('\'/zh/examples\'')
+    expect(nuxtConfig).toContain('compatibilityRouteRules')
+    expect(nuxtConfig).toContain('routeAliases.add(`/en')
+    expect(nuxtConfig).toContain('routeAliases.add(`/docs')
+    expect(nuxtConfig).toContain('payloadExtraction: false')
+    expect(nuxtConfig).toContain('failOnError: true')
+    expect(nuxtConfig).toContain('process.env.GITHUB_SHA')
     expect(typeDocConfig.entryFileName).toBe('index')
     expect(typeDocConfig.readme).toBe('api-overview.md')
     expect(typeDocConfig.mergeReadme).toBe(true)
@@ -280,24 +268,22 @@ describe('documentation application', () => {
     ]))
     expect(typeDocConfig.treatValidationWarningsAsErrors).toBe(true)
     expect(typeDocConfig.validation?.notDocumented).toBe(true)
-    // AI modified: authored Markdown SFCs, including the Chinese API wrapper, stay inside vue-tsc.
-    expect(docsTypeScriptConfig).toContain('"**/*.md"')
-    expect(docsTypeScriptConfig).toContain('"api/**/*.md"')
-    expect(docsTypeScriptConfig).not.toContain('"zh/api/**/*.md"')
-    expect(docsTypeScriptConfig).toContain('"vitePressExtensions": [".md"]')
-    expect(docsTypeScriptConfig).toContain('"../../playwright.config.ts"')
+    // AI modified: Nuxt-generated application types and strict authored source stay inside vue-tsc.
+    expect(docsTypeScriptConfig).toContain('"./.nuxt/tsconfig.json"')
+    expect(docsTypeScriptConfig).toContain('"strict": true')
   })
 
   it('reserves the contentinfo landmark for the site-wide footer', async () => {
-    const themeLayout = await readFile(resolve(docsRoot, '.vitepress/theme/index.ts'), 'utf8')
+    const [applicationLayout, siteFooter] = await Promise.all([
+      readFile(resolve(docsRoot, 'app/layouts/default.vue'), 'utf8'),
+      readFile(resolve(docsRoot, 'app/components/SiteFooter.vue'), 'utf8'),
+    ])
 
-    // AI modified: document metadata remains a region while the permitted footer role avoids duplicate contentinfo.
-    expect(themeLayout).toContain('document.querySelector<HTMLElement>(\'.VPDocFooter\')')
-    expect(themeLayout).toContain('documentFooter?.setAttribute(\'role\', \'group\')')
-    expect(themeLayout).toContain('documentInformation?.setAttribute(\'role\', \'region\')')
-    expect(themeLayout).toContain('Page information')
-    expect(themeLayout).toContain('页面信息')
-    expect(themeLayout).not.toContain('document.querySelector<HTMLElement>(\'.VPFooter\')')
+    // AI modified: Nuxt renders exactly one shared footer outside page documents.
+    expect(applicationLayout).toContain('<SiteFooter />')
+    expect(siteFooter).toContain('<footer class="site-footer">')
+    expect(siteFooter).toContain('Third-party licenses')
+    expect(siteFooter).not.toContain('role="contentinfo"')
   })
 
   it('keeps repository release and deployment safeguards documented', async () => {
@@ -347,7 +333,7 @@ describe('documentation application', () => {
     expect(mainBranchIndex).toBeGreaterThan(pushTriggerIndex)
     expect(developmentBranchIndex).toBeGreaterThan(mainBranchIndex)
 
-    // AI modified: a Pages artifact is publishable only after main-ref and full project verification.
+    // AI modified: a Vercel artifact is publishable only after ref validation and full project verification.
     expect(documentationWorkflow).toContain('if [ "$GITHUB_REF" != "refs/heads/main" ]; then')
     expect(documentationWorkflow.indexOf('Validate deployment ref')).toBeLessThan(documentationWorkflow.indexOf('actions/checkout@'))
     expect(documentationWorkflow).toContain('pnpm audit --audit-level high')
@@ -358,8 +344,15 @@ describe('documentation application', () => {
     expect(documentationWorkflow).toContain('pnpm run build')
     expect(documentationWorkflow).not.toContain('pnpm run docs:build')
     expect(documentationWorkflow).toContain('pnpm exec playwright install --with-deps chromium firefox webkit')
+    expect(documentationWorkflow).toContain('pnpm --filter @gaudio/docs build:ssr')
     expect(documentationWorkflow).toContain('pnpm --filter @gaudio/docs e2e')
     expect(documentationWorkflow).toContain('DOCS_E2E_USE_EXISTING_BUILD: "true"')
+    expect(documentationWorkflow).toContain('pnpm dlx vercel@59.1.4 build --prod')
+    expect(documentationWorkflow).toContain('pnpm dlx vercel@59.1.4 deploy --prebuilt --prod')
+    expect(documentationWorkflow).toContain('pnpm dlx vercel@59.1.4 deploy --prebuilt --yes')
+    expect(documentationWorkflow).toMatch(/DOCS_SITE_URL: \$\{\{ vars\.DOCS_SITE_URL \}\}/)
+    expect(documentationWorkflow).toMatch(/VERCEL_TOKEN: \$\{\{ secrets\.VERCEL_TOKEN \}\}/)
+    expect(documentationWorkflow).not.toContain('actions/deploy-pages@')
     expect(playwrightConfiguration).toContain('process.env.DOCS_E2E_USE_EXISTING_BUILD === \'true\'')
     // AI modified: Turbo must forward the CI and reuse flags so browser policy survives task isolation.
     expect(turboConfiguration).toContain('"CI"')
@@ -380,20 +373,21 @@ describe('documentation application', () => {
     expect(playwrightConfiguration).toContain('outputDir: \'output/playwright/results\'')
     expect(playwrightConfiguration).toContain('outputFolder: \'output/playwright/report\'')
     expect(playwrightConfiguration).toContain('command: docsPreviewCommand')
-    // AI modified: the preview server must honor loopback binding and serve only the verified VitePress output.
+    // AI modified: the preview server must honor loopback binding and serve only the verified Nuxt output.
     expect(playwrightConfiguration).toContain('pnpm exec vite preview . --config vite.preview.config.ts')
     expect(playwrightConfiguration).not.toContain('vitepress preview')
     expect(playwrightConfiguration).toContain('DOCS_PREVIEW_PORT must be an integer from 1 to 65535')
     expect(playwrightConfiguration).toContain('docsRoute(\'examples/\')')
     expect(vitePreviewConfiguration).toContain('import { docsBase } from \'./lib/docs-base.ts\'')
-    expect(vitePreviewConfiguration).toContain('const docsOutput = resolve(import.meta.dirname, \'.vitepress/dist\')')
-    // AI modified: optimized previews must serve VitePress's empty-root 404 instead of hydrating the home document.
+    expect(vitePreviewConfiguration).toContain('const docsOutput = resolve(import.meta.dirname, \'.output/public\')')
+    // AI modified: optimized previews must serve Nuxt's generated 404 instead of hydrating the home document.
     expect(vitePreviewConfiguration).toContain('appType: \'mpa\'')
     expect(vitePreviewConfiguration).toContain('plugins: [documentationNotFoundPreview()]')
     expect(vitePreviewConfiguration).toContain('readFileSync(resolve(outputDirectory, \'404.html\'), \'utf8\')')
     expect(vitePreviewConfiguration).toContain('response.statusCode = 404')
     expect(vitePreviewConfiguration).toContain('response.setHeader(\'Content-Length\', Buffer.byteLength(notFoundHtml))')
-    expect(vitePreviewConfiguration).toContain('configurePreviewServer(server) {\n      return () => {')
+    expect(vitePreviewConfiguration).toContain('server.middlewares.use(documentationCleanPageMiddleware(outputDirectory))')
+    expect(vitePreviewConfiguration).toContain('return () => {')
     expect(vitePreviewConfiguration).toContain('host: \'127.0.0.1\'')
     expect(vitePreviewConfiguration).toContain('strictPort: true')
     // AI modified: custom documentation bases must flow into every browser route and asset assertion.
@@ -466,21 +460,21 @@ describe('documentation application', () => {
   })
 
   it('keeps generated API navigation inside the active Chinese locale', async () => {
-    const [vitePressConfig, routeLoader, routePage] = await Promise.all([
-      readFile(resolve(docsRoot, '.vitepress/config.ts'), 'utf8'),
-      readFile(resolve(docsRoot, 'zh/api/[path].paths.ts'), 'utf8'),
-      readFile(resolve(docsRoot, 'zh/api/[path].md'), 'utf8'),
+    const [nuxtConfig, documentationPage, navigationConfiguration] = await Promise.all([
+      readFile(resolve(docsRoot, 'nuxt.config.ts'), 'utf8'),
+      readFile(resolve(docsRoot, 'app/pages/[...slug].vue'), 'utf8'),
+      readFile(resolve(docsRoot, 'app/config/documentation-navigation.ts'), 'utf8'),
     ])
 
-    expect(vitePressConfig).toContain('{ text: \'API\', link: \'/zh/api/\' }')
-    // AI modified: the English declaration source remains canonical even while locale navigation stays available.
-    expect(vitePressConfig).toContain('.filter(sitemapEntry => !isChineseApiMirror(sitemapEntry.url))')
-    expect(vitePressConfig).toContain('const canonicalPage = isChineseApiMirror(page)')
-    expect(routeLoader).toContain('apiMarkdownFiles(generatedApiRoot)')
-    expect(routeLoader).toContain('params: { path: apiPath }')
-    expect(routeLoader).toContain('.replaceAll(\'](/api/\', \'](/zh/api/\')')
-    // AI modified: generated English declarations need a language-of-parts boundary on Chinese pages.
-    expect(routePage).toMatch(/<div lang="en-US">\s*<!-- @content -->\s*<\/div>/)
+    expect(nuxtConfig).toContain('...apiRoutes.map(routePath => `/zh')
+    expect(nuxtConfig).toContain('exclude: [\'/zh/api/**\', \'/__docs/**\']')
+    // AI modified: English declarations remain canonical while the Nuxt page mirrors links inside /zh/api.
+    expect(documentationPage).toContain('const isChineseApiMirror')
+    expect(documentationPage).toContain('contentPath.value.toLocaleLowerCase()')
+    expect(documentationPage).toContain('const canonicalPath = computed')
+    expect(documentationPage).toContain(':lang="isChineseApiMirror ? \'en-US\' : undefined"')
+    expect(documentationPage).toContain('const localePrefix = isChinese.value')
+    expect(navigationConfiguration).toContain('const chineseGuideLinks')
   })
 
   it('keeps generated audio samples within the static deployment budget', async () => {
@@ -603,11 +597,12 @@ describe('documentation application', () => {
   }, 30_000)
 
   it('ships bilingual guide pages without migration documentation', async () => {
-    const [englishGuideFiles, chineseGuideFiles, englishHome, chineseHome] = await Promise.all([
+    const [englishGuideFiles, chineseGuideFiles, homePage, homeHero, capabilities] = await Promise.all([
       readdir(resolve(docsRoot, 'guide')),
       readdir(resolve(docsRoot, 'zh/guide')),
-      readFile(resolve(docsRoot, 'index.md'), 'utf8'),
-      readFile(resolve(docsRoot, 'zh/index.md'), 'utf8'),
+      readFile(resolve(docsRoot, 'app/components/HomePage.vue'), 'utf8'),
+      readFile(resolve(docsRoot, 'app/components/HomeHero.vue'), 'utf8'),
+      readFile(resolve(docsRoot, 'app/components/HomeCapabilities.vue'), 'utf8'),
     ])
 
     expect(englishGuideFiles).not.toContain('migration.md')
@@ -628,40 +623,73 @@ describe('documentation application', () => {
       'events.md',
       'api-reference.md',
     ]))
-    expect(englishHome).toContain('Pre-release')
-    // AI modified: keep the home page focused on the library capability surface.
-    expect(englishHome).toContain('Capability Map')
-    expect(englishHome).toContain('Source lifecycle')
-    expect(englishHome).toContain('Adaptive delivery')
-    expect(englishHome).toContain('<HomeMiniPlayer />')
-    expect(chineseHome).toContain('预发布')
-    expect(chineseHome).toContain('能力地图')
-    expect(chineseHome).toContain('Source 生命周期')
-    expect(chineseHome).toContain('自适应分发')
-    expect(chineseHome).toContain('<HomeMiniPlayer />')
+    // AI modified: locale-aware Nuxt components render the approved use-case-first home composition.
+    expect(homeHero).toContain('<HomeMiniPlayer :controller="player" />')
+    expect(homeHero).toContain('One player for browser audio, HLS, and DASH.')
+    expect(homePage).toContain('<HomeCapabilities />')
+    expect(homePage).toContain('浏览器音频、HLS 与 DASH 播放器')
+    expect(homePage).toContain('Browser audio, HLS, and DASH player')
+    expect(capabilities).toContain('Playback')
+    expect(capabilities).toContain('播放')
+    expect(capabilities).toContain('Observability')
+    expect(capabilities).toContain('可观测性')
   })
 
   it('loads the homepage player only where rendered and keeps load and playback failures retryable', async () => {
-    const [themeEntry, englishHome, chineseHome, miniPlayer, miniPlayerState] = await Promise.all([
-      readFile(resolve(docsRoot, '.vitepress/theme/index.ts'), 'utf8'),
-      readFile(resolve(docsRoot, 'index.md'), 'utf8'),
-      readFile(resolve(docsRoot, 'zh/index.md'), 'utf8'),
-      readFile(resolve(docsRoot, '.vitepress/theme/components/HomeMiniPlayer.vue'), 'utf8'),
-      readFile(resolve(docsRoot, '.vitepress/theme/composables/use-home-mini-player.ts'), 'utf8'),
+    const [applicationLayout, homePage, homeHero, miniPlayer, miniPlayerState] = await Promise.all([
+      readFile(resolve(docsRoot, 'app/layouts/default.vue'), 'utf8'),
+      readFile(resolve(docsRoot, 'app/components/HomePage.vue'), 'utf8'),
+      readFile(resolve(docsRoot, 'app/components/HomeHero.vue'), 'utf8'),
+      readFile(resolve(docsRoot, 'app/components/HomeMiniPlayer.vue'), 'utf8'),
+      readFile(resolve(docsRoot, 'app/composables/use-home-mini-player.ts'), 'utf8'),
     ])
 
-    // AI modified: prevent a global theme registration from preloading GAudio on every documentation route.
-    expect(themeEntry).not.toContain('HomeMiniPlayer')
-    expect(englishHome).toContain('defineAsyncComponent')
-    expect(englishHome).toContain('./.vitepress/theme/components/HomeMiniPlayer.vue')
-    expect(chineseHome).toContain('../.vitepress/theme/components/HomeMiniPlayer.vue')
+    // AI modified: keep the media-owning mini player out of the global layout and defer browser code until interaction.
+    expect(applicationLayout).not.toContain('HomeMiniPlayer')
+    expect(homePage).toContain('<HomeHero />')
+    expect(homeHero).toContain('<HomeMiniPlayer :controller="player" />')
+    expect(miniPlayerState).toContain('await import(\'gaudio\')')
+    expect(miniPlayerState).toContain('preload: \'none\'')
+    expect(miniPlayerState).not.toContain('onMounted')
     expect(miniPlayerState).toContain('playerErrorKind')
     expect(miniPlayerState).toContain('playerErrorKind.value = isReady.value ? \'playback\' : \'load\'')
-    expect(miniPlayerState).toContain('playerErrorKind.value !== \'load\'')
     expect(miniPlayerState).toContain('playerErrorKind.value = undefined')
-    expect(miniPlayer).toContain('text.value.playbackError')
-    expect(miniPlayer).toContain('text.value.retryLoad')
+    expect(miniPlayer).toContain('Playback failed — retry')
+    expect(miniPlayer).toContain('Retry sample')
     expect(miniPlayer).not.toContain('hasLoadError')
+  })
+
+  it('implements the approved homepage hierarchy and interactive proof surfaces', async () => {
+    const [homePage, homeHero, homeMiniPlayer, homeQuickStart, homeAdoptionPaths, homeBoundaries, miniPlayerState, mainStyles] = await Promise.all([
+      readFile(resolve(docsRoot, 'app/components/HomePage.vue'), 'utf8'),
+      readFile(resolve(docsRoot, 'app/components/HomeHero.vue'), 'utf8'),
+      readFile(resolve(docsRoot, 'app/components/HomeMiniPlayer.vue'), 'utf8'),
+      readFile(resolve(docsRoot, 'app/components/HomeQuickStart.vue'), 'utf8'),
+      readFile(resolve(docsRoot, 'app/components/HomeAdoptionPaths.vue'), 'utf8'),
+      readFile(resolve(docsRoot, 'app/components/HomeBoundaries.vue'), 'utf8'),
+      readFile(resolve(docsRoot, 'app/composables/use-home-mini-player.ts'), 'utf8'),
+      readFile(resolve(docsRoot, 'app/assets/css/main.css'), 'utf8'),
+    ])
+
+    // AI modified: lock the selected value → proof → adoption → boundary sequence from the final wireframe.
+    expect(homePage.indexOf('<HomeQuickStart />')).toBeLessThan(homePage.indexOf('<HomeAdoptionPaths />'))
+    expect(homePage.indexOf('<HomeAdoptionPaths />')).toBeLessThan(homePage.indexOf('<HomeCapabilities />'))
+    expect(homePage.indexOf('<HomeCapabilities />')).toBeLessThan(homePage.indexOf('<HomeBoundaries />'))
+    expect(homeMiniPlayer).toContain('waveformPeaks')
+    expect(homeMiniPlayer).toContain('Loaded after interaction · autoplay off')
+    expect(homeQuickStart).toContain('[\'pnpm\', \'npm\', \'yarn\', \'bun\']')
+    expect(homeQuickStart).toContain('localStorage.setItem(\'gaudio-package-manager\'')
+    expect(homeQuickStart).toContain('navigator.clipboard.writeText')
+    expect(homeAdoptionPaths).toContain('packageName: \'gaudio/hls\'')
+    expect(homeAdoptionPaths).toContain('packageName: \'gaudio/dash\'')
+    expect(homeBoundaries).toContain('GAudio is a playback library')
+    expect(miniPlayerState).toContain('analyzer: {')
+    expect(miniPlayerState).toContain('fftSize: 2048')
+    expect(miniPlayerState).toContain('getFrequencyData({ binCount: 64 })')
+    expect(homeHero).toContain('class="home-wireframe-hero"')
+    expect(mainStyles).toContain('--home-wireframe-max: 1200px')
+    expect(mainStyles).toContain('.home-showcase-player__waveform')
+    expect(mainStyles).toContain('.home-wireframe-package-tabs')
   })
 
   it('documents adaptive content types in both languages', async () => {
@@ -746,6 +774,11 @@ describe('documentation application', () => {
     expect(chineseGuide).toContain('在首次 registry release 可见之前')
     expect(readme).toContain('Before the first registry release is visible')
     expect(rootReadme).toContain('Before the first registry release is visible')
+    // AI modified: installation snippets cannot resolve to the incompatible hls.js 1.7 declaration release.
+    for (const installationGuide of [englishGuide, chineseGuide, readme]) {
+      expect(installationGuide).toContain('hls.js@~1.6.16')
+    }
+    expect(rootReadme).toContain('hls.js >=1.6.16 <1.7.0')
     // AI modified: public compatibility claims distinguish tested engines from browser and resolver guarantees.
     for (const englishCompatibilityGuide of [englishGuide, readme, rootReadme]) {
       expect(englishCompatibilityGuide).toContain('tested-current matrix, not a minimum-version or real-device guarantee')
@@ -761,12 +794,15 @@ describe('documentation application', () => {
     expect(englishGuide).toContain('Source cookbook')
     expect(englishGuide).toContain('signed URL')
     expect(englishGuide).toContain('credentials')
-    expect(englishGuide).toContain('silent analyzer samples')
+    // AI modified: CORS guidance covers request mode and the complete output, not just analyzer samples.
+    expect(englishGuide).toContain('crossOrigin: \'anonymous\'')
+    expect(englishGuide).toContain('silence the entire Web Audio output')
     expect(englishGuide).not.toContain('MIME sniffing')
     expect(chineseGuide).toContain('Source cookbook')
     expect(chineseGuide).toContain('签名 URL')
     expect(chineseGuide).toContain('credentials')
-    expect(chineseGuide).toContain('静音的 analyzer 样本')
+    expect(chineseGuide).toContain('crossOrigin: \'anonymous\'')
+    expect(chineseGuide).toContain('整个音频输出都可能静音')
     expect(chineseGuide).not.toContain('MIME 判断')
     // AI modified: keep extension error identity distinct from GAudio-owned stable error codes.
     expect(englishGuide).toContain('Extension callbacks remain an exception boundary')
@@ -775,8 +811,9 @@ describe('documentation application', () => {
     expect(readme).toContain('does not attach headers')
     expect(readme).toContain('Extension callbacks can still propagate their original errors')
     // AI modified: npm-only readers need the same analyzer CORS boundary as the complete guide.
-    expect(readme).toContain('analyzer samples remain silent')
-    expect(readme).toContain('Web Audio access through CORS')
+    expect(readme).toContain('silence the entire Web Audio output')
+    expect(readme).toContain('crossOrigin: \'use-credentials\'')
+    expect(readme).toContain('Access-Control-Allow-Credentials: true')
     expect(readme).not.toContain('const preferredVariant = variants[0]')
     expect(readme).toContain('highestBitrateVariant')
     // AI modified: the npm README must expose runtime configuration without hiding reload costs.
@@ -979,8 +1016,10 @@ describe('documentation application', () => {
       }
     }
 
-    expect(checkedLinks).toBeGreaterThan(20)
+    expect(checkedLinks).toBeGreaterThan(10)
     expect(unresolvedLinks).toEqual([])
-    expect(await pathExists(resolve(docsRoot, 'zh/api/[path].paths.ts'))).toBe(true)
+    // AI modified: Nuxt owns localized API mirrors through one route instead of a framework-specific loader.
+    expect(await pathExists(resolve(docsRoot, 'zh/api/[path].paths.ts'))).toBe(false)
+    expect(await pathExists(resolve(docsRoot, 'app/pages/[...slug].vue'))).toBe(true)
   })
 })

@@ -32,7 +32,7 @@ Source API：
 | `setSource(source)` | `void` | 接收 `AudioSourceInput`，卸载 active engine，并把状态重置为 `idle`。Analyzer dispose 和 engine unload 错误会保留原始对象。 |
 | `load()` | `Promise<void>` | 打开当前 source，并在 metadata 可用后 resolve。Adapter/analyzer 创建阶段的非 `GAudioError` 失败会包装为 `ENGINE_ERROR` 并保留原始 `cause`；加载前 analyzer 清理错误保持原样。 |
 | `play()` | `Promise<void>` | 开始或恢复播放；`idle` 时会先加载。 |
-| `dispose()` | `void` | 永久禁用 player 并开始清理。清理可在返回后继续；首个清理错误可能抛出，重复 `dispose()` 会重试保留的未完成工作。 |
+| `dispose()` | `Promise<void>` | 立即永久禁用 player，并在所拥有的清理完成后 resolve。独立资源都会尝试清理，Promise 以首个失败 reject；之后再次调用只重试保留的工作。 |
 
 播放列表 API：
 
@@ -170,6 +170,7 @@ Variant 顺序由 implementation 决定。按音质排名选择前，应先按 `
 | 字段 | 类型 | 默认值 |
 | --- | --- | --- |
 | `source` | `AudioSourceInput` | `undefined` |
+| `crossOrigin` | `AudioCrossOriginMode` | 内置默认分析使用 `anonymous`；其他情况保留引擎策略 |
 | `adapters` | `readonly AudioEngineAdapter[]` | `[]` |
 | `analyzer` | `boolean \| AudioPlayerAnalyzerOptions` | `undefined` |
 | `mediaSession` | `boolean \| AudioMediaSessionOptions` | `undefined` |
@@ -282,6 +283,21 @@ const analyzer = new AudioAnalyzer(audioContext, sourceNode, fftSize)
 在 `AudioPlayer` 边界，adapter `createEngine()` 和 analyzer factory 抛出的非 `GAudioError` 失败会包装为 `ENGINE_ERROR`；原始值保存在 `cause` 中，player 还会通过 `error` 事件发布同一个包装对象。直接调用 adapter `createEngine()` 或 `MediaElementAudioEngine` 扩展 hook 时，仍可能原样收到扩展自己的错误。Source replacement 清理和显式加载前的 analyzer 清理也会保留原始错误。
 
 直接委托给注入式自定义 `AudioEngine` 的构造设置与订阅、`pause()`、`stop()`、由 engine 支撑的设置和查询，以及 `canPlayType()`，都会保留原始抛出值。上述直接调用的失败不会自动发布 player `error` 事件。
+
+<!-- AI modified: 区分自定义引擎必需的播放契约与可选浏览器能力。 -->
+自定义引擎正式支持构造注入和 adapter 两种接入方式。核心播放、事件、取消和清理仍为必需能力；以下浏览器接口可省略：
+
+| 可选 engine 成员 | 省略时的行为 |
+| --- | --- |
+| `fastSeek` | 委托给 `seek`，保留取消语义和原始错误。 |
+| `setPreload`、`getPreload` | Player/router 保存请求的提示；没有 setter 时，引擎自行决定加载策略。 |
+| `setAutoplay`、`getAutoplay` | Router 保存原生提示，player 仍自行管理自动播放。没有 setter 时，`load()` 必须保持暂停，直到调用 `play()`。 |
+| `getSeekableRanges`、`getPlayedRanges` | 返回 `[]`，表示范围或历史未知。 |
+| `canPlayType` | 返回 `''`，表示格式支持情况未知。 |
+
+分析器与自适应音质方法同样可选。`AudioEngine.load(source, options?: AudioEngineLoadOptions)` 接收可选的 `crossOrigin?: AudioCrossOriginMode`（`'anonymous'` 或 `'use-credentials'`）。内置媒体引擎在附加 URL 前应用该策略；省略时保留元素原策略。此选项控制媒体元素请求，HLS/DASH manifest 和 segment 的凭证仍由各自 vendor adapter 配置控制。
+
+每个自定义 `AudioEngine.dispose()` 都必须返回 `Promise<void>`，并且只在本次 source、浏览器、Web Audio 与 vendor 资源清理全部完成后 settle。这样 player dispose 和协议替换只依赖一个与具体实现无关的生命周期契约。
 
 <!-- AI modified: 记录生命周期竞态，保证注入式 engine 的异步操作都能终止。 -->
 对于 player 管理的异步操作，engine 结果与生命周期结果中先发生的一方生效。当前 `load()` 或 `play()` 会发布其保留或包装后的 engine 失败；`seek()`、`fastSeek()` 和 `setAdaptiveQuality()` 的普通 engine rejection 则仍只由委托调用返回。Dispose 会立即以 `ENGINE_ERROR` 和 `Audio operation was interrupted by player disposal` 拒绝所有进行中的操作；dispose 与取消本身不会新增 player `error`。Terminal engine `error` 会使用向 listener 仅发布一次的同一个 `GAudioError` 实例拒绝操作（`load()` 仅在 source fallback 耗尽后如此）。

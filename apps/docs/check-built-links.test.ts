@@ -23,16 +23,16 @@ async function documentationFixture(
   <head>
     <link rel="canonical" href="${productionRoot}">
     <link rel="alternate" hreflang="en-US" href="${productionRoot}">
-    <link rel="alternate" hreflang="zh-CN" href="${productionRoot}zh/">
+    <link rel="alternate" hreflang="zh-CN" href="${productionRoot}zh">
     <link rel="alternate" hreflang="x-default" href="${productionRoot}">
   </head>
   <body>
     <main><a ${linkAttribute}>Protocol fixture</a></main>${additionalBodyMarkup}
-    <footer class="VPFooter"><a href="${fixtureDocsBase}THIRD_PARTY_LICENSES.txt">Third-party licenses</a></footer>
+    <footer class="site-footer"><a href="${fixtureDocsBase}THIRD_PARTY_LICENSES.txt">Third-party licenses</a></footer>
   </body>
 </html>`),
     writeFile(resolve(outputRoot, 'sitemap.xml'), `<urlset xmlns:xhtml="http://www.w3.org/1999/xhtml">
-<url><loc>${productionRoot}</loc><xhtml:link rel="alternate" hreflang="en-US" href="${productionRoot}"/><xhtml:link rel="alternate" hreflang="zh-CN" href="${productionRoot}zh/"/></url>
+<url><loc>${productionRoot}</loc><xhtml:link rel="alternate" hreflang="en-US" href="${productionRoot}"/><xhtml:link rel="alternate" hreflang="zh-CN" href="${productionRoot}zh"/><xhtml:link rel="alternate" hreflang="x-default" href="${productionRoot}"/></url>
 </urlset>`),
     // AI modified: every deployable fixture carries the same required attribution artifact as production docs.
     writeFile(resolve(outputRoot, 'THIRD_PARTY_LICENSES.txt'), 'fixture dependency licenses\n'),
@@ -41,7 +41,7 @@ async function documentationFixture(
   return outputRoot
 }
 
-async function documentationPageFixture(documentFooterMarkup: string): Promise<string> {
+async function documentationPageFixture(siteFooterMarkup: string): Promise<string> {
   const outputRoot = await documentationFixture('href="https://example.com/guide"')
   const productionRoot = 'https://guoxk-me.github.io/gaudio/'
 
@@ -49,15 +49,14 @@ async function documentationPageFixture(documentFooterMarkup: string): Promise<s
   await Promise.all([
     writeFile(resolve(outputRoot, 'api/index.html'), `<!doctype html>
 <html lang="en-US">
-  <head><link rel="canonical" href="${productionRoot}api/"></head>
+  <head><link rel="canonical" href="${productionRoot}api"></head>
   <body>
-    <main>API fixture</main>${documentFooterMarkup}
-    <footer class="VPFooter"></footer>
+    <main>API fixture</main>${siteFooterMarkup}
   </body>
 </html>`),
     writeFile(resolve(outputRoot, 'sitemap.xml'), `<urlset xmlns:xhtml="http://www.w3.org/1999/xhtml">
-<url><loc>${productionRoot}</loc><xhtml:link rel="alternate" hreflang="en-US" href="${productionRoot}"/><xhtml:link rel="alternate" hreflang="zh-CN" href="${productionRoot}zh/"/></url>
-<url><loc>${productionRoot}api/</loc></url>
+<url><loc>${productionRoot}</loc><xhtml:link rel="alternate" hreflang="en-US" href="${productionRoot}"/><xhtml:link rel="alternate" hreflang="zh-CN" href="${productionRoot}zh"/><xhtml:link rel="alternate" hreflang="x-default" href="${productionRoot}"/></url>
+<url><loc>${productionRoot}api</loc></url>
 </urlset>`),
   ])
 
@@ -87,9 +86,9 @@ afterEach(async () => {
 })
 
 describe('built documentation link protocol policy', () => {
-  it('accepts one site footer, a document group, and a named information region', async () => {
+  it('accepts one Nuxt site footer and a named document region', async () => {
     const outputRoot = await documentationPageFixture(
-      '<footer role="group" class="VPDocFooter"><div role="region" aria-label="Page information" class="edit-info"></div></footer>',
+      '<footer class="site-footer"><div role="region" aria-label="Page information"></div></footer>',
     )
     const linkCheck = spawnSync(process.execPath, [linkCheckerScript, outputRoot], {
       encoding: 'utf8',
@@ -101,7 +100,7 @@ describe('built documentation link protocol policy', () => {
 
   it('rejects a document footer that duplicates the site contentinfo landmark', async () => {
     const outputRoot = await documentationPageFixture(
-      '<footer class="VPDocFooter"><div role="region" aria-label="Page information" class="edit-info"></div></footer>',
+      '<footer class="site-footer"></footer><footer></footer>',
     )
     const linkCheck = spawnSync(process.execPath, [linkCheckerScript, outputRoot], {
       encoding: 'utf8',
@@ -109,29 +108,44 @@ describe('built documentation link protocol policy', () => {
 
     expect(linkCheck.status).toBe(1)
     expect(linkCheck.stderr).toContain('expected one contentinfo landmark, found 2')
-    expect(linkCheck.stderr).toContain('expected document footer role group')
   })
 
-  it('rejects a document layout without its named footer region', async () => {
+  it('rejects a document layout without its shared site footer', async () => {
     const outputRoot = await documentationPageFixture('')
     const linkCheck = spawnSync(process.execPath, [linkCheckerScript, outputRoot], {
       encoding: 'utf8',
     })
 
     expect(linkCheck.status).toBe(1)
-    expect(linkCheck.stderr).toContain('api/index.html -> expected 1 document footer, found 0')
+    expect(linkCheck.stderr).toContain('api/index.html -> expected one site-wide contentinfo footer')
   })
 
-  it('rejects document information that is not a named region', async () => {
-    const outputRoot = await documentationPageFixture(
-      '<footer role="group" class="VPDocFooter"><div class="edit-info">Updated today</div></footer>',
+  it('rejects a canonical directory page overwritten by its own compatibility redirect', async () => {
+    const outputRoot = await documentationPageFixture('<footer class="site-footer"></footer>')
+
+    await writeFile(
+      resolve(outputRoot, 'api/index.html'),
+      '<!doctype html><html><head><meta http-equiv="refresh" content="0; url=/gaudio/api"></head></html>',
     )
     const linkCheck = spawnSync(process.execPath, [linkCheckerScript, outputRoot], {
       encoding: 'utf8',
     })
 
     expect(linkCheck.status).toBe(1)
-    expect(linkCheck.stderr).toContain('api/index.html -> expected a named Page information region')
+    expect(linkCheck.stderr).toContain('api/index.html -> canonical page redirects to itself')
+  })
+
+  it('rejects a site footer whose role suppresses the contentinfo landmark', async () => {
+    const outputRoot = await documentationPageFixture(
+      '<footer role="group" class="site-footer"></footer>',
+    )
+    const linkCheck = spawnSync(process.execPath, [linkCheckerScript, outputRoot], {
+      encoding: 'utf8',
+    })
+
+    expect(linkCheck.status).toBe(1)
+    expect(linkCheck.stderr).toContain('api/index.html -> expected one site-wide contentinfo footer')
+    expect(linkCheck.stderr).toContain('api/index.html -> expected one contentinfo landmark, found 0')
   })
 
   it('uses the shared leading- and trailing-slash rules for a custom deployment base', async () => {

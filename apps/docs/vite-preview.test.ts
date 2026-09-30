@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { resolve } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
+  documentationCleanPageMiddleware,
   documentationNotFoundMiddleware,
   documentationNotFoundPreview,
 } from './vite.preview.config.ts'
@@ -29,11 +30,12 @@ async function previewOutput(): Promise<{ notFoundHtml: string, outputDirectory:
   const notFoundHtml = '<!doctype html><html><body><div id="app"></div></body></html>'
   outputDirectories.push(outputDirectory)
 
-  await mkdir(resolve(outputDirectory, 'guide'), { recursive: true })
+  await mkdir(resolve(outputDirectory, 'guide/getting-started'), { recursive: true })
   await Promise.all([
     writeFile(resolve(outputDirectory, 'index.html'), '<!doctype html><html><body>home</body></html>'),
     writeFile(resolve(outputDirectory, '404.html'), notFoundHtml),
     writeFile(resolve(outputDirectory, 'guide/getting-started.html'), '<!doctype html><html><body>guide</body></html>'),
+    writeFile(resolve(outputDirectory, 'guide/getting-started/index.html'), '<!doctype html><html><body>clean guide</body></html>'),
     writeFile(resolve(outputDirectory, '中文.html'), '<!doctype html><html><body>localized</body></html>'),
     writeFile(resolve(outputDirectory, 'application.js'), 'export {}'),
   ])
@@ -84,8 +86,20 @@ afterEach(async () => {
 })
 
 describe('optimized documentation preview routing', () => {
+  it('serves a clean directory index before Vite can select its compatibility redirect', async () => {
+    const { outputDirectory } = await previewOutput()
+    const requestSnapshot = requestPreview(
+      documentationCleanPageMiddleware(outputDirectory),
+      { accept: 'text/html', url: '/gaudio/guide/getting-started' },
+    )
+
+    expect(requestSnapshot.statusCode).toBe(200)
+    expect(requestSnapshot.body).toContain('clean guide')
+    expect(requestSnapshot.isContinued).toBe(false)
+  })
+
   it.each([undefined, '', '*/*', 'text/html', 'text/html,application/xhtml+xml'])(
-    'serves the VitePress 404 artifact for an unknown GET with Accept %j',
+    'serves the Nuxt 404 artifact for an unknown GET with Accept %j',
     async (accept) => {
       const { notFoundHtml, outputDirectory } = await previewOutput()
       const requestSnapshot = requestPreview(
@@ -185,13 +199,13 @@ describe('optimized documentation preview routing', () => {
       },
     }])
 
-    expect(registeredMiddlewares).toEqual([])
+    expect(registeredMiddlewares).toHaveLength(1)
     expect(typeof postHook).toBe('function')
 
     if (typeof postHook === 'function') {
       await Reflect.apply(postHook, {}, [])
     }
 
-    expect(registeredMiddlewares).toHaveLength(1)
+    expect(registeredMiddlewares).toHaveLength(2)
   })
 })

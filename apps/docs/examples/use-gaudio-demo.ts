@@ -8,13 +8,13 @@ import { createHlsAdapter } from 'gaudio/hls'
 import { computed, onMounted, onUnmounted, shallowRef, watch } from 'vue'
 import {
   defaultDemoFormatFolder,
-  defaultDemoSampleUrl,
   defaultDemoTrackId,
   demoCoverArtUrl,
   demoCoverThumbUrl,
   demoFormatGroups,
   demoSampleUrl,
   demoTracks,
+  findDemoFormatGroup,
 } from './demo-samples'
 
 // AI modified: one keyboard slider step now advances one percent of the active timeline.
@@ -141,7 +141,7 @@ function sourceAddress(sourceUrl: string): URL | undefined {
   }
 }
 
-function catalogSelectionForSource(sourceUrl: string): DemoCatalogSelection | undefined {
+function catalogSelectionForSource(sourceUrl: string, publicAssetBase: string): DemoCatalogSelection | undefined {
   const requestedAddress = sourceAddress(sourceUrl)
 
   if (!requestedAddress) {
@@ -150,7 +150,7 @@ function catalogSelectionForSource(sourceUrl: string): DemoCatalogSelection | un
 
   for (const formatGroup of demoFormatGroups) {
     for (const track of demoTracks) {
-      const catalogAddress = sourceAddress(demoSampleUrl(formatGroup.folder, track.id, formatGroup.extension))
+      const catalogAddress = sourceAddress(demoSampleUrl(publicAssetBase, formatGroup.folder, track.id, formatGroup.extension))
 
       if (
         catalogAddress?.origin === requestedAddress.origin
@@ -173,10 +173,17 @@ function browserSupportForDisplay(support: string, hasAdapterSupport: boolean): 
 }
 
 export function useGaudioDemo() {
+  const publicAssetBase = useRuntimeConfig().app.baseURL
+  const initialSampleUrl = demoSampleUrl(
+    publicAssetBase,
+    defaultDemoFormatFolder,
+    defaultDemoTrackId,
+    findDemoFormatGroup(defaultDemoFormatFolder).extension,
+  )
   const activeFormatFolder = shallowRef<string | undefined>(defaultDemoFormatFolder)
   const activeTrackId = shallowRef<string | undefined>(defaultDemoTrackId)
-  const sourceUrl = shallowRef(defaultDemoSampleUrl)
-  const activeSourceUrl = shallowRef(defaultDemoSampleUrl)
+  const sourceUrl = shallowRef(initialSampleUrl)
+  const activeSourceUrl = shallowRef(initialSampleUrl)
   const protocolOverride = shallowRef<ProtocolOverride>('auto')
   const sourceMode = shallowRef<DemoSourceMode>('url-string')
   const playerState = shallowRef('idle')
@@ -237,10 +244,10 @@ export function useGaudioDemo() {
   ))
   const activeSamplePath = computed(() => activeSourceUrl.value)
   const activeCoverThumbUrl = computed(() => (
-    activeTrack.value ? demoCoverThumbUrl(activeTrack.value.coverThumb) : undefined
+    activeTrack.value ? demoCoverThumbUrl(publicAssetBase, activeTrack.value.coverThumb) : undefined
   ))
   const activeCoverArtUrl = computed(() => (
-    activeTrack.value ? demoCoverArtUrl(activeTrack.value.coverFile) : undefined
+    activeTrack.value ? demoCoverArtUrl(publicAssetBase, activeTrack.value.coverFile) : undefined
   ))
   const adaptiveQualityChoices = computed<AdaptiveQualityChoice[]>(() => [
     { id: automaticQualitySelection, label: 'Automatic ABR' },
@@ -370,7 +377,7 @@ export function useGaudioDemo() {
       album: 'GAudio demo',
       artwork: [
         {
-          src: demoCoverArtUrl(track.coverFile),
+          src: demoCoverArtUrl(publicAssetBase, track.coverFile),
           sizes: '512x512',
           type: 'image/png',
         },
@@ -379,7 +386,7 @@ export function useGaudioDemo() {
   }
 
   function reflectSourceOwnership(loadedSourceUrl: string): void {
-    const catalogSelection = catalogSelectionForSource(loadedSourceUrl)
+    const catalogSelection = catalogSelectionForSource(loadedSourceUrl, publicAssetBase)
 
     activeSourceUrl.value = loadedSourceUrl
     activeTrackId.value = catalogSelection?.track.id
@@ -605,7 +612,7 @@ export function useGaudioDemo() {
 
     activeFormatFolder.value = formatGroup.folder
     activeTrackId.value = track.id
-    sourceUrl.value = demoSampleUrl(formatGroup.folder, track.id, formatGroup.extension)
+    sourceUrl.value = demoSampleUrl(publicAssetBase, formatGroup.folder, track.id, formatGroup.extension)
     activeSourceUrl.value = sourceUrl.value
     protocolOverride.value = 'auto'
     sourceMode.value = 'url-string'
@@ -880,19 +887,22 @@ export function useGaudioDemo() {
       && group.folder !== 'hls'
       && group.folder !== 'dash'
     )) ?? fallbackFormatGroup
-    const primarySource = demoSampleUrl(formatGroup.folder, track.id, formatGroup.extension)
+    const primarySource = demoSampleUrl(publicAssetBase, formatGroup.folder, track.id, formatGroup.extension)
     const fallbackSource = demoSampleUrl(
+      publicAssetBase,
       fallbackFormatGroup.folder,
       track.id,
       fallbackFormatGroup.extension,
     )
     // AI modified: alternate audio uses the same program in another valid format, so playlist metadata stays truthful.
     const alternateSource = demoSampleUrl(
+      publicAssetBase,
       alternateFormatGroup.folder,
       track.id,
       alternateFormatGroup.extension,
     )
     const nextPlaylistSource = demoSampleUrl(
+      publicAssetBase,
       formatGroup.folder,
       nextPlaylistTrack.id,
       formatGroup.extension,
@@ -932,6 +942,7 @@ export function useGaudioDemo() {
           source: nextPlaylistSource,
           fallbackSources: [
             demoSampleUrl(
+              publicAssetBase,
               fallbackFormatGroup.folder,
               nextPlaylistTrack.id,
               fallbackFormatGroup.extension,
@@ -970,7 +981,9 @@ export function useGaudioDemo() {
     const catalogTrack = demoTracks.find(track => (
       track.title === metadata?.title && track.artist === metadata.artist
     ))
-    const catalogSelection = selectedSourceUrl ? catalogSelectionForSource(selectedSourceUrl) : undefined
+    const catalogSelection = selectedSourceUrl
+      ? catalogSelectionForSource(selectedSourceUrl, publicAssetBase)
+      : undefined
 
     activeSourceUrl.value = selectedSourceUrl ?? activeSourceUrl.value
     sourceUrl.value = selectedSourceUrl ?? sourceUrl.value
@@ -1043,9 +1056,9 @@ export function useGaudioDemo() {
       preset: AdaptivePlaybackPreset.Balanced,
     })
     dashAdapter = createDashAdapter({ preset: AdaptivePlaybackPreset.Balanced })
-    // AI modified: create the player after mount because VitePress renders examples during SSR.
+    // AI modified: create the player after mount because Nuxt renders examples during SSR.
     player = new AudioPlayer({
-      source: defaultDemoSampleUrl,
+      source: initialSampleUrl,
       adapters: [
         hlsAdapter,
         dashAdapter,
@@ -1078,13 +1091,10 @@ export function useGaudioDemo() {
   })
 
   onUnmounted(() => {
-    try {
-      player.dispose()
-    }
-    catch (error) {
-      // AI modified: cleanup failures must not abort VitePress route navigation.
+    void player.dispose().catch((error: unknown) => {
+      // AI modified: cleanup failures must not abort Nuxt route navigation.
       console.warn('GAudio demo cleanup failed', error)
-    }
+    })
   })
 
   return {

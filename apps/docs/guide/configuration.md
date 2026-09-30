@@ -13,7 +13,7 @@ pnpm add gaudio@next
 Add adaptive vendors only when the application imports the matching adapter:
 
 ```bash
-pnpm add gaudio@next hls.js
+pnpm add gaudio@next hls.js@~1.6.16
 pnpm add gaudio@next dashjs
 ```
 
@@ -76,6 +76,7 @@ const player = new AudioPlayer({
 | Option | Type | Default | Notes |
 | --- | --- | --- | --- |
 | `source` | `AudioSourceInput` | `undefined` | Initial source. It opens only when `load()` or idle `play()` runs. |
+| `crossOrigin` | `AudioCrossOriginMode` | `anonymous` for built-in default analysis | Choose `anonymous` or `use-credentials`; other uses preserve the engine request policy by default. |
 | `adapters` | `readonly AudioEngineAdapter[]` | `[]` | Optional HLS, DASH, or future protocol adapters for the internal router. Do not combine with a custom engine. |
 | `analyzer` | `boolean \| AudioPlayerAnalyzerOptions` | `undefined` | `true` enables player-owned Web Audio analysis with default `fftSize`. |
 | `mediaSession` | `boolean \| AudioMediaSessionOptions` | `undefined` | Enables browser, keyboard, headset, and operating-system media controls when supported. |
@@ -221,7 +222,8 @@ const waveform = analyzer?.getWaveformData({ sampleCount: 128 })
 | `fftSize` | `2048` | Must be a browser-supported `AnalyserNode.fftSize` value. |
 | `createAnalyzer` | engine factory | Use when a custom engine or app-owned Web Audio graph should provide analysis. |
 
-Cross-origin media can play successfully but still return silent analyzer samples unless the media response allows Web Audio access through CORS.
+<!-- AI modified: document the request policy required before connecting browser media to Web Audio. -->
+Built-in player-owned analysis uses `crossOrigin: 'anonymous'` before loading media. The server must allow the page origin through CORS; cross-origin media fetched without CORS can silence the entire Web Audio output. Use `crossOrigin: 'use-credentials'` for native media that requires cookies, with an explicit allowed origin and `Access-Control-Allow-Credentials: true`. Injected custom engines and custom analyzer factories keep their own request policy unless `crossOrigin` is explicitly supplied. This option configures the media element; hls.js and dash.js manifest/segment credentials remain vendor adapter configuration.
 
 ## Adaptive adapter configuration
 

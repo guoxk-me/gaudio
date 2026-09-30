@@ -6,7 +6,7 @@ import { resolve, sep } from 'node:path'
 import { defineConfig } from 'vite'
 import { docsBase } from './lib/docs-base.ts'
 
-const docsOutput = resolve(import.meta.dirname, '.vitepress/dist')
+const docsOutput = resolve(import.meta.dirname, '.output/public')
 
 interface DocumentationPreviewRequest {
   headers: IncomingHttpHeaders
@@ -80,11 +80,67 @@ export function documentationNotFoundMiddleware(outputDirectory: string, notFoun
   }
 }
 
-// AI modified: preview unknown pages from VitePress's empty-root 404 document instead of hydrating the home page.
+// AI modified: clean Nuxt routes must win over same-name .html compatibility redirects in Vite's MPA preview.
+export function documentationCleanPageMiddleware(outputDirectory: string) {
+  return (
+    request: DocumentationPreviewRequest,
+    response: DocumentationPreviewResponse,
+    next: () => void,
+  ): void => {
+    const acceptHeader = request.headers.accept
+    const fetchDestination = request.headers['sec-fetch-dest']
+    const canAcceptHtml = acceptHeader?.includes('text/html') === true
+      || ((fetchDestination === undefined || fetchDestination === '' || fetchDestination === 'document')
+        && (acceptHeader === undefined || acceptHeader === '' || acceptHeader.includes('*/*')))
+
+    if (!['GET', 'HEAD'].includes(request.method ?? '') || !canAcceptHtml) {
+      next()
+      return
+    }
+
+    let requestPath: string | undefined
+
+    try {
+      requestPath = decodeURIComponent(new URL(request.url ?? '/', 'http://preview.local').pathname)
+    }
+    catch {
+      requestPath = undefined
+    }
+
+    const docsBaseWithoutSlash = docsBase.slice(0, -1)
+    if (requestPath === undefined || (requestPath !== docsBaseWithoutSlash && !requestPath.startsWith(docsBase))) {
+      next()
+      return
+    }
+
+    const routePath = requestPath === docsBaseWithoutSlash
+      ? ''
+      : requestPath.slice(docsBase.length).replace(/\/$/, '')
+    const cleanPageFile = resolve(outputDirectory, routePath, 'index.html')
+    const isCleanPage = cleanPageFile.startsWith(`${outputDirectory}${sep}`)
+      && statSync(cleanPageFile, { throwIfNoEntry: false })?.isFile() === true
+
+    if (!isCleanPage) {
+      next()
+      return
+    }
+
+    const pageHtml = readFileSync(cleanPageFile, 'utf8')
+    response.statusCode = 200
+    response.setHeader('Cache-Control', 'no-cache')
+    response.setHeader('Content-Length', Buffer.byteLength(pageHtml))
+    response.setHeader('Content-Type', 'text/html; charset=utf-8')
+    response.end(request.method === 'HEAD' ? undefined : pageHtml)
+  }
+}
+
+// AI modified: preview unknown pages from Nuxt's generated 404 document instead of serving an unrelated route.
 export function documentationNotFoundPreview(outputDirectory = docsOutput): Plugin {
   return {
     name: 'gaudio-documentation-not-found-preview',
     configurePreviewServer(server) {
+      server.middlewares.use(documentationCleanPageMiddleware(outputDirectory))
+
       return () => {
         const notFoundHtml = readFileSync(resolve(outputDirectory, '404.html'), 'utf8')
 
@@ -95,16 +151,16 @@ export function documentationNotFoundPreview(outputDirectory = docsOutput): Plug
 }
 
 export default defineConfig({
-  // AI modified: MPA fallback leaves unknown paths available for the VitePress 404 middleware.
+  // AI modified: MPA fallback leaves unknown paths available for the generated 404 middleware.
   appType: 'mpa',
   base: docsBase,
   plugins: [documentationNotFoundPreview()],
   build: {
-    // AI modified: Vite previews the exact VitePress artifact already checked for deployment.
+    // AI modified: Vite previews the exact Nuxt static artifact already checked for deployment.
     outDir: docsOutput,
   },
   preview: {
-    // AI modified: E2E preview access stays on loopback because VitePress 1.x ignores its advertised host flag.
+    // AI modified: E2E preview access stays on loopback and uses a strict, isolated port.
     host: '127.0.0.1',
     strictPort: true,
   },

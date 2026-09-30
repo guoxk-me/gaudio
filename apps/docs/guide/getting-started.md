@@ -15,7 +15,7 @@ pnpm add gaudio@next
 Install only the adaptive dependency your application actually imports:
 
 ```bash
-pnpm add gaudio@next hls.js
+pnpm add gaudio@next hls.js@~1.6.16
 pnpm add gaudio@next dashjs
 ```
 
@@ -32,6 +32,8 @@ The root entry does not import `hls.js` or `dashjs`. Applications that only play
 ## Compatibility
 
 The built core and HLS entry points can be imported by Node.js 18 or newer; `dashjs@5` requires Node.js 20 or newer when evaluated in Node.js. Browser playback still requires DOM media APIs, so create players and adapters after client mount in SSR applications. Published declarations support TypeScript 5.8 or newer and are verified with TypeScript 5.8.3 plus the current project compiler.
+
+GAudio currently supports `hls.js >=1.6.16 <1.7.0`. Version 1.7 is excluded because its published declarations do not pass the supported TypeScript consumer matrix.
 
 Browser support is capability-based. CI exercises the current Playwright-bundled Chromium, Firefox, and WebKit desktop engines plus a Pixel 5 Chromium emulation project; this is a tested-current matrix, not a minimum-version or real-device guarantee. Core playback requires `HTMLAudioElement`, and analysis requires Web Audio. HLS requires native HLS or Media Source Extensions compatible with hls.js. DASH requires Media Source Extensions compatible with dash.js and native `globalThis.structuredClone()`. GAudio does not ship browser polyfills.
 
@@ -69,6 +71,7 @@ await player.play()
 | Option | Type | Default | Description |
 | --- | --- | --- | --- |
 | `source` | `AudioSourceInput` | `undefined` | URL string, source description, `HttpAudioSource`, `BlobAudioSource`, or custom `AudioSource`. Not loaded until `load()` or idle `play()`. |
+| `crossOrigin` | `AudioCrossOriginMode` | `anonymous` for built-in default analysis | Choose `anonymous` or `use-credentials`; other uses preserve the engine request policy by default. |
 | `adapters` | `readonly AudioEngineAdapter[]` | `[]` | Optional protocol adapters used by the internal engine router for HLS and DASH. Do not pass when injecting a custom engine. |
 | `analyzer` | `boolean \| AudioPlayerAnalyzerOptions` | `undefined` | Enables player-owned Web Audio analysis after `load()`. Use `true` for defaults or pass `fftSize` and `createAnalyzer`. |
 | `mediaSession` | `boolean \| AudioMediaSessionOptions` | `undefined` | Enables browser and operating-system media controls; pass metadata and seek-offset options when needed. |
@@ -90,7 +93,7 @@ await player.play()
 | `stop()` | Pauses and returns to `0` seconds while retaining the loaded source. The next `play()` reuses it. |
 | `seek(seconds)` | Seeks to a non-negative exact position. Invalid values throw `RangeError`. |
 | `fastSeek(seconds)` | Uses the browser optimized seek path when available, otherwise falls back to `seek()`. |
-| `dispose()` | Permanently disables the player and starts cleanup. Cleanup may continue after return; a cleanup error can throw, and a repeated call retries retained work. Create a new player and fresh adapters after disposal. |
+| `dispose()` | Immediately disables the player and returns a promise that settles after cleanup. Await it before reusing ownership-sensitive resources; a rejected call preserves unfinished cleanup for an explicit retry. Create a new player and fresh adapters after disposal. |
 
 Extension callbacks remain an exception boundary. `AudioPlayer.load()` wraps non-`GAudioError` failures from adapter `createEngine()` calls and analyzer factories as `ENGINE_ERROR`, keeps the original error in `cause`, and publishes the same wrapper through the player `error` event. Calling a custom adapter's `createEngine()` directly can still reject with that adapter's own error.
 
@@ -191,7 +194,8 @@ For bearer tokens or custom headers, prefer returning a short-lived signed URL f
 
 For cookie-based auth, keep media on an origin that can receive the browser's credentials and configure CORS accordingly. The media response must allow the application origin, and credentialed cross-origin requests cannot use a wildcard `Access-Control-Allow-Origin`.
 
-Analyzer data has an extra browser restriction. Cross-origin media can play successfully but still produce silent analyzer samples unless the media is CORS-enabled for Web Audio use. When you need `analyzer: true`, serve media with CORS headers that allow the page origin and test the analyzer path in the target browsers.
+<!-- AI modified: document the request policy required before connecting browser media to Web Audio. -->
+Built-in player-owned analysis uses `crossOrigin: 'anonymous'` before loading media. The server must allow the page origin through CORS; cross-origin media fetched without CORS can silence the entire Web Audio output. Use `crossOrigin: 'use-credentials'` for native media that requires cookies, with an explicit allowed origin and `Access-Control-Allow-Credentials: true`. Injected custom engines and custom analyzer factories keep their own request policy unless `crossOrigin` is explicitly supplied. This option configures the media element; hls.js and dash.js manifest/segment credentials remain vendor adapter configuration.
 
 ## Browser capabilities
 
@@ -240,7 +244,8 @@ const frequency = analyzer?.getFrequencyData({ binCount: 64 })
 const waveform = analyzer?.getWaveformData({ sampleCount: 128 })
 ```
 
-The built-in media element, HLS, and DASH engines create a Web Audio media-element source when analysis is enabled. Cross-origin media must allow audio analysis through CORS, otherwise browsers can return silent sample data.
+<!-- AI modified: document the request policy required before connecting browser media to Web Audio. -->
+The built-in engines create a Web Audio media-element source when analysis is enabled. The default player prepares anonymous CORS requests before loading; injected engines and custom analyzer factories must choose their request policy explicitly. See the CORS guidance above for cookie-based media.
 
 Custom engines can support the simple `analyzer: true` path by exposing `createAnalyzer`. Applications that own a separate Web Audio graph can pass a custom factory:
 

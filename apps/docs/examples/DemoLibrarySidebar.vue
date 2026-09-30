@@ -9,6 +9,7 @@ const props = defineProps<{
   demo: GaudioDemo
   text: DemoText
 }>()
+const publicAssetBase = useRuntimeConfig().app.baseURL
 
 const {
   activeFormatFolder,
@@ -80,7 +81,7 @@ const {
         >
           <!-- AI modified: the adjacent track title names this decorative cover for assistive technology. -->
           <img
-            :src="demoCoverThumbUrl(track.coverThumb)"
+            :src="demoCoverThumbUrl(publicAssetBase, track.coverThumb)"
             alt=""
             class="size-10 shrink-0 rounded-md object-cover ring-1 ring-border"
             width="40"

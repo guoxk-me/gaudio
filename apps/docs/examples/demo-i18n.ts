@@ -790,7 +790,7 @@ export interface DemoText {
   }
 }
 
-// AI modified: VitePress locale codes drive all demo labels without duplicating component logic.
+// AI modified: Nuxt route locale codes drive all demo labels without duplicating component logic.
 export function demoLocaleForLang(lang: string): DemoLocale {
   return lang.startsWith('zh') ? 'zh' : 'en'
 }

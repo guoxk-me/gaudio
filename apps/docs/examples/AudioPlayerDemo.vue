@@ -1,17 +1,17 @@
 <script setup lang="ts">
-import { useData } from 'vitepress'
 import { computed } from 'vue'
-import { demoLocaleForLang, demoText } from './demo-i18n'
+import { useDocumentationLocale } from '../app/composables/use-documentation-locale'
+import { demoText } from './demo-i18n'
 import DemoFeatureTabs from './DemoFeatureTabs.vue'
 import DemoLibrarySidebar from './DemoLibrarySidebar.vue'
 import DemoNowPlayingStage from './DemoNowPlayingStage.vue'
 import DemoTransportBar from './DemoTransportBar.vue'
 import { useGaudioDemo } from './use-gaudio-demo'
 
-const { lang } = useData()
+const { isChinese } = useDocumentationLocale()
 const demo = useGaudioDemo()
-// AI modified: keep the demo workbench on the same document grid as the API coverage table.
-const text = computed(() => demoText[demoLocaleForLang(lang.value)])
+// AI modified: Nuxt route locale now drives the same bilingual demo copy without a VitePress runtime.
+const text = computed(() => demoText[isChinese.value ? 'zh' : 'en'])
 </script>
 
 <template>

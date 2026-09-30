@@ -54,16 +54,16 @@ export const demoFormatGroups: DemoFormatGroup[] = [
   { folder: 'dash', label: 'DASH', extension: '.mpd', mimeType: 'application/dash+xml' },
 ]
 
-export function demoSampleUrl(formatFolder: string, trackId: string, extension: string): string {
-  return `${import.meta.env.BASE_URL}audio/${formatFolder}/${trackId}${extension}`
+export function demoSampleUrl(publicAssetBase: string, formatFolder: string, trackId: string, extension: string): string {
+  return `${publicAssetBase}audio/${formatFolder}/${trackId}${extension}`
 }
 
-export function demoCoverThumbUrl(coverThumb: string): string {
-  return `${import.meta.env.BASE_URL}cover/thumbs/${coverThumb}`
+export function demoCoverThumbUrl(publicAssetBase: string, coverThumb: string): string {
+  return `${publicAssetBase}cover/thumbs/${coverThumb}`
 }
 
-export function demoCoverArtUrl(coverFile: string): string {
-  return `${import.meta.env.BASE_URL}cover/${encodeURIComponent(coverFile)}`
+export function demoCoverArtUrl(publicAssetBase: string, coverFile: string): string {
+  return `${publicAssetBase}cover/${encodeURIComponent(coverFile)}`
 }
 
 export function findDemoTrack(trackId: string): DemoTrack {
@@ -76,8 +76,3 @@ export function findDemoFormatGroup(formatFolder: string): DemoFormatGroup {
 
 export const defaultDemoTrackId = demoTracks[0].id
 export const defaultDemoFormatFolder = demoFormatGroups[0].folder
-export const defaultDemoSampleUrl = demoSampleUrl(
-  defaultDemoFormatFolder,
-  defaultDemoTrackId,
-  findDemoFormatGroup(defaultDemoFormatFolder).extension,
-)

@@ -17,7 +17,8 @@ const licenseOverridesPath = resolve(resolvedLicenseOverridesRoot, 'package-lice
 const outputRoot = process.argv[2]
   ? resolve(process.argv[2])
   : resolve(docsRoot, 'public')
-const shippedDevelopmentRoots = ['tw-animate-css', 'vitepress']
+// AI modified: Nuxt runtime modules replace VitePress in the generated site's shipped dependency closure.
+const shippedDevelopmentRoots = ['@nuxt/content', '@nuxtjs/sitemap', 'nuxt', 'tw-animate-css']
 const licenseFileNamePattern = /^(?:licen[cs]e|copying|copyright|notice)(?:$|[._-])/i
 const sectionRule = '-'.repeat(80)
 const licenseOverridesRealPath = await realpathWithinDirectory(
@@ -56,7 +57,12 @@ function dependencyRecords(dependencies, packageRecords = []) {
 }
 
 function textWithStableLineEndings(sourceText) {
-  const unixText = sourceText.replace(/\r\n?/g, '\n')
+  // AI modified: upstream line-ending and trailing-space differences must not dirty generated attribution files.
+  const unixText = sourceText
+    .replace(/\r\n?/g, '\n')
+    .split('\n')
+    .map(licenseLine => licenseLine.trimEnd())
+    .join('\n')
 
   return `${unixText.replace(/\n+$/, '')}\n`
 }
@@ -73,7 +79,8 @@ const { stdout: packageGraphText } = await executeFile('pnpm', [
 ], {
   cwd: workspaceRoot,
   encoding: 'utf8',
-  maxBuffer: 10 * 1024 * 1024,
+  // AI modified: Nuxt's explicit dependency tree exceeds Node's small child-process output default.
+  maxBuffer: 64 * 1024 * 1024,
 })
 
 let packageGraphs
@@ -150,9 +157,15 @@ for (const { isProductionRequired, packageRoot } of [...resolvedPackageRoots.val
     throw new TypeError(`Package at ${packageRoot} is missing a name or version.`)
   }
 
+  const legacyLicenseExpressions = Array.isArray(packageManifest.licenses)
+    ? packageManifest.licenses
+        .map(licenseRecord => typeof licenseRecord?.type === 'string' ? licenseRecord.type.trim() : '')
+        .filter(Boolean)
+    : []
+  // AI modified: legacy npm packages may declare one valid license through the deprecated licenses array.
   const licenseExpression = typeof packageManifest.license === 'string'
     ? packageManifest.license.trim().replace(/\s+/g, ' ')
-    : ''
+    : new Set(legacyLicenseExpressions).size === 1 ? legacyLicenseExpressions[0] : ''
   const packageIdentity = `${packageManifest.name}@${packageManifest.version}`
   const packageEntries = await readdir(packageRoot, { withFileTypes: true })
   const licensePaths = packageEntries

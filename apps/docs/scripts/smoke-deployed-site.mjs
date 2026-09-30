@@ -303,7 +303,8 @@ const deployedChecks = [
       'GAudio documentation third-party licenses',
       'dashjs@',
       'hls.js@',
-      'vitepress@',
+      'nuxt@',
+      '@nuxt/content@',
     ],
     // AI modified: the deployed site must expose the generated attribution record, not only bundle it locally.
     label: 'third-party license record',

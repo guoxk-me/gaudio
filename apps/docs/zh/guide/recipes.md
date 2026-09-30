@@ -420,4 +420,5 @@ function paintSpectrum() {
 paintSpectrum()
 ```
 
-远程媒体需要在目标浏览器验证 CORS。文件可能能正常播放，但 Web Audio 分析仍返回静音样本。
+<!-- AI modified: document the request policy required before connecting browser media to Web Audio. -->
+内置播放器启用默认分析时，会在加载媒体前使用 `crossOrigin: 'anonymous'`。服务端仍须通过 CORS 允许页面 origin；未启用 CORS 的跨域媒体接入 Web Audio 后，整个音频输出都可能静音。原生媒体需要 Cookie 时，可设置 `crossOrigin: 'use-credentials'`，同时让响应明确允许页面 origin 并包含 `Access-Control-Allow-Credentials: true`。注入的自定义引擎与自定义 analyzer factory 默认保留自己的请求策略，只有显式传入 `crossOrigin` 才会改变。此选项控制 media element；hls.js、dash.js 清单与分片请求的 credentials 仍由各自 adapter 配置决定。

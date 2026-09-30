@@ -1,6 +1,11 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 
+/* AI modified: Nuxt keeps UI and demo components outside this stylesheet's automatic source boundary. */
+@source "../../app";
+@source "../../components";
+@source "../../examples";
+
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
@@ -28,103 +33,103 @@
   --color-ring: var(--ring);
 }
 
-/* AI modified: align shadcn tokens with the VitePress brand palette for demo surfaces. */
+/* AI modified: align the interactive workbench with the reviewed Nuxt violet design system. */
 :root {
   --radius: 0.625rem;
-  --background: #ffffff;
-  --foreground: #002040;
-  --card: #f3f8fb;
-  --card-foreground: #002040;
+  --background: #fafafc;
+  --foreground: #18161d;
+  --card: #ffffff;
+  --card-foreground: #18161d;
   --popover: #ffffff;
-  --popover-foreground: #002040;
-  --primary: #006d97;
-  --primary-foreground: #f4fbff;
-  --secondary: #eaf2f7;
-  --secondary-foreground: #002040;
-  --muted: #eaf2f7;
-  --muted-foreground: #426072;
-  --accent: #08b0e8;
-  --accent-foreground: #002040;
-  --destructive: #dc2626;
-  --border: rgba(0, 32, 64, 0.14);
-  --input: rgba(0, 32, 64, 0.14);
-  --ring: rgba(0, 109, 151, 0.36);
+  --popover-foreground: #18161d;
+  --primary: #6541e8;
+  --primary-foreground: #ffffff;
+  --secondary: #f3f2f6;
+  --secondary-foreground: #18161d;
+  --muted: #f3f2f6;
+  --muted-foreground: #625e69;
+  --accent: #7657d9;
+  --accent-foreground: #ffffff;
+  --destructive: #c23b57;
+  --border: #ddd9e6;
+  --input: #ddd9e6;
+  --ring: rgb(101 65 232 / 36%);
 }
 
 .dark {
-  --background: #001221;
-  --foreground: #f4fbff;
-  --card: #001a2f;
-  --card-foreground: #f4fbff;
-  --popover: #001a2f;
-  --popover-foreground: #f4fbff;
-  --primary: #27c9ff;
-  --primary-foreground: #001221;
-  --secondary: #002040;
-  --secondary-foreground: #f4fbff;
-  --muted: #002040;
-  --muted-foreground: #b8d4e3;
-  --accent: #08b0e8;
-  --accent-foreground: #001221;
-  --destructive: #f87171;
-  --border: rgba(8, 176, 232, 0.18);
-  --input: rgba(8, 176, 232, 0.18);
-  --ring: rgba(39, 201, 255, 0.42);
+  --background: #0a0910;
+  --foreground: #f7f6fa;
+  --card: #111016;
+  --card-foreground: #f7f6fa;
+  --popover: #18161f;
+  --popover-foreground: #f7f6fa;
+  --primary: #8b6cff;
+  --primary-foreground: #0a0910;
+  --secondary: #18161f;
+  --secondary-foreground: #f7f6fa;
+  --muted: #18161f;
+  --muted-foreground: #a29daa;
+  --accent: #a78bfa;
+  --accent-foreground: #0a0910;
+  --destructive: #ff718d;
+  --border: #2d2935;
+  --input: #2d2935;
+  --ring: rgb(139 108 255 / 42%);
 }
 
-/* AI modified: demo workbench tokens keep controls readable in both VitePress themes. */
+/* AI modified: demo workbench tokens keep every control readable in both Nuxt themes. */
 :root {
-  --gaudio-studio-bg: #f5fafc;
-  --gaudio-studio-shell: #eef6f9;
+  --gaudio-studio-bg: #fafafc;
+  --gaudio-studio-shell: #f8f7ff;
   --gaudio-studio-panel: #ffffff;
-  --gaudio-studio-panel-strong: #f8fcfd;
-  --gaudio-studio-muted: #e8f1f5;
-  --gaudio-studio-hover: #ddebf0;
-  --gaudio-studio-pressed: #cfe3eb;
-  --gaudio-studio-border: rgba(6, 42, 60, 0.14);
-  --gaudio-studio-border-strong: rgba(0, 109, 151, 0.3);
-  --gaudio-studio-text: #092235;
-  --gaudio-studio-text-muted: #526f7d;
-  --gaudio-studio-accent: #087da5;
-  --gaudio-studio-accent-strong: #065f7f;
-  --gaudio-studio-accent-soft: #dff3f9;
-  --gaudio-studio-warm: #e9934f;
-  --gaudio-studio-warm-soft: #fff0df;
-  --gaudio-studio-on-accent: #f7fcff;
-  --gaudio-studio-canvas: #edf6fa;
-  --gaudio-studio-canvas-grid: rgba(8, 35, 60, 0.14);
-  --gaudio-studio-canvas-soft: rgba(0, 109, 151, 0.22);
-  --gaudio-studio-canvas-line: #007f9a;
-  --gaudio-studio-canvas-meter-low: #b9dfe8;
-  --gaudio-studio-canvas-meter-mid: #2f98ad;
-  --gaudio-studio-canvas-meter-high: #005f86;
+  --gaudio-studio-panel-strong: #f3f2f6;
+  --gaudio-studio-muted: #eeecf3;
+  --gaudio-studio-hover: #e5e1ef;
+  --gaudio-studio-pressed: #dad3ed;
+  --gaudio-studio-border: #ddd9e6;
+  --gaudio-studio-border-strong: rgb(101 65 232 / 34%);
+  --gaudio-studio-text: #18161d;
+  --gaudio-studio-text-muted: #625e69;
+  --gaudio-studio-accent: #6541e8;
+  --gaudio-studio-accent-strong: #4e35b1;
+  --gaudio-studio-accent-soft: #f2eeff;
+  --gaudio-studio-warm: #c23b87;
+  --gaudio-studio-warm-soft: #fbeafa;
+  --gaudio-studio-on-accent: #ffffff;
+  --gaudio-studio-canvas: #f3f0ff;
+  --gaudio-studio-canvas-grid: rgb(101 65 232 / 14%);
+  --gaudio-studio-canvas-soft: rgb(101 65 232 / 22%);
+  --gaudio-studio-canvas-line: #7657d9;
+  --gaudio-studio-canvas-meter-low: #d8cdfd;
+  --gaudio-studio-canvas-meter-mid: #8b6cff;
+  --gaudio-studio-canvas-meter-high: #4e35b1;
 }
 
 .dark {
-  --gaudio-studio-bg: #020b12;
-  --gaudio-studio-shell: #06131d;
-  --gaudio-studio-panel: #0a1a26;
-  --gaudio-studio-panel-strong: #0e2230;
-  --gaudio-studio-muted: #102838;
-  --gaudio-studio-hover: #183548;
-  --gaudio-studio-pressed: #1d4054;
-  --gaudio-studio-border: rgba(126, 203, 225, 0.18);
-  --gaudio-studio-border-strong: rgba(126, 203, 225, 0.34);
-  --gaudio-studio-text: #f4fbff;
-  --gaudio-studio-text-muted: #b7d0dc;
-  --gaudio-studio-accent: #34c8f6;
-  --gaudio-studio-accent-strong: #78ddff;
-  --gaudio-studio-accent-soft: rgba(52, 200, 246, 0.16);
-  --gaudio-studio-warm: #ffb56b;
-  --gaudio-studio-warm-soft: rgba(255, 181, 107, 0.15);
-  --gaudio-studio-on-accent: #001221;
-  --gaudio-studio-canvas: #08131c;
-  --gaudio-studio-canvas-grid: rgba(185, 210, 223, 0.14);
-  --gaudio-studio-canvas-soft: rgba(52, 200, 246, 0.22);
-  --gaudio-studio-canvas-line: #8bdde2;
-  --gaudio-studio-canvas-meter-low: #1c4f5a;
-  --gaudio-studio-canvas-meter-mid: #40aebc;
-  --gaudio-studio-canvas-meter-high: #b3f5ff;
+  --gaudio-studio-bg: #0a0910;
+  --gaudio-studio-shell: #111016;
+  --gaudio-studio-panel: #18161f;
+  --gaudio-studio-panel-strong: #211e29;
+  --gaudio-studio-muted: #27232f;
+  --gaudio-studio-hover: #302b3a;
+  --gaudio-studio-pressed: #3a3348;
+  --gaudio-studio-border: #2d2935;
+  --gaudio-studio-border-strong: rgb(139 108 255 / 38%);
+  --gaudio-studio-text: #f7f6fa;
+  --gaudio-studio-text-muted: #a29daa;
+  --gaudio-studio-accent: #a78bfa;
+  --gaudio-studio-accent-strong: #c4b5fd;
+  --gaudio-studio-accent-soft: rgb(139 108 255 / 16%);
+  --gaudio-studio-warm: #f071bd;
+  --gaudio-studio-warm-soft: rgb(240 113 189 / 15%);
+  --gaudio-studio-on-accent: #0a0910;
+  --gaudio-studio-canvas: #15121d;
+  --gaudio-studio-canvas-grid: rgb(167 139 250 / 14%);
+  --gaudio-studio-canvas-soft: rgb(139 108 255 / 22%);
+  --gaudio-studio-canvas-line: #a78bfa;
+  --gaudio-studio-canvas-meter-low: #3a3157;
+  --gaudio-studio-canvas-meter-mid: #8b6cff;
+  --gaudio-studio-canvas-meter-high: #d8cdfd;
 }
 
 @layer base {
@@ -141,13 +146,16 @@
   color: var(--gaudio-studio-text);
 }
 
-.gaudio-demo-shell .vp-doc & {
-  margin-top: 0;
-}
-
 /* AI modified: studio surfaces use one aligned workbench grid across player, controls, and API panels. */
 .gaudio-studio {
   color: var(--gaudio-studio-text);
+}
+
+/* AI modified: theme changes land immediately so color interpolation never creates low-contrast text. */
+.gaudio-studio *,
+.gaudio-studio *::before,
+.gaudio-studio *::after {
+  transition-duration: 0s;
 }
 
 .gaudio-studio__subtitle {

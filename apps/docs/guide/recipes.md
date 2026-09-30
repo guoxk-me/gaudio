@@ -420,4 +420,5 @@ function paintSpectrum() {
 paintSpectrum()
 ```
 
-For remote media, verify CORS in target browsers. A file can play normally while Web Audio analysis still returns silent samples.
+<!-- AI modified: document the request policy required before connecting browser media to Web Audio. -->
+Built-in player-owned analysis uses `crossOrigin: 'anonymous'` before loading media. The server must allow the page origin through CORS; cross-origin media fetched without CORS can silence the entire Web Audio output. Use `crossOrigin: 'use-credentials'` for native media that requires cookies, with an explicit allowed origin and `Access-Control-Allow-Credentials: true`. Injected custom engines and custom analyzer factories keep their own request policy unless `crossOrigin` is explicitly supplied. This option configures the media element; hls.js and dash.js manifest/segment credentials remain vendor adapter configuration.

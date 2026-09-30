@@ -15,7 +15,7 @@ pnpm add gaudio@next
 自适应播放只安装应用实际导入的 vendor 依赖：
 
 ```bash
-pnpm add gaudio@next hls.js
+pnpm add gaudio@next hls.js@~1.6.16
 pnpm add gaudio@next dashjs
 ```
 
@@ -32,6 +32,8 @@ pnpm add gaudio@next dashjs
 ## 兼容性
 
 构建后的核心入口与 HLS 入口可由 Node.js 18 或更高版本 import；`dashjs@5` 在 Node.js 中执行时要求 Node.js 20 或更高版本。浏览器播放仍依赖 DOM media API，因此 SSR 应用应在客户端 mount 后再创建 player 和 adapter。发布的声明文件支持 TypeScript 5.8 或更高版本，并同时使用 TypeScript 5.8.3 与项目当前编译器验证。
+
+GAudio 当前支持 `hls.js >=1.6.16 <1.7.0`。1.7 版本已排除，因为其发布的声明文件无法通过本项目支持的 TypeScript 消费者矩阵。
 
 浏览器支持按能力判断。CI 会在 Playwright 当前捆绑的 Chromium、Firefox、WebKit 桌面引擎以及 Pixel 5 Chromium 模拟项目上运行；这只表示当前引擎已验证，并不承诺最低版本或真实设备兼容。核心播放依赖 `HTMLAudioElement`，分析功能依赖 Web Audio。HLS 需要浏览器原生 HLS 或与 hls.js 兼容的 Media Source Extensions；DASH 需要与 dash.js 兼容的 Media Source Extensions 和原生 `globalThis.structuredClone()`。GAudio 不提供浏览器 polyfill。
 
@@ -69,6 +71,7 @@ await player.play()
 | 参数 | 类型 | 默认值 | 描述 |
 | --- | --- | --- | --- |
 | `source` | `AudioSourceInput` | `undefined` | URL 字符串、source description、`HttpAudioSource`、`BlobAudioSource` 或自定义 `AudioSource`。只有 `load()` 或 idle 状态下的 `play()` 才会真正加载。 |
+| `crossOrigin` | `AudioCrossOriginMode` | 内置默认分析使用 `anonymous` | 可选 `anonymous` 或 `use-credentials`；其他情况默认保留引擎请求策略。 |
 | `adapters` | `readonly AudioEngineAdapter[]` | `[]` | 内部 engine router 使用的可选协议适配器，用于 HLS 和 DASH。注入自定义 engine 时不要同时传入。 |
 | `analyzer` | `boolean \| AudioPlayerAnalyzerOptions` | `undefined` | `load()` 成功后启用 player 持有的 Web Audio 分析。传 `true` 使用默认值，也可以传 `fftSize` 和 `createAnalyzer`。 |
 | `mediaSession` | `boolean \| AudioMediaSessionOptions` | `undefined` | 接入浏览器与操作系统媒体控制；需要时可传 metadata 和 seek offset。 |
@@ -90,7 +93,7 @@ await player.play()
 | `stop()` | 暂停并回到 `0` 秒，但保留已加载 source。下一次 `play()` 会复用它。 |
 | `seek(seconds)` | 跳转到非负的精确时间。非法值抛 `RangeError`。 |
 | `fastSeek(seconds)` | 优先使用浏览器优化 seek 能力，不支持时回退到 `seek()`。 |
-| `dispose()` | 永久禁用 player 并开始清理。清理可在返回后继续；清理错误可能抛出，重复调用会重试保留的工作。dispose 后请创建新的 player 和 adapter。 |
+| `dispose()` | 立即永久禁用 player，并返回在清理完成后 settle 的 Promise。复用涉及所有权的资源前应先 `await`；reject 后再次调用会重试保留的未完成工作。dispose 后请创建新的 player 和 adapter。 |
 
 扩展回调仍是独立的异常边界。`AudioPlayer.load()` 会把 adapter `createEngine()` 和 analyzer factory 抛出的非 `GAudioError` 失败包装为 `ENGINE_ERROR`，在 `cause` 中保留原始错误，并通过 player `error` 事件发布同一个包装错误。直接调用自定义 adapter 的 `createEngine()` 时，仍可能收到 adapter 自己的原始错误。
 
@@ -191,7 +194,8 @@ GAudio 将每次 `open()` 及其对应清理视为一个 source operation。`clo
 
 Cookie 鉴权需要把媒体放在浏览器可携带 credentials 的 origin 上，并正确配置 CORS。媒体响应必须允许应用所在 origin；带 credentials 的跨域请求不能使用通配符 `Access-Control-Allow-Origin`。
 
-Analyzer 还有额外的浏览器限制。跨域媒体可能能正常播放，但如果没有为 Web Audio 开启 CORS，浏览器仍可能返回静音的 analyzer 样本。需要 `analyzer: true` 时，请让媒体响应包含允许页面 origin 的 CORS headers，并在目标浏览器中验证 analyzer 路径。
+<!-- AI modified: document the request policy required before connecting browser media to Web Audio. -->
+内置播放器启用默认分析时，会在加载媒体前使用 `crossOrigin: 'anonymous'`。服务端仍须通过 CORS 允许页面 origin；未启用 CORS 的跨域媒体接入 Web Audio 后，整个音频输出都可能静音。原生媒体需要 Cookie 时，可设置 `crossOrigin: 'use-credentials'`，同时让响应明确允许页面 origin 并包含 `Access-Control-Allow-Credentials: true`。注入的自定义引擎与自定义 analyzer factory 默认保留自己的请求策略，只有显式传入 `crossOrigin` 才会改变。此选项控制 media element；hls.js、dash.js 清单与分片请求的 credentials 仍由各自 adapter 配置决定。
 
 ## 浏览器能力
 
@@ -240,7 +244,8 @@ const frequency = analyzer?.getFrequencyData({ binCount: 64 })
 const waveform = analyzer?.getWaveformData({ sampleCount: 128 })
 ```
 
-内置 media element、HLS 和 DASH engine 会在开启分析时创建 Web Audio media-element source。跨域媒体需要通过 CORS 允许音频分析，否则浏览器可能返回静音样本。
+<!-- AI modified: document the request policy required before connecting browser media to Web Audio. -->
+内置引擎在开启分析时创建 Web Audio media-element source。默认播放器会在加载前准备 anonymous CORS 请求；注入的引擎和自定义 analyzer factory 需要显式选择请求策略。需要 Cookie 的媒体请参考上面的 CORS 配置说明。
 
 自定义 engine 可以暴露 `createAnalyzer` 来支持简单的 `analyzer: true` 路径。应用如果自己持有 Web Audio 图，也可以传自定义工厂：
 

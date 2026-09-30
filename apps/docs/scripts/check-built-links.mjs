@@ -2,13 +2,14 @@ import { readdir, readFile } from 'node:fs/promises'
 import { dirname, extname, join, normalize, relative, resolve } from 'node:path'
 import process from 'node:process'
 import { docsBase, docsRoute } from '../lib/docs-base.ts'
+import { docsSiteUrl } from '../lib/docs-site.ts'
 
 const docsRoot = resolve(import.meta.dirname, '..')
 // AI modified: isolated fixture directories exercise the same release link gate without rebuilding documentation.
 const outputRoot = process.argv[2]
   ? resolve(process.argv[2])
-  : resolve(docsRoot, '.vitepress/dist')
-const docsProductionUrl = 'https://guoxk-me.github.io/gaudio/'
+  : resolve(docsRoot, '.output/public')
+const docsProductionUrl = docsSiteUrl
 const siteOrigin = 'https://gaudio.local'
 const allowedDocumentationProtocols = new Set(['http:', 'https:', 'mailto:', 'tel:'])
 
@@ -43,7 +44,7 @@ function productionUrl(pageFile) {
   }
 
   if (pageFile.endsWith('/index.html')) {
-    return new URL(pageFile.slice(0, -'index.html'.length), docsProductionUrl).href
+    return new URL(pageFile.slice(0, -'/index.html'.length), docsProductionUrl).href
   }
 
   return new URL(pageFile.slice(0, -'.html'.length), docsProductionUrl).href
@@ -55,7 +56,9 @@ function isTranslatedPage(pageFile) {
     : pageFile
 
   return englishPageFile === 'index.html'
+    || englishPageFile === 'docs/index.html'
     || englishPageFile === 'examples/index.html'
+    || englishPageFile === 'player-studio/index.html'
     || englishPageFile.startsWith('guide/')
 }
 
@@ -97,10 +100,6 @@ function markupRole(openingTag) {
   return openingTag.match(/\brole\s*=\s*["']([^"']*)["']/i)?.[1].toLowerCase()
 }
 
-function markupAriaLabel(openingTag) {
-  return openingTag.match(/\baria-label\s*=\s*["']([^"']*)["']/i)?.[1]
-}
-
 function candidateFiles(linkedUrl) {
   const docsBaseWithoutSlash = docsBase.slice(0, -1)
 
@@ -132,7 +131,8 @@ function candidateFiles(linkedUrl) {
   const linkedFiles = [linkedPath]
 
   if (extname(linkedPath) === '') {
-    linkedFiles.push(`${linkedPath}.html`, `${linkedPath}/index.html`)
+    // AI modified: clean Nuxt documents take precedence over compatibility redirect artifacts.
+    linkedFiles.push(`${linkedPath}/index.html`, `${linkedPath}.html`)
   }
 
   return linkedFiles
@@ -233,49 +233,44 @@ for (const pageFile of pageFiles) {
   const canonicalLinks = headLinks(pageMarkup, 'canonical')
   const alternateLinks = headLinks(pageMarkup, 'alternate')
   const isHomePage = pageFile === 'index.html' || pageFile === 'zh/index.html'
+  const refreshTarget = pageMarkup.match(/<meta\s+http-equiv=["']refresh["']\s+content=["'][^;]*;\s*url=([^"']+)["']/i)?.[1]
+  const isClientFallback = pageFile === '200.html' || pageFile === '404.html'
 
-  if (pageFile !== '404.html') {
-    const siteFooters = tagsWithClass(pageMarkup, 'footer', 'VPFooter')
-    const documentFooters = tagsWithClass(pageMarkup, 'footer', 'VPDocFooter')
-    const documentInformationBlocks = tagsWithClass(pageMarkup, 'div', 'edit-info')
-    const themeFooters = [...siteFooters, ...documentFooters]
-    const implicitThemeContentinfoCount = themeFooters.filter(footerTag => markupRole(footerTag) === undefined).length
+  if (refreshTarget) {
+    const refreshUrl = new URL(refreshTarget, pageAddress)
+    const refreshCandidates = candidateFiles(new URL(`${refreshUrl.pathname}${refreshUrl.search}${refreshUrl.hash}`, siteOrigin))
+    const isDirectoryIndex = pageFile.endsWith('/index.html')
+    const comparablePagePath = pageAddress.pathname.replace(/\/$/, '')
+    const comparableRefreshPath = refreshUrl.pathname.replace(/\/$/, '')
+
+    // AI modified: compatibility artifacts must stay inside the subpath and land on a generated canonical document.
+    if (isDirectoryIndex && comparableRefreshPath === comparablePagePath) {
+      semanticFailures.push(`${pageFile} -> canonical page redirects to itself: ${refreshTarget}`)
+    }
+    else if (refreshUrl.origin !== siteOrigin || !refreshUrl.pathname.startsWith(docsBase)) {
+      semanticFailures.push(`${pageFile} -> redirect escaped deployment base: ${refreshTarget}`)
+    }
+    else if (!refreshCandidates.some(refreshCandidate => outputFileSet.has(refreshCandidate))) {
+      brokenReferences.push(`${pageFile} -> ${refreshTarget}`)
+    }
+
+    continue
+  }
+
+  if (!isClientFallback) {
+    const siteFooters = tagsWithClass(pageMarkup, 'footer', 'site-footer')
+    const footerTags = [...pageMarkup.matchAll(/<footer\b[^>]*>/gi)].map(footerMatch => footerMatch[0])
+    const implicitThemeContentinfoCount = footerTags.filter(footerTag => markupRole(footerTag) === undefined).length
     const explicitContentinfoCount = [...pageMarkup.matchAll(/\brole\s*=\s*["']contentinfo["']/gi)].length
     const contentinfoCount = implicitThemeContentinfoCount + explicitContentinfoCount
 
-    // AI modified: the site footer exclusively owns contentinfo in every statically rendered page.
+    // AI modified: Nuxt's shared site footer exclusively owns contentinfo on every rendered page.
     if (siteFooters.length !== 1 || ![undefined, 'contentinfo'].includes(markupRole(siteFooters[0] ?? ''))) {
       semanticFailures.push(`${pageFile} -> expected one site-wide contentinfo footer`)
     }
 
     if (contentinfoCount !== 1) {
       semanticFailures.push(`${pageFile} -> expected one contentinfo landmark, found ${contentinfoCount}`)
-    }
-
-    const expectedDocumentFooterCount = isHomePage ? 0 : 1
-
-    // AI modified: document layouts retain a permitted footer group while home layouts must not grow one.
-    if (documentFooters.length !== expectedDocumentFooterCount) {
-      semanticFailures.push(`${pageFile} -> expected ${expectedDocumentFooterCount} document footer, found ${documentFooters.length}`)
-    }
-
-    if (documentFooters.length === 1 && markupRole(documentFooters[0]) !== 'group') {
-      semanticFailures.push(`${pageFile} -> expected document footer role group`)
-    }
-
-    const maximumDocumentInformationBlockCount = isHomePage ? 0 : 1
-
-    if (documentInformationBlocks.length > maximumDocumentInformationBlockCount) {
-      semanticFailures.push(`${pageFile} -> expected at most ${maximumDocumentInformationBlockCount} document information block, found ${documentInformationBlocks.length}`)
-    }
-
-    if (documentInformationBlocks.length === 1) {
-      const expectedDocumentInformationLabel = pageFile.startsWith('zh/') ? '页面信息' : 'Page information'
-      const documentInformationBlock = documentInformationBlocks[0]
-
-      if (markupRole(documentInformationBlock) !== 'region' || markupAriaLabel(documentInformationBlock) !== expectedDocumentInformationLabel) {
-        semanticFailures.push(`${pageFile} -> expected a named ${expectedDocumentInformationLabel} region`)
-      }
     }
   }
 
@@ -293,7 +288,7 @@ for (const pageFile of pageFiles) {
     }
   }
 
-  if (pageFile === '404.html') {
+  if (isClientFallback) {
     if (canonicalLinks.length > 0) {
       semanticFailures.push(`${pageFile} -> expected no canonical link`)
     }
@@ -302,25 +297,9 @@ for (const pageFile of pageFiles) {
       semanticFailures.push(`${pageFile} -> expected no language alternates`)
     }
 
-    // AI modified: VitePress leaves #app empty for 404 builds, so guard the hydration-safe no-script fallback.
-    const fallbackMatch = pageMarkup.match(/<div id=["']app["']><\/div>\s*(<noscript>[\s\S]*?<\/noscript>)/)
-    const fallbackHtml = fallbackMatch?.[1] ?? ''
-    const fallbackMainCount = [...fallbackHtml.matchAll(/<main\b/g)].length
-
-    if (!fallbackMatch) {
-      semanticFailures.push(`${pageFile} -> expected a no-script fallback outside the empty application root`)
-    }
-
-    if (fallbackMainCount !== 1) {
-      semanticFailures.push(`${pageFile} -> expected one no-script main landmark, found ${fallbackMainCount}`)
-    }
-
-    if (!fallbackHtml.includes('lang="zh-CN"')) {
-      semanticFailures.push(`${pageFile} -> expected a Chinese language-of-parts marker`)
-    }
-
-    if (!fallbackHtml.includes(`href="${docsBase}"`) || !fallbackHtml.includes(`href="${docsBase}zh/"`)) {
-      semanticFailures.push(`${pageFile} -> expected base-aware English and Chinese home links`)
+    // AI modified: Nuxt generates an empty client shell whose router renders the localized error document.
+    if (!/<div\s+id=["']__nuxt["']><\/div>/.test(pageMarkup)) {
+      semanticFailures.push(`${pageFile} -> expected the Nuxt client fallback shell`)
     }
   }
   else {
@@ -339,9 +318,12 @@ for (const pageFile of pageFiles) {
         ? pageFile.slice('zh/'.length)
         : pageFile
       const englishUrl = productionUrl(englishPageFile)
+      const chinesePageFile = englishPageFile === 'player-studio/index.html'
+        ? 'zh/examples/index.html'
+        : `zh/${englishPageFile}`
       const expectedAlternates = new Map([
         ['en-US', englishUrl],
-        ['zh-CN', productionUrl(`zh/${englishPageFile}`)],
+        ['zh-CN', productionUrl(chinesePageFile)],
         ['x-default', englishUrl],
       ])
 
@@ -425,23 +407,30 @@ if (!outputFileSet.has(sitemapFile)) {
 }
 else {
   const sitemapSource = await readFile(resolve(outputRoot, sitemapFile), 'utf8')
-  const sitemapEntries = [...sitemapSource.matchAll(/<url>(.*?)<\/url>/g)].map(entryMatch => entryMatch[1])
+  const sitemapEntries = [...sitemapSource.matchAll(/<url>([\s\S]*?)<\/url>/g)].map(entryMatch => entryMatch[1])
   const sitemapUrls = new Set(sitemapEntries.flatMap((sitemapEntry) => {
     const locationMatch = sitemapEntry.match(/<loc>([^<]+)<\/loc>/)
 
-    return locationMatch ? [locationMatch[1]] : []
+    return locationMatch ? [locationMatch[1].replace(/\/$/, '')] : []
   }))
 
   for (const pageFile of pageFiles) {
     const pageProductionUrl = productionUrl(pageFile)
-    const shouldAppearInSitemap = pageFile !== '404.html' && !isChineseApiMirror(pageFile)
+    const pageMarkup = documentMarkup(pageHtmlByFile.get(pageFile))
+    const isRefreshArtifact = /<meta\s+http-equiv=["']refresh["']/i.test(pageMarkup)
+    const isClientFallback = pageFile === '200.html' || pageFile === '404.html'
+    const shouldAppearInSitemap = !isRefreshArtifact && !isClientFallback && !isChineseApiMirror(pageFile)
 
-    if (shouldAppearInSitemap && !sitemapUrls.has(pageProductionUrl)) {
+    const comparableProductionUrl = pageProductionUrl.replace(/\/$/, '')
+
+    if (shouldAppearInSitemap && !sitemapUrls.has(comparableProductionUrl)) {
       semanticFailures.push(`${sitemapFile} -> missing ${pageProductionUrl}`)
     }
+  }
 
-    if (!shouldAppearInSitemap && sitemapUrls.has(pageProductionUrl)) {
-      semanticFailures.push(`${sitemapFile} -> non-canonical page must be excluded: ${pageProductionUrl}`)
+  for (const sitemapUrl of sitemapUrls) {
+    if (sitemapUrl.includes('/zh/api/') || /\/(?:en|docs\/(?:guide|api))(?:\/|$)/.test(new URL(sitemapUrl).pathname)) {
+      semanticFailures.push(`${sitemapFile} -> non-canonical page must be excluded: ${sitemapUrl}`)
     }
   }
 
@@ -453,16 +442,17 @@ else {
       continue
     }
 
-    const relativeProductionUrl = locationMatch[1].startsWith(docsProductionUrl)
-      ? locationMatch[1].slice(docsProductionUrl.length)
-      : locationMatch[1]
+    const docsProductionRoot = docsProductionUrl.replace(/\/$/, '')
+    const relativeProductionUrl = locationMatch[1] === docsProductionRoot
+      ? ''
+      : locationMatch[1].startsWith(`${docsProductionRoot}/`)
+        ? locationMatch[1].slice(docsProductionRoot.length + 1)
+        : locationMatch[1]
     const pageFile = relativeProductionUrl === ''
       ? 'index.html'
-      : relativeProductionUrl.endsWith('/')
-        ? `${relativeProductionUrl}index.html`
-        : `${relativeProductionUrl}.html`
+      : `${relativeProductionUrl.replace(/\/$/, '')}/index.html`
     const alternateCount = [...sitemapEntry.matchAll(/<xhtml:link\b/g)].length
-    const expectedAlternateCount = isTranslatedPage(pageFile) ? 2 : 0
+    const expectedAlternateCount = isTranslatedPage(pageFile) ? 3 : 0
 
     if (alternateCount !== expectedAlternateCount) {
       semanticFailures.push(`${sitemapFile} -> ${locationMatch[1]} expected ${expectedAlternateCount} language alternates, found ${alternateCount}`)
